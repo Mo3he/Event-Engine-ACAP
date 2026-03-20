@@ -1,4 +1,4 @@
-# ACAP Event Engine
+# Event Engine ACAP
 
 An IFTTT-style rule engine for Axis cameras that replaces and extends the built-in event system. Build automation rules with multiple triggers, conditions, and actions — including MQTT, HTTP webhooks, scheduling, recording, PTZ, overlays, variables, counters, and more.
 
