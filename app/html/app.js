@@ -426,8 +426,16 @@ function buildRuleForm(rule) {
       </div>
       <div class="form-group">
         <label>Max Executions</label>
-        <input id="f-maxex" type="number" min="0" value="${rule ? rule.max_executions || 0 : 0}" placeholder="0 = unlimited">
-        <div class="form-hint">0 = fire unlimited times</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="f-maxex" type="number" min="0" value="${rule ? rule.max_executions || 0 : 0}" placeholder="0 = unlimited" style="width:80px;">
+          <select id="f-maxex-period">
+            <option value=""       ${!(rule && rule.max_exec_period) ? 'selected' : ''}>lifetime</option>
+            <option value="minute" ${rule && rule.max_exec_period === 'minute' ? 'selected' : ''}>per minute</option>
+            <option value="hour"   ${rule && rule.max_exec_period === 'hour'   ? 'selected' : ''}>per hour</option>
+            <option value="day"    ${rule && rule.max_exec_period === 'day'    ? 'selected' : ''}>per day</option>
+          </select>
+        </div>
+        <div class="form-hint">0 = unlimited. Period resets automatically; lifetime resets when rule is saved.</div>
       </div>
     </div>
 
@@ -1547,8 +1555,9 @@ async function saveRule() {
     conditions:      conditionRows,
     condition_logic: conditionLogic,
     actions:         actionRows,
-    cooldown:        parseInt(document.getElementById('f-cooldown').value) || 0,
-    max_executions:  parseInt(document.getElementById('f-maxex').value)    || 0,
+    cooldown:         parseInt(document.getElementById('f-cooldown').value) || 0,
+    max_executions:   parseInt(document.getElementById('f-maxex').value)    || 0,
+    max_exec_period:  document.getElementById('f-maxex-period').value       || '',
   };
 
   try {

@@ -30,9 +30,12 @@ typedef struct {
     int     condition_logic;  /* 0=AND, 1=OR */
     int     cooldown;
     int     max_executions;
+    char    max_exec_period[8]; /* "minute", "hour", "day", or "" = lifetime */
     /* runtime state */
     time_t  last_fired;
     int     execution_count;
+    int     period_exec_count;
+    time_t  period_start;
 } Rule;
 
 static Rule            rules[MAX_RULES];
@@ -70,6 +73,7 @@ static void rules_save_locked(void) {
         cJSON_AddStringToObject(obj, "condition_logic", r->condition_logic == 0 ? "AND" : "OR");
         cJSON_AddNumberToObject(obj, "cooldown",        r->cooldown);
         cJSON_AddNumberToObject(obj, "max_executions",  r->max_executions);
+        if (r->max_exec_period[0]) cJSON_AddStringToObject(obj, "max_exec_period", r->max_exec_period);
         cJSON_AddItemToArray(arr, obj);
     }
     ACAP_FILE_Write("localdata/rules.json", arr);
@@ -103,9 +107,13 @@ static void rule_from_json(Rule* r, cJSON* obj) {
     r->cooldown = cd ? (int)cd->valuedouble : 0;
     cJSON* mx = cJSON_GetObjectItem(obj, "max_executions");
     r->max_executions = mx ? (int)mx->valuedouble : 0;
+    const char* mxp = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "max_exec_period"));
+    snprintf(r->max_exec_period, sizeof(r->max_exec_period), "%s", mxp ? mxp : "");
 
-    r->last_fired      = 0;
-    r->execution_count = 0;
+    r->last_fired       = 0;
+    r->execution_count  = 0;
+    r->period_exec_count = 0;
+    r->period_start     = 0;
 }
 
 static void rule_free_json(Rule* r) {
@@ -145,10 +153,30 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     }
 
     /* Max executions check */
-    if (r->max_executions > 0 && r->execution_count >= r->max_executions) {
-        EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data);
-        pthread_mutex_unlock(&store_lock);
-        return;
+    if (r->max_executions > 0) {
+        if (r->max_exec_period[0]) {
+            /* Rate limit: reset counter when period rolls over */
+            time_t now = time(NULL);
+            time_t period_secs = 60;
+            if (strcmp(r->max_exec_period, "hour") == 0) period_secs = 3600;
+            else if (strcmp(r->max_exec_period, "day") == 0) period_secs = 86400;
+            if (r->period_start == 0 || (now - r->period_start) >= period_secs) {
+                r->period_start = now;
+                r->period_exec_count = 0;
+            }
+            if (r->period_exec_count >= r->max_executions) {
+                EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data);
+                pthread_mutex_unlock(&store_lock);
+                return;
+            }
+        } else {
+            /* Lifetime limit */
+            if (r->execution_count >= r->max_executions) {
+                EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data);
+                pthread_mutex_unlock(&store_lock);
+                return;
+            }
+        }
     }
 
     /* Condition evaluation */
@@ -162,6 +190,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     /* Execute */
     r->last_fired = time(NULL);
     r->execution_count++;
+    if (r->max_exec_period[0]) r->period_exec_count++;
     char rid_copy[37]; snprintf(rid_copy, sizeof(rid_copy), "%s", r->id);
     char rname_copy[128]; snprintf(rname_copy, sizeof(rname_copy), "%s", r->name);
     cJSON* actions_dup = cJSON_Duplicate(r->actions_json, 1);
@@ -287,6 +316,7 @@ cJSON* RuleEngine_List(void) {
         cJSON_AddBoolToObject(obj,   "enabled", r->enabled);
         cJSON_AddNumberToObject(obj, "cooldown", r->cooldown);
         cJSON_AddNumberToObject(obj, "max_executions", r->max_executions);
+        if (r->max_exec_period[0]) cJSON_AddStringToObject(obj, "max_exec_period", r->max_exec_period);
         cJSON_AddNumberToObject(obj, "execution_count", r->execution_count);
         cJSON_AddNumberToObject(obj, "last_fired", (double)r->last_fired);
         cJSON_AddNumberToObject(obj, "trigger_count",
@@ -319,6 +349,7 @@ cJSON* RuleEngine_Get(const char* id) {
             cJSON_AddStringToObject(result, "condition_logic", r->condition_logic == 0 ? "AND" : "OR");
             cJSON_AddNumberToObject(result, "cooldown",        r->cooldown);
             cJSON_AddNumberToObject(result, "max_executions",  r->max_executions);
+            if (r->max_exec_period[0]) cJSON_AddStringToObject(result, "max_exec_period", r->max_exec_period);
             cJSON_AddNumberToObject(result, "execution_count", r->execution_count);
             cJSON_AddNumberToObject(result, "last_fired",      (double)r->last_fired);
             break;
