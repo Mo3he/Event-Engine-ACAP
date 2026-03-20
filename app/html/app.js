@@ -692,8 +692,11 @@ function triggerFields(t, rowIdx) {
   if (type === 'rule_fired') return `
     <div class="form-row">
       <div class="form-group">
-        <label>Rule ID (leave empty for any rule)</label>
-        <input type="text" data-k="rule_id" value="${escHtml(t.rule_id || '')}" placeholder="rule UUID">
+        <label>Rule (leave empty to match any rule firing)</label>
+        <select data-k="rule_id">
+          <option value="" ${!t.rule_id ? 'selected' : ''}>— Any rule —</option>
+          ${allRules.map(r => `<option value="${r.id}" ${t.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+        </select>
       </div>
     </div>`;
   if (type === 'mqtt_message') return `
