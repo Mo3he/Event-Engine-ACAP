@@ -47,6 +47,7 @@ let vapixEventCatalog = null; /* null = not yet fetched */
 let ptzPresets = null;        /* null=loading, []=no PTZ, [{channel,presets:[name,...]},...] */
 let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
+let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 
 /* ===================================================
  * Toast
@@ -846,46 +847,103 @@ function getTriggerTokens() {
   return [...new Set(tokens)];
 }
 
-function insertToken(sel) {
-  const token = sel.value;
-  if (!token) return;
-  sel.value = '';
-  const group = sel.closest('.form-group');
-  const target = group && (group.querySelector('textarea') || group.querySelector('input[type="text"]'));
+/* Token picker — uses a position:fixed panel appended to document.body so it
+ * is never clipped by the modal's overflow:auto container. */
+let _tokenPickerBtn    = null;  /* the button that opened the current panel */
+let _tokenTargetInput  = null;  /* the input/textarea to insert into */
+
+function toggleTokenPicker(btn) {
+  const existingPanel = document.getElementById('_token_picker_panel');
+
+  /* clicking same button again → close */
+  if (existingPanel && _tokenPickerBtn === btn) {
+    existingPanel.remove();
+    _tokenPickerBtn = null;
+    _tokenTargetInput = null;
+    return;
+  }
+  if (existingPanel) existingPanel.remove();
+
+  /* remember the target input (sibling in same .form-group) */
+  const group = btn.closest('.form-group');
+  _tokenTargetInput = group && (group.querySelector('textarea') || group.querySelector('input[type="text"]'));
+  _tokenPickerBtn   = btn;
+
+  /* build token groups */
+  const triggerTokens = getTriggerTokens();
+  const groups = [
+    { label: 'Time',    tokens: ['{{timestamp}}', '{{date}}', '{{time}}'] },
+    { label: 'Camera',  tokens: ['{{camera.serial}}', '{{camera.model}}', '{{camera.ip}}'] },
+  ];
+  if (triggerTokens.length)
+    groups.push({ label: 'Trigger', tokens: triggerTokens });
+  if (knownVarNames.length)
+    groups.push({ label: 'Variables', tokens: knownVarNames.map(n => `{{var.${n}}}`) });
+  if (knownCounterNames.length)
+    groups.push({ label: 'Counters', tokens: knownCounterNames.map(n => `{{counter.${n}}}`) });
+  else
+    groups.push({ label: 'Counters', tokens: ['{{counter.NAME}}'] });
+
+  const row = (t) =>
+    `<button type="button" onclick="insertTokenFromPicker(${JSON.stringify(t)})"
+       style="display:block;width:100%;text-align:left;padding:4px 12px;font-size:11px;
+              font-family:monospace;background:none;border:none;color:var(--text);
+              cursor:pointer;white-space:nowrap"
+       onmouseover="this.style.background='var(--surface2)'"
+       onmouseout="this.style.background='none'">${escHtml(t)}</button>`;
+
+  const label = (l) =>
+    `<div style="padding:6px 8px 2px;font-size:10px;color:var(--text-dim);
+                 font-weight:600;text-transform:uppercase;letter-spacing:.05em">${l}</div>`;
+
+  const panel = document.createElement('div');
+  panel.id = '_token_picker_panel';
+  panel.style.cssText =
+    'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);' +
+    'border-radius:6px;max-height:240px;overflow-y:auto;min-width:200px;' +
+    'box-shadow:0 4px 16px rgba(0,0,0,.5);padding:4px 0';
+  panel.innerHTML = groups.map(g => label(g.label) + g.tokens.map(row).join('')).join('');
+  document.body.appendChild(panel);
+
+  /* position below the button, flip left if near right edge */
+  const rect = btn.getBoundingClientRect();
+  const pw = 210;
+  const left = (rect.left + pw > window.innerWidth) ? Math.max(0, rect.right - pw) : rect.left;
+  panel.style.left = left + 'px';
+  panel.style.top  = (rect.bottom + 4) + 'px';
+
+  /* close on outside click */
+  setTimeout(() => {
+    document.addEventListener('click', function _close(e) {
+      if (!panel.contains(e.target) && e.target !== btn) {
+        panel.remove();
+        _tokenPickerBtn = null;
+        _tokenTargetInput = null;
+      }
+      document.removeEventListener('click', _close);
+    });
+  }, 0);
+}
+
+function insertTokenFromPicker(token) {
+  const target = _tokenTargetInput;
+  const panel  = document.getElementById('_token_picker_panel');
+  if (panel) panel.remove();
+  _tokenPickerBtn   = null;
+  _tokenTargetInput = null;
   if (!target) return;
-  const s = target.selectionStart, e = target.selectionEnd;
+  const s = target.selectionStart ?? target.value.length;
+  const e = target.selectionEnd   ?? s;
   target.value = target.value.slice(0, s) + token + target.value.slice(e);
   target.selectionStart = target.selectionEnd = s + token.length;
   target.focus();
 }
 
 function getTokenInsertWidget() {
-  const triggerTokens = getTriggerTokens();
-  const triggerOpts = triggerTokens.length
-    ? `<optgroup label="Trigger">${triggerTokens.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('')}</optgroup>`
-    : '';
-  const varOpts = knownVarNames.length
-    ? `<optgroup label="Variables">${knownVarNames.map(n => `<option value="{{var.${escHtml(n)}}}">{{var.${escHtml(n)}}}</option>`).join('')}</optgroup>`
-    : '';
-  return `<div class="form-hint" style="display:flex;align-items:center;gap:6px">
-    <select onchange="insertToken(this)" style="font-size:11px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:2px 6px;border-radius:4px;max-width:220px">
-      <option value="">Insert token…</option>
-      <optgroup label="Time">
-        <option value="{{timestamp}}">{{timestamp}}</option>
-        <option value="{{date}}">{{date}}</option>
-        <option value="{{time}}">{{time}}</option>
-      </optgroup>
-      <optgroup label="Camera">
-        <option value="{{camera.serial}}">{{camera.serial}}</option>
-        <option value="{{camera.model}}">{{camera.model}}</option>
-        <option value="{{camera.ip}}">{{camera.ip}}</option>
-      </optgroup>
-      ${triggerOpts}
-      ${varOpts}
-      <optgroup label="Counters">
-        <option value="{{counter.NAME}}">{{counter.NAME}}</option>
-      </optgroup>
-    </select>
+  return `<div class="form-hint">
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="toggleTokenPicker(this)"
+            style="font-size:11px;padding:2px 8px;font-family:monospace">{ } Insert token</button>
   </div>`;
 }
 
@@ -1623,6 +1681,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadPtzPresets();
   loadAudioClips();
   API.getVariables().then(v => {
-    knownVarNames = Object.keys(v || {}).filter(k => !(v[k] && v[k].is_counter));
+    knownVarNames     = Object.keys(v || {}).filter(k => !(v[k] && v[k].is_counter));
+    knownCounterNames = Object.keys(v || {}).filter(k =>   v[k] && v[k].is_counter);
   }).catch(() => {});
 });
