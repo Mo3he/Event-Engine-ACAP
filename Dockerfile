@@ -14,6 +14,6 @@ RUN . /opt/axis/acapsdk/environment-setup* && acap-build . && \
         mkdir -p /tmp/eaptmp && \
         tar xzf "$eap" -C /tmp/eaptmp && \
         cp -r settings html /tmp/eaptmp/ && \
-        tar czf "$eap" -C /tmp/eaptmp . && \
+        tar czf "$eap" -C /tmp/eaptmp --transform 's|^\./||' . && \
         rm -rf /tmp/eaptmp; \
     done

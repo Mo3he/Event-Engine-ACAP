@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "1.7.1",
+  "schemaVersion": "1.4.0",
   "acapPackageConf": {
     "setup": {
       "friendlyName": "Event Engine",
