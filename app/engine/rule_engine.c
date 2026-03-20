@@ -169,7 +169,11 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     pthread_mutex_unlock(&store_lock);
 
     EventLog_Append(rid_copy, rname_copy, 1, NULL, trigger_data);
-    ACAP_EVENTS_Fire("RuleFired");
+    cJSON* fired_data = cJSON_CreateObject();
+    cJSON_AddStringToObject(fired_data, "rule_id",   rid_copy);
+    cJSON_AddStringToObject(fired_data, "rule_name", rname_copy);
+    ACAP_EVENTS_Fire_JSON("RuleFired", fired_data);
+    cJSON_Delete(fired_data);
 
     Actions_Execute(rid_copy, actions_dup, trigger_dup);
     Triggers_On_Rule_Fired(rid_copy);
