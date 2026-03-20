@@ -46,6 +46,7 @@ let actionRows = [];
 let vapixEventCatalog = null; /* null = not yet fetched */
 let ptzPresets = null;        /* null=loading, []=no PTZ, [{channel,presets:[name,...]},...] */
 let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
+let knownVarNames = [];       /* variable names loaded at startup for hint display */
 
 /* ===================================================
  * Toast
@@ -104,6 +105,11 @@ async function loadVapixEventCatalog() {
     vapixEventCatalog = parseVapixEventCatalog(await resp.text());
   } catch(e) {
     vapixEventCatalog = [];
+  }
+  /* If the rule editor is open, re-render so catalog-based hints and dropdowns update */
+  if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
+    renderTriggerList();
+    renderActionList();
   }
 }
 
@@ -840,7 +846,10 @@ function getTriggerTokenHint() {
   const triggerPart = tokens.length
     ? [...new Set(tokens)].join(', ')
     : '{{trigger.KEY}}';
-  return `<div class="form-hint">Supports: {{timestamp}}, {{date}}, {{camera.name}}, {{camera.serial}}, ${triggerPart}, {{var.NAME}}, {{counter.NAME}}</div>`;
+  const varPart = knownVarNames.length
+    ? knownVarNames.map(n => `{{var.${n}}}`).join(', ')
+    : '{{var.NAME}}';
+  return `<div class="form-hint">Supports: {{timestamp}}, {{date}}, {{camera.name}}, {{camera.serial}}, ${triggerPart}, ${varPart}, {{counter.NAME}}</div>`;
 }
 
 function actionFields(a) {
@@ -1256,7 +1265,7 @@ async function saveRule() {
   };
 
   try {
-    if (editingRule) {
+    if (editingRule && editingRule.id) {
       await API.updateRule(editingRule.id, rule);
       toast('Rule updated', 'success');
     } else {
@@ -1576,4 +1585,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadVapixEventCatalog();
   loadPtzPresets();
   loadAudioClips();
+  API.getVariables().then(v => {
+    knownVarNames = Object.keys(v || {}).filter(k => !(v[k] && v[k].is_counter));
+  }).catch(() => {});
 });

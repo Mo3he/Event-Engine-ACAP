@@ -1,7 +1,121 @@
 [
   {
     "id": "00000000-0000-0000-0000-000000000001",
-    "name": "Example: Log Motion to Syslog",
+    "name": "Motion → MQTT Alert",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "vapix_event",
+        "topic0": {"tnsaxis": "VideoAnalytics"},
+        "topic1": {"tnsaxis": "MotionDetection"},
+        "filter_key": "active",
+        "filter_value": true
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "mqtt_publish",
+        "topic": "cameras/{{camera.serial}}/motion",
+        "payload": "{\"camera\":\"{{camera.serial}}\",\"model\":\"{{camera.model}}\",\"time\":\"{{timestamp}}\",\"active\":{{trigger.active}}}",
+        "qos": 0,
+        "retain": false
+      }
+    ],
+    "cooldown": 10,
+    "max_executions": 0,
+    "tags": ["example", "motion", "mqtt"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "name": "Webhook → HTTP POST with Payload",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "http_webhook",
+        "token": "change-me-to-a-secret"
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "http_request",
+        "url": "https://example.com/notify",
+        "method": "POST",
+        "headers": "Content-Type: application/json",
+        "body": "{\"camera\":\"{{camera.serial}}\",\"time\":\"{{timestamp}}\",\"source\":\"{{trigger.source}}\"}"
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "webhook"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "name": "MQTT Message → Forward & Log",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "mqtt_message",
+        "topic_filter": "cameras/command/#"
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "send_syslog",
+        "message": "MQTT command received on {{trigger.topic}}: {{trigger.payload}}"
+      },
+      {
+        "type": "mqtt_publish",
+        "topic": "cameras/{{camera.serial}}/ack",
+        "payload": "{\"received\":\"{{trigger.payload}}\",\"time\":\"{{timestamp}}\"}",
+        "qos": 0,
+        "retain": false
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "mqtt"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000004",
+    "name": "Schedule → Overlay Text",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "schedule",
+        "schedule_type": "daily_time",
+        "time": "08:00",
+        "days": [1, 2, 3, 4, 5]
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "overlay_text",
+        "channel": 1,
+        "text": "{{camera.model}} — {{date}}",
+        "duration": 30,
+        "position": "top",
+        "text_color": "white"
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "schedule", "overlay"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000005",
+    "name": "Motion → Start Recording (Business Hours)",
     "enabled": false,
     "triggers": [
       {
@@ -24,64 +138,13 @@
     "condition_logic": "AND",
     "actions": [
       {
-        "type": "send_syslog",
-        "message": "Motion detected at {{timestamp}} on camera {{camera.name}}"
+        "type": "recording",
+        "operation": "start",
+        "duration": 30
       }
     ],
     "cooldown": 30,
     "max_executions": 0,
-    "tags": ["example", "motion"]
-  },
-  {
-    "id": "00000000-0000-0000-0000-000000000002",
-    "name": "Example: Webhook → HTTP POST",
-    "enabled": false,
-    "triggers": [
-      {
-        "type": "http_webhook",
-        "token": "change-me-to-a-secret"
-      }
-    ],
-    "trigger_logic": "OR",
-    "conditions": [],
-    "condition_logic": "AND",
-    "actions": [
-      {
-        "type": "http_request",
-        "url": "https://example.com/webhook",
-        "method": "POST",
-        "headers": "Content-Type: application/json",
-        "body": "{\"camera\":\"{{camera.serial}}\",\"time\":\"{{timestamp}}\"}"
-      }
-    ],
-    "cooldown": 0,
-    "max_executions": 0,
-    "tags": ["example", "webhook"]
-  },
-  {
-    "id": "00000000-0000-0000-0000-000000000003",
-    "name": "Example: Schedule → Overlay Text",
-    "enabled": false,
-    "triggers": [
-      {
-        "type": "schedule",
-        "schedule_type": "daily_time",
-        "time": "08:00",
-        "days": [1, 2, 3, 4, 5]
-      }
-    ],
-    "trigger_logic": "OR",
-    "conditions": [],
-    "condition_logic": "AND",
-    "actions": [
-      {
-        "type": "overlay_text",
-        "channel": 1,
-        "text": "Business Hours — {{date}}"
-      }
-    ],
-    "cooldown": 0,
-    "max_executions": 0,
-    "tags": ["example", "schedule"]
+    "tags": ["example", "motion", "recording"]
   }
 ]
