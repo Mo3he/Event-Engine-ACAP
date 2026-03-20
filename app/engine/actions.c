@@ -458,6 +458,25 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     free(payload);
 }
 
+/* siren_light — control Axis Siren and Light via VAPIX */
+static void action_siren_light(cJSON* cfg) {
+    const char* signal_action = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "signal_action"));
+    const char* profile        = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
+    if (!profile || profile[0] == '\0') { LOG_WARN("siren_light: no profile specified"); return; }
+    const char* method = (signal_action && strcmp(signal_action, "stop") == 0) ? "stop" : "start";
+
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "apiVersion", "1.0");
+    cJSON_AddStringToObject(req, "method", method);
+    cJSON* params = cJSON_AddObjectToObject(req, "params");
+    cJSON_AddStringToObject(params, "profile", profile);
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
+    free(body);
+    if (resp) free(resp);
+}
+
 /* run_rule — forward to rule engine */
 static void action_run_rule(cJSON* cfg) {
     const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
@@ -539,6 +558,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
         else if (strcmp(type, "io_output")         == 0) action_io_output(action);
         else if (strcmp(type, "audio_clip")        == 0) action_audio_clip(action);
+        else if (strcmp(type, "siren_light")       == 0) action_siren_light(action);
         else if (strcmp(type, "send_syslog")       == 0) action_send_syslog(action, trigger_data);
         else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action);
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);

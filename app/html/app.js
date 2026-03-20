@@ -46,6 +46,7 @@ let actionRows = [];
 let vapixEventCatalog = null; /* null = not yet fetched */
 let ptzPresets = null;        /* null=loading, []=no PTZ, [{channel,presets:[name,...]},...] */
 let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
+let sirenProfiles = null;     /* null=loading, []=none or not supported, [{name,label},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 
@@ -151,6 +152,21 @@ async function loadAudioClips() {
       .filter(c => c.type === 'audio' && c.name)
       .sort((a, b) => parseInt(a.id) - parseInt(b.id));
   } catch(e) { audioClips = []; }
+}
+
+async function loadSirenProfiles() {
+  try {
+    const resp = await fetch('/axis-cgi/siren_and_light.cgi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiVersion: '1.0', method: 'getProfiles' })
+    });
+    if (!resp.ok) { sirenProfiles = []; return; }
+    const data = await resp.json();
+    const profiles = data && data.data && data.data.profiles;
+    if (!Array.isArray(profiles)) { sirenProfiles = []; return; }
+    sirenProfiles = profiles.map(p => ({ name: p.name, label: p.name }));
+  } catch(e) { sirenProfiles = []; }
 }
 
 function parseVapixEventCatalog(xmlText) {
@@ -887,6 +903,7 @@ const ACTION_TYPES = [
   { value: 'ptz_preset',        label: 'PTZ Preset' },
   { value: 'io_output',         label: 'I/O Output' },
   { value: 'audio_clip',        label: 'Audio Clip' },
+  { value: 'siren_light',       label: 'Siren / Light' },
   { value: 'send_syslog',       label: 'Send Syslog' },
   { value: 'vapix_query',       label: 'VAPIX Event Query' },
   { value: 'fire_vapix_event',  label: 'Fire VAPIX Event' },
@@ -1177,6 +1194,35 @@ function actionFields(a) {
       <div class="form-group"><label>Audio Clip</label>${clipControl}</div>
     </div>`;
   }
+  if (type === 'siren_light') {
+    let profileControl;
+    if (sirenProfiles === null) {
+      profileControl = `<input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Loading profiles..." disabled>`;
+    } else if (!sirenProfiles.length) {
+      profileControl = `<input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Profile name (e.g. Green)">`;
+    } else {
+      let opts = `<option value="">— select profile —</option>`;
+      for (const p of sirenProfiles) {
+        const sel = a.profile === p.name ? 'selected' : '';
+        opts += `<option value="${escHtml(p.name)}" ${sel}>${escHtml(p.label)}</option>`;
+      }
+      profileControl = `<select data-k="profile">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Action</label>
+        <select data-k="signal_action">
+          <option value="start" ${(a.signal_action||'start')==='start' ? 'selected':''}>Start</option>
+          <option value="stop"  ${a.signal_action==='stop' ? 'selected':''}>Stop</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Profile</label>${profileControl}
+        <div class="form-hint">Profile names are configured in the camera's Siren and Light settings. Start with no duration runs until stopped.</div>
+      </div>
+    </div>`;
+  }
   if (type === 'send_syslog') return `
     <div class="form-row">
       <div class="form-group">
@@ -1455,6 +1501,10 @@ function normalizeAction(a) {
       const v = a[`${k}_val`];
       if (v) out[k] = { [a[`${k}_ns`] || '']: v };
     });
+  }
+  if (a.type === 'siren_light') {
+    out.signal_action = a.signal_action || 'start';
+    out.profile = a.profile || '';
   }
   return out;
 }
@@ -1809,6 +1859,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadVapixEventCatalog();
   loadPtzPresets();
   loadAudioClips();
+  loadSirenProfiles();
   API.getVariables().then(v => {
     knownVarNames     = Object.keys(v || {}).filter(k => !(v[k] && v[k].is_counter));
     knownCounterNames = Object.keys(v || {}).filter(k =>   v[k] && v[k].is_counter);

@@ -1,6 +1,6 @@
-# Event Engine - ACAP for Axis Cameras
+# Event Engine — ACAP for Axis Cameras
 
-A powerful IFTTT-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks - and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, and more.
+A powerful IFTTT-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks — and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, and more.
 
 ---
 
@@ -8,11 +8,11 @@ A powerful IFTTT-style automation engine that runs directly on your Axis camera.
 
 Event Engine replaces and extends the built-in Axis event system with a flexible **If This Then That** rule engine. Each rule has:
 
-- **Triggers** - what starts the rule (one or more, evaluated as OR or AND)
-- **Conditions** - optional checks that must pass before actions run
-- **Actions** - what happens when the rule fires (one or more, run in sequence)
+- **Triggers** — what starts the rule (one or more, evaluated as OR or AND)
+- **Conditions** — optional checks that must pass before actions run
+- **Actions** — what happens when the rule fires (one or more, run in sequence)
 
-Rules are built in a clean web UI and take effect immediately - no reboot required.
+Rules are built in a clean web UI and take effect immediately — no reboot required.
 
 ---
 
@@ -20,7 +20,7 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 
 | Type | Description |
 |------|-------------|
-| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, etc.) selected from a live dropdown populated from the camera |
+| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, etc.) selected from a live dropdown. Supports an optional numeric threshold condition (e.g. fire only when CO2 is above 1000 ppm) with optional hold duration to require the condition to persist for N seconds before triggering |
 | **Schedule** | Cron expression, fixed interval, or daily time with day-of-week selection |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token |
@@ -51,6 +51,8 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 | **PTZ Preset** | Move the camera to a named preset position |
 | **I/O Output** | Set a digital output port high or low |
 | **Audio Clip** | Play a media clip on the camera |
+| **Siren / Light** | Activate or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
+| **VAPIX Event Query** | Fetch the latest data from a VAPIX event and inject it as template tokens for subsequent actions - useful for polling current sensor values on a schedule |
 | **Fire Rule** | Immediately trigger another rule |
 | **Delay** | Pause the action sequence for N seconds |
 | **VAPIX Event** | Fire a custom VAPIX event (visible to other Axis apps) |
@@ -77,7 +79,7 @@ Action fields (URL, body, MQTT payload, overlay text, etc.) support `{{token}}` 
 
 The rule editor shows which `{{trigger.*}}` keys are available based on the selected trigger type. Use `{{trigger_json}}` to publish all trigger data at once without picking individual fields.
 
-**Example - MQTT payload using trigger data:**
+**Example — MQTT payload using trigger data:**
 ```
 Camera {{camera.serial}} fired at {{timestamp}}: {{trigger_json}}
 ```
@@ -102,17 +104,17 @@ Configure broker, port, credentials, client ID, and a base topic in the **MQTT**
 
 Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 
-- **Rules** - create, edit, duplicate, enable/disable, and delete rules
-- **Status** - engine status, MQTT connection state, device info, export/import
-- **Variables** - view and manage named variables and counters
-- **Event Log** - per-rule firing history with timestamps and result codes
+- **Rules** — create, edit, duplicate, enable/disable, and delete rules
+- **Status** — engine status, MQTT connection state, device info, export/import
+- **Variables** — view and manage named variables and counters
+- **Event Log** — per-rule firing history with timestamps and result codes
 
 ---
 
 ## Requirements
 
 - Axis camera running **AXIS OS 11.0 or later**
-- [Docker](https://www.docker.com/) - only needed if building from source
+- [Docker](https://www.docker.com/) — only needed if building from source
 
 ---
 
@@ -122,8 +124,8 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
 
 1. Go to `http://<camera-ip>/#settings/apps`
 2. Click **Add app** and upload the `.eap` for your camera's architecture:
-   - `Event_Engine_1_0_0_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
-   - `Event_Engine_1_0_0_armv7hf.eap` - Cortex-A9 (older cameras)
+   - `Event_Engine_1_0_0_aarch64.eap` — Cortex-A53 and newer (most cameras from ~2017 onwards)
+   - `Event_Engine_1_0_0_armv7hf.eap` — Cortex-A9 (older cameras)
 3. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
@@ -146,7 +148,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET / POST / DELETE | `/rules` | Rule CRUD - POST without `id` creates, POST with `?id=` updates |
+| GET / POST / DELETE | `/rules` | Rule CRUD — POST without `id` creates, POST with `?id=` updates |
 | POST | `/fire` | Fire a rule manually or via webhook token |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET | `/actions` | Available action types and their schemas |
@@ -188,7 +190,7 @@ app/
 ├── Makefile
 ├── engine/
 │   ├── rule_engine.c       # Rule store, trigger dispatch, cooldown, chaining
-│   ├── triggers.c          # All trigger types - subscribe, match, extract data
+│   ├── triggers.c          # All trigger types — subscribe, match, extract data
 │   ├── conditions.c        # Condition evaluation
 │   ├── actions.c           # All action types + {{template}} engine
 │   ├── scheduler.c         # Cron, interval, and daily-time scheduler
