@@ -8,7 +8,7 @@ An IFTTT-style rule engine for Axis cameras that replaces and extends the built-
 - **Triggers** — VAPIX event, HTTP webhook, MQTT message, schedule (cron/interval/daily), I/O input, counter threshold, rule chaining
 - **Conditions** — time window, event state, counter comparison, HTTP check, I/O state, variable compare
 - **Actions** — HTTP request, recording start/stop, overlay text, PTZ preset, I/O output, audio clip, syslog, VAPIX event, delay, set variable, increment counter, MQTT publish, run rule
-- **MQTT** — full MQTT 3.1.1 client (raw sockets, no external library), wildcard topic subscriptions, reconnect with backoff
+- **MQTT** — full MQTT 3.1.1 client (raw sockets, no external library), QoS 0 and QoS 1 publish, wildcard topic subscriptions, reconnect with backoff. Password stored separately and never exposed via the API
 - **Templates** — `{{timestamp}}`, `{{camera.serial}}`, `{{trigger.KEY}}`, `{{var.NAME}}`, `{{counter.NAME}}` in action payloads
 - **Scheduler** — cron expressions, fixed intervals, daily time with day-of-week selection
 - **Variables & Counters** — named, persistent, usable in templates and conditions
@@ -50,7 +50,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET/POST/PUT/DELETE | `/rules` | Rule CRUD |
+| GET/POST/DELETE | `/rules` | Rule CRUD — POST without `id` creates, POST with `?id=` updates |
 | POST | `/fire` | Fire a rule manually or via webhook token |
 | GET | `/triggers` | Available trigger types |
 | GET | `/actions` | Available action types |
@@ -96,6 +96,13 @@ Action fields (URL, body, message, MQTT payload, etc.) support `{{...}}` substit
 | `{{trigger.KEY}}` | Any key from the trigger event data |
 | `{{var.NAME}}` | Named variable value |
 | `{{counter.NAME}}` | Named counter value |
+
+## Notes
+
+- **Overlay text** uses the VAPIX Dynamic Overlay API (`addText`/`setText`). The overlay is created on first use and reused on subsequent firings. Set a duration to auto-remove it after N seconds, or 0 to keep it permanently. Position and text colour are configurable per action.
+- **MQTT payload filter** — `mqtt_message` triggers can optionally match only messages whose payload contains a specific substring.
+- **Rule duplication** — click the ⎘ button on any rule card to open a copy in the editor.
+- **Corrupt rules.json** — if the rules file cannot be parsed on startup, the engine logs a warning, sets a status flag, and falls back to the bundled default rules.
 
 ## Persistence
 
