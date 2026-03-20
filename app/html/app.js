@@ -169,11 +169,15 @@ function parseVapixEventCatalog(xmlText) {
         const isTopic = child.getAttributeNS(WSNT, 'topic') === 'true';
         const newPath = [...path, { ns: child.prefix || '', name: child.localName }];
         if (isTopic) {
-          const dataEl = child.getElementsByTagNameNS(SCHEMA, 'Data')[0];
-          const dataKeys = dataEl
-            ? Array.from(dataEl.getElementsByTagNameNS(SCHEMA, 'SimpleItemDescription'))
-                .map(d => d.getAttribute('Name')).filter(Boolean)
-            : [];
+          /* Collect both Source and Data keys — both appear in trigger_data at runtime */
+          const getKeys = tag => {
+            const el = child.getElementsByTagNameNS(SCHEMA, tag)[0];
+            return el
+              ? Array.from(el.getElementsByTagNameNS(SCHEMA, 'SimpleItemDescription'))
+                  .map(d => d.getAttribute('Name')).filter(Boolean)
+              : [];
+          };
+          const dataKeys = [...getKeys('Source'), ...getKeys('Data')];
           const topics = {};
           newPath.slice(0, 4).forEach((p, i) => { topics[`topic${i}`] = { [p.ns]: p.name }; });
           events.push({ label: newPath.map(p => p.name).join(' / '), topics, dataKeys });
