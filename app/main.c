@@ -42,6 +42,25 @@ static gboolean Engine_Tick(gpointer user_data) {
 /*=====================================================
  * Settings callback
  *=====================================================*/
+/* Password is stored separately — never returned by the settings endpoint */
+#define MQTT_PASS_FILE "localdata/mqtt_password.txt"
+
+static void save_mqtt_password(const char* pw) {
+    if (!pw || !pw[0]) return;
+    cJSON* obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "pw", pw);
+    ACAP_FILE_Write(MQTT_PASS_FILE, obj);
+    cJSON_Delete(obj);
+}
+
+static void load_mqtt_password(char* out, size_t out_size) {
+    cJSON* obj = ACAP_FILE_Read(MQTT_PASS_FILE);
+    if (!obj) return;
+    const char* pw = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "pw"));
+    if (pw) snprintf(out, out_size, "%s", pw);
+    cJSON_Delete(obj);
+}
+
 static void apply_mqtt_config(cJSON* mqtt_json) {
     if (!mqtt_json) return;
     MQTT_Config mc;
@@ -52,8 +71,19 @@ static void apply_mqtt_config(cJSON* mqtt_json) {
     snprintf(mc.client_id, sizeof(mc.client_id), "%s", cid  ? cid  : "acap_event_engine");
     const char* user = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_json, "username"));
     snprintf(mc.username,  sizeof(mc.username),  "%s", user ? user : "");
+
+    /* Password: if provided in the update, save it; otherwise use stored value */
     const char* pass = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_json, "password"));
-    snprintf(mc.password,  sizeof(mc.password),  "%s", pass ? pass : "");
+    if (pass && pass[0]) {
+        save_mqtt_password(pass);
+        snprintf(mc.password, sizeof(mc.password), "%s", pass);
+        /* Strip from in-memory settings so GET /settings never returns it */
+        cJSON* pw_item = cJSON_GetObjectItem(mqtt_json, "password");
+        if (pw_item) cJSON_SetValuestring(pw_item, "");
+    } else {
+        load_mqtt_password(mc.password, sizeof(mc.password));
+    }
+
     cJSON* port = cJSON_GetObjectItem(mqtt_json, "port");
     mc.port = port ? (int)port->valuedouble : 1883;
     cJSON* ka   = cJSON_GetObjectItem(mqtt_json, "keepalive");
@@ -110,45 +140,40 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     } else if (strcmp(method, "POST") == 0) {
         cJSON* body = get_body_json(req);
         if (!body) { ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON body"); return; }
-        char new_id[37] = "";
-        if (!RuleEngine_Add(body, new_id)) {
-            cJSON_Delete(body);
-            ACAP_HTTP_Respond_Error(resp, 500, "Failed to add rule");
-            return;
-        }
-        cJSON_Delete(body);
-        cJSON* result = cJSON_CreateObject();
-        cJSON_AddStringToObject(result, "id", new_id);
-        cJSON_AddStringToObject(result, "status", "created");
-        ACAP_HTTP_Respond_JSON(resp, result);
-        cJSON_Delete(result);
 
-    } else if (strcmp(method, "PUT") == 0) {
         char* id = ACAP_HTTP_Request_Param(req, "id");
-        if (!id || !*id) {
-            if (id) free(id);
-            ACAP_HTTP_Respond_Error(resp, 400, "Missing id parameter");
-            return;
-        }
-        cJSON* body = get_body_json(req);
-        if (!body) { free(id); ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON body"); return; }
-
-        /* Handle enable/disable shortcut */
-        cJSON* en = cJSON_GetObjectItem(body, "enabled");
-        cJSON* keys = cJSON_GetObjectItem(body, "name");
-        if (en && !keys) {
-            /* Only updating enabled flag */
-            int result = RuleEngine_SetEnabled(id, cJSON_IsTrue(en) ? 1 : 0);
+        if (id && *id) {
+            /* POST ?id=... → update existing rule (PUT body not supported by ACAP) */
+            cJSON* en   = cJSON_GetObjectItem(body, "enabled");
+            cJSON* name = cJSON_GetObjectItem(body, "name");
+            if (en && !name) {
+                /* Enable/disable shortcut */
+                int result = RuleEngine_SetEnabled(id, cJSON_IsTrue(en) ? 1 : 0);
+                free(id); cJSON_Delete(body);
+                if (!result) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
+                ACAP_HTTP_Respond_Text(resp, "OK");
+                return;
+            }
+            int result = RuleEngine_Update(id, body);
             free(id); cJSON_Delete(body);
             if (!result) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
             ACAP_HTTP_Respond_Text(resp, "OK");
-            return;
+        } else {
+            /* POST (no id) → create new rule */
+            if (id) free(id);
+            char new_id[37] = "";
+            if (!RuleEngine_Add(body, new_id)) {
+                cJSON_Delete(body);
+                ACAP_HTTP_Respond_Error(resp, 500, "Failed to add rule");
+                return;
+            }
+            cJSON_Delete(body);
+            cJSON* result = cJSON_CreateObject();
+            cJSON_AddStringToObject(result, "id", new_id);
+            cJSON_AddStringToObject(result, "status", "created");
+            ACAP_HTTP_Respond_JSON(resp, result);
+            cJSON_Delete(result);
         }
-
-        int result = RuleEngine_Update(id, body);
-        free(id); cJSON_Delete(body);
-        if (!result) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
-        ACAP_HTTP_Respond_Text(resp, "OK");
 
     } else if (strcmp(method, "DELETE") == 0) {
         char* id = ACAP_HTTP_Request_Param(req, "id");
@@ -399,8 +424,16 @@ int main(void) {
             snprintf(mc.client_id, sizeof(mc.client_id), "%s", c ? c : "acap_event_engine");
             const char* u = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_cfg, "username"));
             snprintf(mc.username,  sizeof(mc.username),  "%s", u ? u : "");
+            /* Password: migrate from settings to separate file if present */
             const char* p = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_cfg, "password"));
-            snprintf(mc.password,  sizeof(mc.password),  "%s", p ? p : "");
+            if (p && p[0]) {
+                save_mqtt_password(p);
+                snprintf(mc.password, sizeof(mc.password), "%s", p);
+                cJSON* pw_item = cJSON_GetObjectItem(mqtt_cfg, "password");
+                if (pw_item) cJSON_SetValuestring(pw_item, "");
+            } else {
+                load_mqtt_password(mc.password, sizeof(mc.password));
+            }
             cJSON* port = cJSON_GetObjectItem(mqtt_cfg, "port");
             mc.port = port ? (int)port->valuedouble : 1883;
             cJSON* ka   = cJSON_GetObjectItem(mqtt_cfg, "keepalive");

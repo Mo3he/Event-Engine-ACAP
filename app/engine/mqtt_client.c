@@ -22,15 +22,17 @@
 /* =====================================================
  * MQTT 3.1.1 packet constants
  * ===================================================== */
-#define MQTT_PKT_CONNECT    0x10
-#define MQTT_PKT_CONNACK    0x20
-#define MQTT_PKT_PUBLISH    0x30
-#define MQTT_PKT_PUBACK     0x40
-#define MQTT_PKT_SUBSCRIBE  0x82  /* type 0x80 | reserved 0x02 */
-#define MQTT_PKT_SUBACK     0x90
-#define MQTT_PKT_PINGREQ    0xC0
-#define MQTT_PKT_PINGRESP   0xD0
-#define MQTT_PKT_DISCONNECT 0xE0
+#define MQTT_PKT_CONNECT     0x10
+#define MQTT_PKT_CONNACK     0x20
+#define MQTT_PKT_PUBLISH     0x30
+#define MQTT_PKT_PUBACK      0x40
+#define MQTT_PKT_SUBSCRIBE   0x82  /* type 0x80 | reserved 0x02 */
+#define MQTT_PKT_SUBACK      0x90
+#define MQTT_PKT_UNSUBSCRIBE 0xA2  /* type 0xA0 | reserved 0x02 */
+#define MQTT_PKT_UNSUBACK    0xB0
+#define MQTT_PKT_PINGREQ     0xC0
+#define MQTT_PKT_PINGRESP    0xD0
+#define MQTT_PKT_DISCONNECT  0xE0
 
 #define CONNECT_TIMEOUT_SEC  10
 #define RECV_TIMEOUT_SEC      5
@@ -226,7 +228,7 @@ static int send_subscribe(int fd, const char* topic_filter) {
     Buf payload; buf_init(&payload);
     buf_append_u16(&payload, pid);
     buf_append_str(&payload, topic_filter);
-    buf_append_u8(&payload, 0);   /* QoS 0 */
+    buf_append_u8(&payload, 1);   /* Request QoS 1 */
 
     uint8_t rl[4];
     int rl_len = encode_remaining_length(rl, payload.len);
@@ -240,6 +242,37 @@ static int send_subscribe(int fd, const char* topic_filter) {
     buf_free(&pkt);
     pthread_mutex_unlock(&send_lock);
     return ret > 0 ? 1 : 0;
+}
+
+static int send_unsubscribe(int fd, const char* topic_filter) {
+    pthread_mutex_lock(&send_lock);
+    uint16_t pid = packet_id++;
+    if (packet_id == 0) packet_id = 1;
+
+    Buf payload; buf_init(&payload);
+    buf_append_u16(&payload, pid);
+    buf_append_str(&payload, topic_filter);
+
+    uint8_t rl[4];
+    int rl_len = encode_remaining_length(rl, payload.len);
+    Buf pkt; buf_init(&pkt);
+    buf_append_u8(&pkt, MQTT_PKT_UNSUBSCRIBE);
+    buf_append(&pkt, rl, rl_len);
+    buf_append(&pkt, payload.data, payload.len);
+    buf_free(&payload);
+
+    int ret = send_all(fd, pkt.data, pkt.len);
+    buf_free(&pkt);
+    pthread_mutex_unlock(&send_lock);
+    return ret > 0 ? 1 : 0;
+}
+
+static void send_puback(int fd, uint16_t pid) {
+    uint8_t pkt[4] = { MQTT_PKT_PUBACK, 2,
+                       (uint8_t)(pid >> 8), (uint8_t)(pid & 0xFF) };
+    pthread_mutex_lock(&send_lock);
+    send_all(fd, pkt, 4);
+    pthread_mutex_unlock(&send_lock);
 }
 
 static int send_pingreq(int fd) {
@@ -271,9 +304,10 @@ static gboolean dispatch_message(gpointer data) {
 }
 
 /* Parse and dispatch a PUBLISH packet.
- * buf points to the remaining-length bytes + variable header + payload.
- * remaining_len is the decoded value. */
-static void handle_publish(const uint8_t* buf, int remaining_len) {
+ * buf holds the variable header + payload (remaining_len bytes).
+ * qos is extracted from the fixed header flags.
+ * For QoS 1 we send a PUBACK back on fd. */
+static void handle_publish(const uint8_t* buf, int remaining_len, uint8_t qos, int fd) {
     if (remaining_len < 2) return;
     int pos = 0;
     uint16_t topic_len = ((uint16_t)buf[pos] << 8) | buf[pos + 1];
@@ -285,7 +319,14 @@ static void handle_publish(const uint8_t* buf, int remaining_len) {
     topic[topic_len] = '\0';
     pos += topic_len;
 
-    /* QoS 0 — no packet ID */
+    /* QoS 1: variable header contains a 2-byte packet ID after the topic */
+    if (qos == 1) {
+        if (pos + 2 > remaining_len) { free(topic); return; }
+        uint16_t pid = ((uint16_t)buf[pos] << 8) | buf[pos + 1];
+        pos += 2;
+        send_puback(fd, pid);
+    }
+
     int payload_len = remaining_len - pos;
     char* payload = malloc(payload_len + 1);
     memcpy(payload, buf + pos, payload_len);
@@ -399,9 +440,12 @@ static void* worker_fn(void* arg) {
 
             uint8_t pkt_type = fhdr & 0xF0;
             if (pkt_type == MQTT_PKT_PUBLISH) {
-                handle_publish(recv_buf, remaining_len);
+                uint8_t qos_level = (fhdr >> 1) & 0x03;
+                handle_publish(recv_buf, remaining_len, qos_level, fd);
+            } else if (pkt_type == MQTT_PKT_PUBACK) {
+                /* QoS 1 delivery confirmed by broker — no retransmit needed */
             }
-            /* PINGRESP, SUBACK, etc. — acknowledged implicitly */
+            /* PINGRESP, SUBACK, UNSUBACK — no action needed */
             continue;
 
         disconnect:
@@ -474,24 +518,33 @@ int MQTT_Reconfigure(MQTT_Config* config) {
     return 1;
 }
 
-int MQTT_Publish(const char* topic, const char* payload, int retain) {
+int MQTT_Publish(const char* topic, const char* payload, int retain, int qos) {
     if (!topic || !connected) return 0;
+    if (qos < 0 || qos > 1) qos = 0;
 
     pthread_mutex_lock(&send_lock);
     if (sockfd < 0) { pthread_mutex_unlock(&send_lock); return 0; }
 
     int topic_len   = (int)strlen(topic);
     int payload_len = payload ? (int)strlen(payload) : 0;
-    int var_len     = 2 + topic_len + payload_len;  /* QoS 0: no packet ID */
+    /* QoS 1 adds a 2-byte packet ID after the topic */
+    int var_len = 2 + topic_len + (qos > 0 ? 2 : 0) + payload_len;
+
+    uint16_t pid = 0;
+    if (qos > 0) {
+        pid = packet_id++;
+        if (packet_id == 0) packet_id = 1;
+    }
 
     Buf pkt; buf_init(&pkt);
-    uint8_t fhdr = (uint8_t)(MQTT_PKT_PUBLISH | (retain ? 0x01 : 0x00));
+    uint8_t fhdr = (uint8_t)(MQTT_PKT_PUBLISH | ((qos & 0x03) << 1) | (retain ? 0x01 : 0x00));
     buf_append_u8(&pkt, fhdr);
     uint8_t rl[4];
     int rl_len = encode_remaining_length(rl, var_len);
     buf_append(&pkt, rl, rl_len);
     buf_append_u16(&pkt, (uint16_t)topic_len);
     buf_append(&pkt, (const uint8_t*)topic, topic_len);
+    if (qos > 0) buf_append_u16(&pkt, pid);
     if (payload_len) buf_append(&pkt, (const uint8_t*)payload, payload_len);
 
     int ret = send_all(sockfd, pkt.data, pkt.len);
@@ -537,7 +590,12 @@ void MQTT_Unsubscribe(const char* topic_filter) {
         }
     }
     pthread_mutex_unlock(&sub_lock);
-    /* MQTT 3.1.1 UNSUBSCRIBE not implemented — just remove from re-sub list */
+
+    /* Send UNSUBSCRIBE to broker if connected */
+    pthread_mutex_lock(&send_lock);
+    int fd = sockfd;
+    pthread_mutex_unlock(&send_lock);
+    if (fd >= 0) send_unsubscribe(fd, topic_filter);
 }
 
 int MQTT_Is_Connected(void) {

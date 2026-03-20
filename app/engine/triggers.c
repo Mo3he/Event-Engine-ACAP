@@ -69,6 +69,7 @@ typedef struct {
 
     /* mqtt_message */
     char   mqtt_topic_filter[256]; /* supports MQTT wildcards + / # */
+    char   mqtt_payload_filter[256]; /* optional substring match; empty = any payload */
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
@@ -252,6 +253,8 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             s->type = TRIG_MQTT_MESSAGE;
             const char* tf = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "topic_filter"));
             snprintf(s->mqtt_topic_filter, sizeof(s->mqtt_topic_filter), "%s", tf ? tf : "#");
+            const char* pf = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "payload_filter"));
+            snprintf(s->mqtt_payload_filter, sizeof(s->mqtt_payload_filter), "%s", pf ? pf : "");
             MQTT_Subscribe(s->mqtt_topic_filter);
 
         } else {
@@ -346,6 +349,8 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
         Subscription* s = &subs[i];
         if (s->type != TRIG_MQTT_MESSAGE) continue;
         if (!mqtt_topic_matches(s->mqtt_topic_filter, topic)) continue;
+        if (s->mqtt_payload_filter[0] &&
+            (!payload || !strstr(payload, s->mqtt_payload_filter))) continue;
 
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type",    "mqtt_message");

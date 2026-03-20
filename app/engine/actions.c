@@ -214,32 +214,105 @@ static void action_recording(cJSON* cfg) {
     if (resp) free(resp);
 }
 
-/* overlay_text */
+/* overlay_text
+ * Uses the VAPIX Dynamic Overlay API: POST dynamicoverlay/dynamicoverlay.cgi
+ * We track one identity per channel (1-8) in memory so we reuse the same
+ * overlay slot on repeated firings.  After reboot the identity is -1 and
+ * a new overlay is created automatically.
+ */
+#define MAX_OVERLAY_CHANNELS 8
+static int overlay_identity[MAX_OVERLAY_CHANNELS]; /* -1 = not yet created */
+static int overlay_identity_init = 0;
+
+static void overlay_remove(int identity) {
+    char body[64];
+    snprintf(body, sizeof(body), "{\"apiVersion\":\"1.0\",\"method\":\"remove\",\"params\":{\"identity\":%d}}", identity);
+    char* resp = ACAP_VAPIX_Post("dynamicoverlay/dynamicoverlay.cgi", body);
+    if (resp) free(resp);
+}
+
+static gboolean overlay_remove_cb(gpointer user_data) {
+    int identity = GPOINTER_TO_INT(user_data);
+    overlay_remove(identity);
+    /* Also clear from our tracking array if it matches */
+    for (int i = 0; i < MAX_OVERLAY_CHANNELS; i++) {
+        if (overlay_identity[i] == identity) overlay_identity[i] = -1;
+    }
+    return G_SOURCE_REMOVE;
+}
+
 static void action_overlay_text(cJSON* cfg, cJSON* trigger_data) {
+    if (!overlay_identity_init) {
+        for (int i = 0; i < MAX_OVERLAY_CHANNELS; i++) overlay_identity[i] = -1;
+        overlay_identity_init = 1;
+    }
+
     int channel = 1;
     cJSON* ch = cJSON_GetObjectItem(cfg, "channel");
     if (ch) channel = (int)ch->valuedouble;
+    if (channel < 1 || channel > MAX_OVERLAY_CHANNELS) channel = 1;
 
     const char* text_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "text"));
     if (!text_tmpl) return;
     char* text = Actions_Expand_Template(text_tmpl, trigger_data);
 
+    const char* position   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "position"));
+    const char* text_color = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "text_color"));
+    if (!position)   position   = "topLeft";
+    if (!text_color) text_color = "white";
+
+    cJSON* dur_j = cJSON_GetObjectItem(cfg, "duration");
+    int duration = dur_j ? (int)dur_j->valuedouble : 0;
+
+    int identity = overlay_identity[channel - 1];
+    const char* method = (identity >= 0) ? "setText" : "addText";
+
     cJSON* req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "apiVersion", "1.0");
-    cJSON_AddStringToObject(req, "method", "setTextOverlay");
+    cJSON_AddStringToObject(req, "method", method);
     cJSON* params = cJSON_AddObjectToObject(req, "params");
     cJSON_AddNumberToObject(params, "camera", channel);
     cJSON_AddStringToObject(params, "text", text);
     free(text);
-
-    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
-    if (dur) cJSON_AddNumberToObject(params, "duration", dur->valuedouble);
+    if (identity >= 0) {
+        cJSON_AddNumberToObject(params, "identity", identity);
+    } else {
+        cJSON_AddStringToObject(params, "position",   position);
+        cJSON_AddStringToObject(params, "textColor",  text_color);
+    }
 
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
-    char* resp = ACAP_VAPIX_Post("dynamicoverlay.cgi", body);
+    char* resp_str = ACAP_VAPIX_Post("dynamicoverlay/dynamicoverlay.cgi", body);
     free(body);
-    if (resp) free(resp);
+
+    if (resp_str) {
+        cJSON* resp_j = cJSON_Parse(resp_str);
+        free(resp_str);
+        if (resp_j) {
+            /* On setText failure (e.g. after reboot), reset and retry as addText */
+            if (cJSON_GetObjectItem(resp_j, "error") && identity >= 0) {
+                overlay_identity[channel - 1] = -1;
+                cJSON_Delete(resp_j);
+                action_overlay_text(cfg, trigger_data); /* one retry */
+                return;
+            }
+            /* On addText success, store the returned identity */
+            cJSON* data = cJSON_GetObjectItem(resp_j, "data");
+            if (data) {
+                cJSON* id_j = cJSON_GetObjectItem(data, "identity");
+                if (id_j) overlay_identity[channel - 1] = (int)id_j->valuedouble;
+            }
+            cJSON_Delete(resp_j);
+        }
+    }
+
+    /* If duration > 0, schedule removal after that many seconds */
+    if (duration > 0 && overlay_identity[channel - 1] >= 0) {
+        g_timeout_add_seconds((guint)duration,
+                              overlay_remove_cb,
+                              GINT_TO_POINTER(overlay_identity[channel - 1]));
+    }
 }
 
 /* ptz_preset */
@@ -361,7 +434,11 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     cJSON* retain_j = cJSON_GetObjectItem(cfg, "retain");
     int retain = retain_j && cJSON_IsTrue(retain_j) ? 1 : 0;
 
-    if (!MQTT_Publish(topic, payload, retain))
+    cJSON* qos_j = cJSON_GetObjectItem(cfg, "qos");
+    int qos = qos_j ? (int)qos_j->valuedouble : 0;
+    if (qos < 0 || qos > 1) qos = 0;
+
+    if (!MQTT_Publish(topic, payload, retain, qos))
         LOG_WARN("mqtt_publish failed (not connected?)");
 
     free(topic);

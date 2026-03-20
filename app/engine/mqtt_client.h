@@ -12,15 +12,18 @@ extern "C" {
  * No external library required.
  *
  * Features:
- *   - QoS 0 publish and subscribe
- *   - Automatic reconnection with backoff
+ *   - QoS 0 and QoS 1 publish (per-message, optional)
+ *   - QoS 1 subscribe (broker delivers with acknowledgment)
+ *   - PUBACK sent to broker for incoming QoS 1 messages
+ *   - UNSUBSCRIBE packet sent on MQTT_Unsubscribe()
+ *   - Automatic reconnection with exponential backoff
  *   - Keepalive PINGREQ/PINGRESP
- *   - Multiple topic subscriptions
+ *   - Multiple topic subscriptions with wildcard support (+ and #)
  *   - Incoming message dispatch via callback (on GMainLoop thread)
  *   - Thread-safe publish (mutex protected)
  *
  * Limitations:
- *   - QoS 0 only (fire and forget)
+ *   - No QoS 1 retransmit (message sent once; PUBACK acknowledged but not enforced)
  *   - No TLS (plain TCP, port 1883)
  *   - Single broker
  */
@@ -44,8 +47,9 @@ void MQTT_Cleanup(void);
 /* Update config (triggers reconnect if host/port changed) */
 int  MQTT_Reconfigure(MQTT_Config* config);
 
-/* Publish — thread-safe, returns 1 on success */
-int  MQTT_Publish(const char* topic, const char* payload, int retain);
+/* Publish — thread-safe, returns 1 on success.
+ * qos: 0 = fire and forget, 1 = at-least-once (PUBACK expected from broker) */
+int  MQTT_Publish(const char* topic, const char* payload, int retain, int qos);
 
 /* Subscribe to a topic filter — call before or after connect, resubscribed on reconnect */
 int  MQTT_Subscribe(const char* topic_filter);

@@ -219,11 +219,17 @@ int RuleEngine_Init(void) {
     Triggers_Init(on_trigger_fired);
 
     /* Load saved rules */
-    cJSON* saved = ACAP_FILE_Read("localdata/rules.json");
+    cJSON* saved = NULL;
+    if (ACAP_FILE_Exists("localdata/rules.json")) {
+        saved = ACAP_FILE_Read("localdata/rules.json");
+        if (!saved) {
+            LOG_WARN("rules.json exists but could not be parsed — file may be corrupt, loading defaults");
+            ACAP_STATUS_SetString("engine", "rules_load_error", "rules.json corrupt — defaults loaded");
+        }
+    }
     if (!saved) {
-        /* First run — load defaults */
         saved = ACAP_FILE_Read("settings/default_rules.json");
-        LOG("loading default rules");
+        if (saved) LOG("first run or recovery — loading default rules");
     }
 
     if (saved && cJSON_IsArray(saved)) {

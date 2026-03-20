@@ -22,9 +22,9 @@ const API = {
   getRules:      ()      => API.get('rules'),
   getRule:       id      => API.get(`rules?id=${id}`),
   addRule:       rule    => API.post('rules', rule),
-  updateRule:    (id, r) => API.put(`rules?id=${id}`, r),
+  updateRule:    (id, r) => API.post(`rules?id=${id}`, r),
   deleteRule:    id      => API.delete(`rules?id=${id}`),
-  setEnabled:    (id, v) => API.put(`rules?id=${id}`, { enabled: v }),
+  setEnabled:    (id, v) => API.post(`rules?id=${id}`, { enabled: v }),
   fireRule:      id      => API.post('fire', { id }),
 
   getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + rule : ''}`),
@@ -134,6 +134,7 @@ function renderRules() {
       <div class="rule-actions">
         <button class="btn btn-ghost btn-sm btn-icon" onclick="testRule('${r.id}')" title="Test / Fire now">▶</button>
         <button class="btn btn-ghost btn-sm btn-icon" onclick="editRule('${r.id}')" title="Edit">✏</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="duplicateRule('${r.id}')" title="Duplicate">⎘</button>
         <button class="btn btn-ghost btn-sm btn-icon" onclick="deleteRule('${r.id}')" title="Delete">🗑</button>
       </div>
     </div>
@@ -164,6 +165,18 @@ async function testRule(id) {
 async function editRule(id) {
   const rule = await API.getRule(id);
   openRuleEditor(rule);
+}
+
+async function duplicateRule(id) {
+  try {
+    const rule = await API.getRule(id);
+    const { id: _id, execution_count: _ec, last_fired: _lf, ...copy } = rule;
+    copy.name = copy.name + ' (copy)';
+    copy.enabled = false;
+    openRuleEditor(copy);
+  } catch(e) {
+    toast('Failed to duplicate rule', 'error');
+  }
 }
 
 async function deleteRule(id) {
@@ -420,6 +433,11 @@ function triggerFields(t) {
         <label>Topic Filter</label>
         <input type="text" data-k="topic_filter" value="${escHtml(t.topic_filter || '#')}" placeholder="sensors/# or home/+/temperature">
         <div class="form-hint">Supports MQTT wildcards: + (single level) and # (multi-level). Requires MQTT configured in Settings.</div>
+      </div>
+      <div class="form-group">
+        <label>Payload Filter <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="payload_filter" value="${escHtml(t.payload_filter || '')}" placeholder="e.g. motion or &quot;state&quot;:true">
+        <div class="form-hint">Rule fires only if the payload contains this substring. Leave empty to match any payload.</div>
       </div>
     </div>`;
   return '';
@@ -685,9 +703,36 @@ function actionFields(a) {
         <input type="text" data-k="text" value="${escHtml(a.text || '')}" placeholder="MOTION DETECTED at {{time}}">
         ${hint}
       </div>
-      <div class="form-group" style="flex:0 0 100px;">
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 80px;">
         <label>Channel</label>
         <input type="number" data-k="channel" min="1" value="${a.channel || 1}">
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Duration (s, 0=keep)</label>
+        <input type="number" data-k="duration" min="0" value="${a.duration || 0}">
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Position</label>
+        <select data-k="position">
+          <option value="topLeft"     ${(a.position||'topLeft')==='topLeft'     ? 'selected':''}>Top Left</option>
+          <option value="topRight"    ${a.position==='topRight'    ? 'selected':''}>Top Right</option>
+          <option value="bottomLeft"  ${a.position==='bottomLeft'  ? 'selected':''}>Bottom Left</option>
+          <option value="bottomRight" ${a.position==='bottomRight' ? 'selected':''}>Bottom Right</option>
+          <option value="top"         ${a.position==='top'         ? 'selected':''}>Top Centre</option>
+          <option value="bottom"      ${a.position==='bottom'      ? 'selected':''}>Bottom Centre</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Text Colour</label>
+        <select data-k="text_color">
+          <option value="white"         ${(a.text_color||'white')==='white'         ? 'selected':''}>White</option>
+          <option value="black"         ${a.text_color==='black'         ? 'selected':''}>Black</option>
+          <option value="red"           ${a.text_color==='red'           ? 'selected':''}>Red</option>
+          <option value="transparent"   ${a.text_color==='transparent'   ? 'selected':''}>Transparent</option>
+          <option value="semiTransparent" ${a.text_color==='semiTransparent' ? 'selected':''}>Semi-transparent</option>
+        </select>
       </div>
     </div>`;
   if (type === 'ptz_preset') return `
@@ -811,7 +856,14 @@ function actionFields(a) {
         <textarea data-k="payload" placeholder='{"camera":"{{camera.serial}}","time":"{{timestamp}}"}'>${escHtml(a.payload || '')}</textarea>
         ${hint}
       </div>
-      <div class="form-group" style="flex:0 0 120px;">
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>QoS</label>
+        <select data-k="qos">
+          <option value="0" ${(a.qos === 0 || a.qos === undefined) ? 'selected':''}>0 – At most once</option>
+          <option value="1" ${a.qos === 1 ? 'selected':''}>1 – At least once</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
         <label>Retain</label>
         <select data-k="retain">
           <option value="false" ${!a.retain ? 'selected':''}>No</option>
@@ -897,6 +949,7 @@ function normalizeTrigger(t) {
     }
   } else if (t.type === 'mqtt_message') {
     out.topic_filter = t.topic_filter || '#';
+    if (t.payload_filter) out.payload_filter = t.payload_filter;
   } else if (t.type === 'counter_threshold') {
     out.counter_name = t.counter_name; out.op = t.op || 'gt'; out.value = parseFloat(t.value) || 0;
   } else if (t.type === 'rule_fired') {
@@ -929,7 +982,7 @@ function normalizeAction(a) {
                  'preset','port','state','clip_name','message','level','event_id',
                  'seconds','name','value','delta','rule_id','cron','interval_seconds',
                  'schedule_type','time','counter_name','op','token','edge',
-                 'topic','payload'];
+                 'topic','payload','qos','position','text_color'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
@@ -943,6 +996,7 @@ function normalizeAction(a) {
   }
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
+    out.qos    = parseInt(a.qos) || 0;
   }
   return out;
 }
