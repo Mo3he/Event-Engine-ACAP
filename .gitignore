@@ -1,5 +1,4 @@
-# Build outputs
-*.eap
+# Build intermediates
 *.o
 app/engine/*.o
 
