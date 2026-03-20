@@ -363,7 +363,7 @@ async function duplicateRule(id) {
     const rule = await API.getRule(id);
     const { id: _id, execution_count: _ec, last_fired: _lf, ...copy } = rule;
     copy.name = copy.name + ' (copy)';
-    copy.enabled = false;
+    copy.enabled = true;
     openRuleEditor(copy);
   } catch(e) {
     toast('Failed to duplicate rule', 'error');
