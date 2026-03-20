@@ -190,14 +190,19 @@ function parseVapixEventCatalog(xmlText) {
 
 function findCatalogMatch(t) {
   if (!vapixEventCatalog || !vapixEventCatalog.length) return -1;
+  const keys = ['topic0','topic1','topic2','topic3'];
+  const cmp = (a, b) => {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    const ak = Object.keys(a)[0], bk = Object.keys(b)[0];
+    return ak === bk && a[ak] === b[bk];
+  };
+  /* Exact match first */
+  let idx = vapixEventCatalog.findIndex(ev => keys.every(k => cmp(ev.topics[k], t[k])));
+  if (idx >= 0) return idx;
+  /* Prefix match: trigger has fewer topic levels than catalog entry */
   return vapixEventCatalog.findIndex(ev =>
-    ['topic0','topic1','topic2','topic3'].every(k => {
-      const a = ev.topics[k], b = t[k];
-      if (!a && !b) return true;
-      if (!a || !b) return false;
-      const ak = Object.keys(a)[0], bk = Object.keys(b)[0];
-      return ak === bk && a[ak] === b[bk];
-    })
+    keys.every(k => !t[k] || cmp(ev.topics[k], t[k]))
   );
 }
 
@@ -444,60 +449,61 @@ function triggerFields(t, rowIdx) {
   if (type === 'vapix_event') {
     const ns  = k => t[k] ? Object.keys(t[k])[0]   || '' : '';
     const val = k => t[k] ? Object.values(t[k])[0] || '' : '';
-    const matchIdx = findCatalogMatch(t);
-    const catalogSelect = vapixEventCatalog === null
-      ? `<select disabled><option>Loading events from camera…</option></select>`
-      : `<select onchange="applyVapixEvent(${rowIdx}, this.value)">
-           <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Custom / manual below —</option>
-           ${vapixEventCatalog.map((ev, i) =>
-             `<option value="${i}" ${i === matchIdx ? 'selected':''}>${escHtml(ev.label)}</option>`
-           ).join('')}
-         </select>`;
-    return `
+    /* Hidden inputs so normalizeTrigger can still read topic values */
+    const hiddenTopics = ['topic0','topic1','topic2','topic3'].map(k =>
+      `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
+      `<input type="hidden" data-k="${k}_val" value="${escHtml(val(k))}">`
+    ).join('');
+
+    if (vapixEventCatalog === null) {
+      return `${hiddenTopics}
+      <div class="form-row"><div class="form-group">
+        <label>Camera Event</label>
+        <select disabled><option>Loading events from camera…</option></select>
+      </div></div>`;
+    }
+
+    const matchIdx  = findCatalogMatch(t);
+    const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys : [];
+    const filterKey = t.filter_key || '';
+    const filterVal = t.filter_value;
+
+    const filterRow = dataKeys.length ? `
     <div class="form-row">
       <div class="form-group">
-        <label>Event</label>
-        ${catalogSelect}
-        <div class="form-hint">Events fetched from this camera. Selecting one fills the topic fields below automatically.</div>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Topic 0</label>
-        <div style="display:flex;gap:4px">
-          <input type="text" data-k="topic0_ns"  style="flex:0 0 80px" value="${escHtml(ns('topic0'))}"  placeholder="tnsaxis">
-          <input type="text" data-k="topic0_val" style="flex:1"        value="${escHtml(val('topic0'))}" placeholder="VideoAnalytics">
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Topic 1</label>
-        <div style="display:flex;gap:4px">
-          <input type="text" data-k="topic1_ns"  style="flex:0 0 80px" value="${escHtml(ns('topic1'))}"  placeholder="tnsaxis">
-          <input type="text" data-k="topic1_val" style="flex:1"        value="${escHtml(val('topic1'))}" placeholder="MotionDetection">
-        </div>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Topic 2 <span style="opacity:.6">(optional)</span></label>
-        <div style="display:flex;gap:4px">
-          <input type="text" data-k="topic2_ns"  style="flex:0 0 80px" value="${escHtml(ns('topic2'))}">
-          <input type="text" data-k="topic2_val" style="flex:1"        value="${escHtml(val('topic2'))}">
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Filter on data key <span style="opacity:.6">(optional)</span></label>
-        <div style="display:flex;gap:4px;align-items:center">
-          <input type="text" data-k="filter_key" style="flex:1" value="${escHtml(t.filter_key || '')}" placeholder="active">
-          <select data-k="filter_value" style="flex:0 0 80px">
-            <option value="">Any</option>
-            <option value="true"  ${t.filter_value === true  ? 'selected':''}>= true</option>
-            <option value="false" ${t.filter_value === false ? 'selected':''}>= false</option>
+        <label>Condition <span style="opacity:.6">(optional — only fire when…)</span></label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-k="filter_key">
+            <option value="">— no condition —</option>
+            ${dataKeys.map(k =>
+              `<option value="${escHtml(k)}" ${filterKey===k?'selected':''}>${escHtml(k)}</option>`
+            ).join('')}
+          </select>
+          <select data-k="filter_value">
+            <option value="" ${filterVal==null?'selected':''}>= any value</option>
+            <option value="true"  ${filterVal===true ?'selected':''}>= true</option>
+            <option value="false" ${filterVal===false?'selected':''}>= false</option>
           </select>
         </div>
-        <div class="form-hint">Only fire when this event data key has the specified value.</div>
       </div>
-    </div>`;
+    </div>` : '';
+
+    return `${hiddenTopics}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Camera Event</label>
+        <select onchange="applyVapixEvent(${rowIdx}, this.value)">
+          <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
+          ${vapixEventCatalog.map((ev, i) =>
+            `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
+          ).join('')}
+        </select>
+        ${matchIdx < 0 && (t.topic0 || t.topic1)
+          ? `<div class="form-hint" style="color:var(--text-muted)">Saved event not found in this camera's catalog — it may still work if the camera supports it.</div>`
+          : `<div class="form-hint">Choose which camera event fires this rule.</div>`}
+      </div>
+    </div>
+    ${filterRow}`;
   }
   if (type === 'http_webhook') {
     const tok = t.token || generateToken();
@@ -1256,10 +1262,11 @@ function collectRows(rows, prefix) {
 function normalizeTrigger(t) {
   const out = { type: t.type };
   if (t.type === 'vapix_event' || t.type === 'io_input') {
-    if (t.topic0_ns && t.topic0_val) out.topic0 = { [t.topic0_ns]: t.topic0_val };
-    if (t.topic1_ns && t.topic1_val) out.topic1 = { [t.topic1_ns]: t.topic1_val };
-    if (t.topic2_ns && t.topic2_val) out.topic2 = { [t.topic2_ns]: t.topic2_val };
-    if (t.topic3_ns && t.topic3_val) out.topic3 = { [t.topic3_ns]: t.topic3_val };
+    /* namespace (ns) can legitimately be empty string — only skip if value is absent */
+    if (t.topic0_val) out.topic0 = { [t.topic0_ns || '']: t.topic0_val };
+    if (t.topic1_val) out.topic1 = { [t.topic1_ns || '']: t.topic1_val };
+    if (t.topic2_val) out.topic2 = { [t.topic2_ns || '']: t.topic2_val };
+    if (t.topic3_val) out.topic3 = { [t.topic3_ns || '']: t.topic3_val };
     if (t.filter_key) out.filter_key = t.filter_key;
     if (t.filter_value === 'true') out.filter_value = true;
     else if (t.filter_value === 'false') out.filter_value = false;
