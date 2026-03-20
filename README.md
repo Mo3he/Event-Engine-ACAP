@@ -9,7 +9,8 @@ An IFTTT-style rule engine for Axis cameras that replaces and extends the built-
 - **Conditions** — time window, event state, counter comparison, HTTP check, I/O state, variable compare
 - **Actions** — HTTP request, recording start/stop, overlay text, PTZ preset, I/O output, audio clip, syslog, VAPIX event, delay, set variable, increment counter, MQTT publish, run rule
 - **MQTT** — full MQTT 3.1.1 client (raw sockets, no external library), QoS 0 and QoS 1 publish, wildcard topic subscriptions, reconnect with backoff. Password stored separately and never exposed via the API
-- **Templates** — `{{timestamp}}`, `{{camera.serial}}`, `{{trigger.KEY}}`, `{{var.NAME}}`, `{{counter.NAME}}` in action payloads
+- **Templates** — `{{timestamp}}`, `{{camera.serial}}`, `{{trigger.KEY}}`, `{{var.NAME}}`, `{{counter.NAME}}` in action payloads. The editor shows which `{{trigger.*}}` keys are available based on the rule's triggers
+- **Camera-aware UI** — VAPIX event trigger shows a dropdown of events fetched from the camera; PTZ preset action lists the camera's configured presets; audio clip action lists available media clips
 - **Scheduler** — cron expressions, fixed intervals, daily time with day-of-week selection
 - **Variables & Counters** — named, persistent, usable in templates and conditions
 - **Event Log** — per-rule history with result codes
@@ -101,6 +102,9 @@ Action fields (URL, body, message, MQTT payload, etc.) support `{{...}}` substit
 
 - **Overlay text** uses the VAPIX Dynamic Overlay API (`addText`/`setText`). The overlay is created on first use and reused on subsequent firings. Set a duration to auto-remove it after N seconds, or 0 to keep it permanently. Position and text colour are configurable per action.
 - **MQTT payload filter** — `mqtt_message` triggers can optionally match only messages whose payload contains a specific substring.
+- **VAPIX event trigger data** — event data keys (e.g. `active`, `source`) are flattened into trigger data so they are directly usable as `{{trigger.active}}` etc. in action templates.
+- **PTZ presets** — the PTZ preset action fetches the camera's configured presets at page load and shows them in a grouped dropdown (by channel). Falls back to a text field on cameras without PTZ.
+- **Audio clips** — the audio clip action lists available media clips from the camera (`MediaClip` parameter group). Plays via `mediaclip.cgi?action=play&clip=<id>`.
 - **Rule duplication** — click the ⎘ button on any rule card to open a copy in the editor.
 - **Corrupt rules.json** — if the rules file cannot be parsed on startup, the engine logs a warning, sets a status flag, and falls back to the bundled default rules.
 

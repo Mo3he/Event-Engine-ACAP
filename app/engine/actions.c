@@ -364,7 +364,7 @@ static void action_audio_clip(cJSON* cfg) {
     const char* clip = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "clip_name"));
     if (!clip) return;
     char req[256];
-    snprintf(req, sizeof(req), "audio/audioclip.cgi?audioClipId=%s", clip);
+    snprintf(req, sizeof(req), "mediaclip.cgi?action=play&clip=%s", clip);
     char* resp = ACAP_VAPIX_Get(req);
     if (resp) free(resp);
 }

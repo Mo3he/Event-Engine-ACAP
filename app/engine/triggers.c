@@ -301,7 +301,15 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type", s->type == TRIG_IO_INPUT ? "io_input" : "vapix_event");
         cJSON* ev_data = cJSON_GetObjectItem(event, "data");
-        if (ev_data) cJSON_AddItemToObject(tdata, "event_data", cJSON_Duplicate(ev_data, 1));
+        if (ev_data) {
+            cJSON_AddItemToObject(tdata, "event_data", cJSON_Duplicate(ev_data, 1));
+            /* Flatten individual keys so {{trigger.KEY}} works (e.g. {{trigger.active}}) */
+            cJSON* item;
+            cJSON_ArrayForEach(item, ev_data) {
+                if (item->string && !cJSON_GetObjectItem(tdata, item->string))
+                    cJSON_AddItemToObject(tdata, item->string, cJSON_Duplicate(item, 1));
+            }
+        }
 
         fire_fn(s->rule_id, s->trigger_index, tdata);
         cJSON_Delete(tdata);

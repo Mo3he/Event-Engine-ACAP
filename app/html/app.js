@@ -43,6 +43,9 @@ let pollTimer = null;
 let triggerRows = [];
 let conditionRows = [];
 let actionRows = [];
+let vapixEventCatalog = null; /* null = not yet fetched */
+let ptzPresets = null;        /* null=loading, []=no PTZ, [{channel,presets:[name,...]},...] */
+let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
 
 /* ===================================================
  * Toast
@@ -85,6 +88,135 @@ function escHtml(s) {
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
     .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ===================================================
+ * VAPIX Event Catalog — fetched from the camera at startup
+ * =================================================== */
+async function loadVapixEventCatalog() {
+  try {
+    const resp = await fetch('/vapix/services', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/soap+xml; charset=utf-8' },
+      body: `<?xml version="1.0" encoding="UTF-8"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:tev="http://www.onvif.org/ver10/events/wsdl"><soap:Body><tev:GetEventProperties/></soap:Body></soap:Envelope>`
+    });
+    if (!resp.ok) throw new Error(resp.status);
+    vapixEventCatalog = parseVapixEventCatalog(await resp.text());
+  } catch(e) {
+    vapixEventCatalog = [];
+  }
+}
+
+async function loadPtzPresets() {
+  try {
+    const resp = await fetch('/axis-cgi/com/ptz.cgi?query=presetposall');
+    if (!resp.ok) { ptzPresets = []; return; }
+    const text = await resp.text();
+    const channels = [];
+    let cur = null;
+    for (const line of text.split('\n')) {
+      const m = line.match(/^Preset Positions for camera (\d+)/);
+      if (m) { cur = { channel: parseInt(m[1]), presets: [] }; channels.push(cur); }
+      else if (cur) {
+        const pm = line.match(/^presetposno\d+=(.+)/);
+        if (pm) cur.presets.push(pm[1].trim());
+      }
+    }
+    ptzPresets = channels.filter(c => c.presets.length);
+  } catch(e) { ptzPresets = []; }
+}
+
+async function loadAudioClips() {
+  try {
+    const resp = await fetch('/axis-cgi/param.cgi?action=list&group=MediaClip');
+    if (!resp.ok) { audioClips = []; return; }
+    const text = await resp.text();
+    const byId = {};
+    for (const line of text.split('\n')) {
+      const m = line.match(/^root\.MediaClip\.(M\d+)\.(\w+)=(.+)/);
+      if (!m) continue;
+      const [, key, prop, val] = m;
+      if (!byId[key]) byId[key] = { id: key.slice(1) };
+      if (prop === 'Name') byId[key].name = val.trim();
+      if (prop === 'Type') byId[key].type = val.trim();
+    }
+    audioClips = Object.values(byId)
+      .filter(c => c.type === 'audio' && c.name)
+      .sort((a, b) => parseInt(a.id) - parseInt(b.id));
+  } catch(e) { audioClips = []; }
+}
+
+function parseVapixEventCatalog(xmlText) {
+  try {
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const WSNT   = 'http://docs.oasis-open.org/wsn/t-1';
+    const SCHEMA = 'http://www.onvif.org/ver10/schema';
+    const topicSetEl = doc.getElementsByTagNameNS(WSNT, 'TopicSet')[0];
+    if (!topicSetEl) return [];
+    const events = [];
+    function traverse(el, path) {
+      for (const child of el.children) {
+        const ns = child.namespaceURI || '';
+        if (ns.includes('oasis-open.org/wsrf') || ns.includes('oasis-open.org/wsn') ||
+            ns.includes('onvif.org/ver10/schema') || ns.includes('onvif.org/ver10/events')) continue;
+        const isTopic = child.getAttributeNS(WSNT, 'topic') === 'true';
+        const newPath = [...path, { ns: child.prefix || '', name: child.localName }];
+        if (isTopic) {
+          const dataEl = child.getElementsByTagNameNS(SCHEMA, 'Data')[0];
+          const dataKeys = dataEl
+            ? Array.from(dataEl.getElementsByTagNameNS(SCHEMA, 'SimpleItemDescription'))
+                .map(d => d.getAttribute('Name')).filter(Boolean)
+            : [];
+          const topics = {};
+          newPath.slice(0, 4).forEach((p, i) => { topics[`topic${i}`] = { [p.ns]: p.name }; });
+          events.push({ label: newPath.map(p => p.name).join(' / '), topics, dataKeys });
+        }
+        traverse(child, newPath);
+      }
+    }
+    traverse(topicSetEl, []);
+    return events.sort((a, b) => a.label.localeCompare(b.label));
+  } catch(e) {
+    return [];
+  }
+}
+
+function findCatalogMatch(t) {
+  if (!vapixEventCatalog || !vapixEventCatalog.length) return -1;
+  return vapixEventCatalog.findIndex(ev =>
+    ['topic0','topic1','topic2','topic3'].every(k => {
+      const a = ev.topics[k], b = t[k];
+      if (!a && !b) return true;
+      if (!a || !b) return false;
+      const ak = Object.keys(a)[0], bk = Object.keys(b)[0];
+      return ak === bk && a[ak] === b[bk];
+    })
+  );
+}
+
+function applyVapixEvent(rowIdx, idx) {
+  const ev = vapixEventCatalog && vapixEventCatalog[parseInt(idx)];
+  if (!ev) return;
+  const row = { type: 'vapix_event', ...ev.topics };
+  if (ev.dataKeys.length === 1) row.filter_key = ev.dataKeys[0];
+  triggerRows[rowIdx] = row;
+  renderTriggerList();
+}
+
+function applyPtzPreset(sel) {
+  const row = sel.closest('.tca-row');
+  const [ch, ...rest] = sel.value.split(':');
+  const name = rest.join(':');
+  row.querySelector('[data-k="preset"]').value  = name;
+  row.querySelector('[data-k="channel"]').value = ch;
+}
+
+function updateWebhookUrl(inp) {
+  const urlEl = inp.closest('.tca-row').querySelector('.webhook-url-display');
+  if (urlEl) {
+    const base = `${window.location.protocol}//${window.location.hostname}/local/acap_event_engine/fire`;
+    urlEl.value = `${base}?token=${inp.value}`;
+  }
 }
 
 /* ===================================================
@@ -300,52 +432,88 @@ function triggerTypeOptions(selected) {
   ).join('');
 }
 
-function triggerFields(t) {
+function triggerFields(t, rowIdx) {
   const type = t.type || 'vapix_event';
-  if (type === 'vapix_event') return `
+  if (type === 'vapix_event') {
+    const ns  = k => t[k] ? Object.keys(t[k])[0]   || '' : '';
+    const val = k => t[k] ? Object.values(t[k])[0] || '' : '';
+    const matchIdx = findCatalogMatch(t);
+    const catalogSelect = vapixEventCatalog === null
+      ? `<select disabled><option>Loading events from camera…</option></select>`
+      : `<select onchange="applyVapixEvent(${rowIdx}, this.value)">
+           <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Custom / manual below —</option>
+           ${vapixEventCatalog.map((ev, i) =>
+             `<option value="${i}" ${i === matchIdx ? 'selected':''}>${escHtml(ev.label)}</option>`
+           ).join('')}
+         </select>`;
+    return `
     <div class="form-row">
       <div class="form-group">
-        <label>Topic 0 Namespace</label>
-        <input type="text" data-k="topic0_ns" value="${t.topic0 ? Object.keys(t.topic0)[0] || '' : 'tnsaxis'}" placeholder="tnsaxis">
-      </div>
-      <div class="form-group">
-        <label>Topic 0 Value</label>
-        <input type="text" data-k="topic0_val" value="${t.topic0 ? Object.values(t.topic0)[0] || '' : ''}" placeholder="VideoAnalytics">
+        <label>Event</label>
+        ${catalogSelect}
+        <div class="form-hint">Events fetched from this camera. Selecting one fills the topic fields below automatically.</div>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Topic 1 Namespace (optional)</label>
-        <input type="text" data-k="topic1_ns" value="${t.topic1 ? Object.keys(t.topic1)[0] || '' : ''}">
+        <label>Topic 0</label>
+        <div style="display:flex;gap:4px">
+          <input type="text" data-k="topic0_ns"  style="flex:0 0 80px" value="${escHtml(ns('topic0'))}"  placeholder="tnsaxis">
+          <input type="text" data-k="topic0_val" style="flex:1"        value="${escHtml(val('topic0'))}" placeholder="VideoAnalytics">
+        </div>
       </div>
       <div class="form-group">
-        <label>Topic 1 Value</label>
-        <input type="text" data-k="topic1_val" value="${t.topic1 ? Object.values(t.topic1)[0] || '' : ''}">
+        <label>Topic 1</label>
+        <div style="display:flex;gap:4px">
+          <input type="text" data-k="topic1_ns"  style="flex:0 0 80px" value="${escHtml(ns('topic1'))}"  placeholder="tnsaxis">
+          <input type="text" data-k="topic1_val" style="flex:1"        value="${escHtml(val('topic1'))}" placeholder="MotionDetection">
+        </div>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Filter Key (optional)</label>
-        <input type="text" data-k="filter_key" value="${escHtml(t.filter_key || '')}" placeholder="active">
-        <div class="form-hint">Only fire when this key matches filter value</div>
+        <label>Topic 2 <span style="opacity:.6">(optional)</span></label>
+        <div style="display:flex;gap:4px">
+          <input type="text" data-k="topic2_ns"  style="flex:0 0 80px" value="${escHtml(ns('topic2'))}">
+          <input type="text" data-k="topic2_val" style="flex:1"        value="${escHtml(val('topic2'))}">
+        </div>
       </div>
       <div class="form-group">
-        <label>Filter Value</label>
-        <select data-k="filter_value">
-          <option value="">Any</option>
-          <option value="true" ${t.filter_value === true ? 'selected' : ''}>true</option>
-          <option value="false" ${t.filter_value === false ? 'selected' : ''}>false</option>
-        </select>
+        <label>Filter on data key <span style="opacity:.6">(optional)</span></label>
+        <div style="display:flex;gap:4px;align-items:center">
+          <input type="text" data-k="filter_key" style="flex:1" value="${escHtml(t.filter_key || '')}" placeholder="active">
+          <select data-k="filter_value" style="flex:0 0 80px">
+            <option value="">Any</option>
+            <option value="true"  ${t.filter_value === true  ? 'selected':''}>= true</option>
+            <option value="false" ${t.filter_value === false ? 'selected':''}>= false</option>
+          </select>
+        </div>
+        <div class="form-hint">Only fire when this event data key has the specified value.</div>
       </div>
     </div>`;
-  if (type === 'http_webhook') return `
+  }
+  if (type === 'http_webhook') {
+    const tok = t.token || generateToken();
+    const base = `${window.location.protocol}//${window.location.hostname}/local/acap_event_engine/fire`;
+    return `
     <div class="form-row">
       <div class="form-group">
-        <label>Token</label>
-        <input type="text" data-k="token" value="${escHtml(t.token || generateToken())}" placeholder="secret-token">
-        <div class="form-hint">POST /local/acap_event_engine/fire?token=TOKEN</div>
+        <label>Token <span style="opacity:.6">(acts as a secret password for this webhook)</span></label>
+        <input type="text" data-k="token" value="${escHtml(tok)}" placeholder="secret-token"
+               oninput="updateWebhookUrl(this)">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Webhook URL — POST to this address to fire the rule</label>
+        <input class="webhook-url-display" type="text" readonly
+               value="${escHtml(`${base}?token=${tok}`)}"
+               style="font-size:11px;font-family:monospace;cursor:pointer;color:var(--accent)"
+               onclick="this.select()" title="Click to select all">
+        <div class="form-hint">No authentication required. Optionally send a JSON body — values are available as <code>{{trigger.KEY}}</code> in action templates.</div>
       </div>
     </div>`;
+  }
   if (type === 'schedule') return `
     <div class="form-row">
       <div class="form-group">
@@ -459,7 +627,7 @@ function renderTriggerList() {
         </select>
         <button class="tca-remove" onclick="removeTriggerRow(${i})" title="Remove">&times;</button>
       </div>
-      <div class="tca-fields">${triggerFields(t)}</div>
+      <div class="tca-fields">${triggerFields(t, i)}</div>
     </div>
   `).join('');
 }
@@ -649,9 +817,35 @@ function actionTypeOptions(selected) {
   ).join('');
 }
 
+function getTriggerTokenHint() {
+  const tokens = [];
+  for (const t of triggerRows) {
+    if (t.type === 'vapix_event') {
+      const idx = findCatalogMatch(t);
+      if (idx >= 0 && vapixEventCatalog[idx].dataKeys.length) {
+        for (const k of vapixEventCatalog[idx].dataKeys) tokens.push(`{{trigger.${k}}}`);
+      } else {
+        tokens.push('{{trigger.active}}');
+      }
+    } else if (t.type === 'mqtt_message') {
+      tokens.push('{{trigger.topic}}', '{{trigger.payload}}');
+    } else if (t.type === 'http_webhook') {
+      tokens.push('{{trigger.KEY}}');
+    } else if (t.type === 'counter_threshold') {
+      tokens.push('{{trigger.counter}}', '{{trigger.value}}');
+    } else if (t.type === 'io_input') {
+      tokens.push('{{trigger.port}}', '{{trigger.state}}');
+    }
+  }
+  const triggerPart = tokens.length
+    ? [...new Set(tokens)].join(', ')
+    : '{{trigger.KEY}}';
+  return `<div class="form-hint">Supports: {{timestamp}}, {{date}}, {{camera.name}}, {{camera.serial}}, ${triggerPart}, {{var.NAME}}, {{counter.NAME}}</div>`;
+}
+
 function actionFields(a) {
   const type = a.type || 'http_request';
-  const hint = `<div class="form-hint">Supports: {{timestamp}}, {{date}}, {{camera.name}}, {{camera.serial}}, {{trigger.KEY}}, {{var.NAME}}, {{counter.NAME}}</div>`;
+  const hint = getTriggerTokenHint();
   if (type === 'http_request') return `
     <div class="form-row">
       <div class="form-group">
@@ -735,17 +929,34 @@ function actionFields(a) {
         </select>
       </div>
     </div>`;
-  if (type === 'ptz_preset') return `
+  if (type === 'ptz_preset') {
+    let presetControl, channelControl = '';
+    if (ptzPresets === null) {
+      presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="Loading presets…" disabled>`;
+      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${a.channel || 1}"></div>`;
+    } else if (!ptzPresets.length) {
+      presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="HomePosition">`;
+      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${a.channel || 1}"></div>`;
+    } else {
+      let opts = `<option value=":">— select preset —</option>`;
+      for (const ch of ptzPresets) {
+        opts += `<optgroup label="Camera ${ch.channel}">`;
+        for (const name of ch.presets) {
+          const sel = (a.preset === name && (parseInt(a.channel) || 1) === ch.channel) ? 'selected' : '';
+          opts += `<option value="${ch.channel}:${escHtml(name)}" ${sel}>${escHtml(name)}</option>`;
+        }
+        opts += `</optgroup>`;
+      }
+      presetControl = `<select data-k="ptz_combined" onchange="applyPtzPreset(this)">${opts}</select>
+        <input type="hidden" data-k="preset"  value="${escHtml(a.preset || '')}">
+        <input type="hidden" data-k="channel" value="${a.channel || 1}">`;
+    }
+    return `
     <div class="form-row">
-      <div class="form-group">
-        <label>Preset Name</label>
-        <input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="HomePosition">
-      </div>
-      <div class="form-group" style="flex:0 0 100px;">
-        <label>Channel</label>
-        <input type="number" data-k="channel" min="1" value="${a.channel || 1}">
-      </div>
+      <div class="form-group"><label>Preset</label>${presetControl}</div>
+      ${channelControl}
     </div>`;
+  }
   if (type === 'io_output') return `
     <div class="form-row">
       <div class="form-group">
@@ -764,13 +975,25 @@ function actionFields(a) {
         <input type="number" data-k="duration" min="0" value="${a.duration || 0}">
       </div>
     </div>`;
-  if (type === 'audio_clip') return `
+  if (type === 'audio_clip') {
+    let clipControl;
+    if (audioClips === null) {
+      clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Loading clips…" disabled>`;
+    } else if (!audioClips.length) {
+      clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Clip ID (e.g. 36)">`;
+    } else {
+      let opts = `<option value="">— select clip —</option>`;
+      for (const c of audioClips) {
+        const sel = a.clip_name === c.id ? 'selected' : '';
+        opts += `<option value="${escHtml(c.id)}" ${sel}>${escHtml(c.name)}</option>`;
+      }
+      clipControl = `<select data-k="clip_name">${opts}</select>`;
+    }
+    return `
     <div class="form-row">
-      <div class="form-group">
-        <label>Clip Name / ID</label>
-        <input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="notification">
-      </div>
+      <div class="form-group"><label>Audio Clip</label>${clipControl}</div>
     </div>`;
+  }
   if (type === 'send_syslog') return `
     <div class="form-row">
       <div class="form-group">
@@ -931,6 +1154,8 @@ function normalizeTrigger(t) {
   if (t.type === 'vapix_event' || t.type === 'io_input') {
     if (t.topic0_ns && t.topic0_val) out.topic0 = { [t.topic0_ns]: t.topic0_val };
     if (t.topic1_ns && t.topic1_val) out.topic1 = { [t.topic1_ns]: t.topic1_val };
+    if (t.topic2_ns && t.topic2_val) out.topic2 = { [t.topic2_ns]: t.topic2_val };
+    if (t.topic3_ns && t.topic3_val) out.topic3 = { [t.topic3_ns]: t.topic3_val };
     if (t.filter_key) out.filter_key = t.filter_key;
     if (t.filter_value === 'true') out.filter_value = true;
     else if (t.filter_value === 'false') out.filter_value = false;
@@ -1348,4 +1573,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadRules();
   loadStatus();
   startPoll();
+  loadVapixEventCatalog();
+  loadPtzPresets();
+  loadAudioClips();
 });
