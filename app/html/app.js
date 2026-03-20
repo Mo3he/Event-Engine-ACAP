@@ -532,7 +532,8 @@ function triggerFields(t, rowIdx) {
     const filterVal = t.filter_value;
     const valueKey  = t.value_key  || (dataKeys[0] || '');
     const valueOp   = t.value_op   || 'gt';
-    const valueThr  = t.value_threshold !== undefined ? t.value_threshold : '';
+    const valueThr  = t.value_threshold  !== undefined ? t.value_threshold  : '';
+    const valueThr2 = t.value_threshold2 !== undefined ? t.value_threshold2 : '';
     const valueHold = t.value_hold_secs || 0;
 
     const condRow = dataKeys.length ? `
@@ -564,16 +565,27 @@ function triggerFields(t, rowIdx) {
               `<option value="${escHtml(k)}" ${valueKey===k?'selected':''}>${escHtml(k)}</option>`
             ).join('')}
           </select>
-          <select data-k="value_op">
-            <option value="gt"  ${valueOp==='gt' ?'selected':''}>is above</option>
-            <option value="lt"  ${valueOp==='lt' ?'selected':''}>is below</option>
-            <option value="gte" ${valueOp==='gte'?'selected':''}>is above or equal to</option>
-            <option value="lte" ${valueOp==='lte'?'selected':''}>is below or equal to</option>
-            <option value="eq"  ${valueOp==='eq' ?'selected':''}>equals</option>
+          <select data-k="value_op" onchange="rerenderTrigger(this)">
+            <option value="gt"      ${valueOp==='gt'      ?'selected':''}>is above</option>
+            <option value="lt"      ${valueOp==='lt'      ?'selected':''}>is below</option>
+            <option value="gte"     ${valueOp==='gte'     ?'selected':''}>is above or equal to</option>
+            <option value="lte"     ${valueOp==='lte'     ?'selected':''}>is below or equal to</option>
+            <option value="eq"      ${valueOp==='eq'      ?'selected':''}>equals</option>
+            <option value="between" ${valueOp==='between' ?'selected':''}>is between</option>
           </select>
+          ${valueOp === 'between' ? `
+          <input type="number" data-k="value_threshold" step="any"
+                 value="${escHtml(String(valueThr))}" placeholder="min"
+                 style="width:80px">
+          <span style="opacity:.7;font-size:12px">and</span>
+          <input type="number" data-k="value_threshold2" step="any"
+                 value="${escHtml(String(valueThr2))}" placeholder="max"
+                 style="width:80px">
+          ` : `
           <input type="number" data-k="value_threshold" step="any"
                  value="${escHtml(String(valueThr))}" placeholder="0"
                  style="width:90px">
+          `}
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
           <span style="opacity:.7;font-size:12px">Hold for at least</span>
@@ -1447,6 +1459,7 @@ function normalizeTrigger(t) {
       if (t.value_key) out.value_key = t.value_key;
       out.value_op        = t.value_op || 'gt';
       out.value_threshold = parseFloat(t.value_threshold) || 0;
+      if (out.value_op === 'between') out.value_threshold2 = parseFloat(t.value_threshold2) || 0;
       const hold = parseInt(t.value_hold_secs) || 0;
       if (hold > 0) out.value_hold_secs = hold;
     }

@@ -54,8 +54,9 @@ typedef struct {
 
     /* Numeric value threshold filter (vapix_event only) */
     char   value_key[64];      /* field name to compare, e.g. "MaxTemp" */
-    char   value_op[8];        /* "gt", "lt", "gte", "lte", "eq" */
-    double value_threshold;    /* comparison value */
+    char   value_op[8];        /* "gt", "lt", "gte", "lte", "eq", "between" */
+    double value_threshold;    /* comparison value (lower bound for "between") */
+    double value_threshold2;   /* upper bound for "between" */
     int    value_hold_secs;    /* condition must hold for N secs; 0 = fire immediately */
     time_t value_since;        /* when hold condition first became true; 0 = not active */
     int    value_hysteresis;   /* 1 = fired for this activation; reset when cond drops */
@@ -106,12 +107,13 @@ static void sched_fired(const char* rule_id, int trigger_index) {
 /*-----------------------------------------------------
  * Numeric value comparison helper
  *-----------------------------------------------------*/
-static int value_passes(double actual, const char* op, double threshold) {
-    if (strcmp(op, "gt")  == 0) return actual >  threshold;
-    if (strcmp(op, "lt")  == 0) return actual <  threshold;
-    if (strcmp(op, "gte") == 0) return actual >= threshold;
-    if (strcmp(op, "lte") == 0) return actual <= threshold;
-    if (strcmp(op, "eq")  == 0) return actual == threshold;
+static int value_passes(double actual, const char* op, double threshold, double threshold2) {
+    if (strcmp(op, "gt")      == 0) return actual >  threshold;
+    if (strcmp(op, "lt")      == 0) return actual <  threshold;
+    if (strcmp(op, "gte")     == 0) return actual >= threshold;
+    if (strcmp(op, "lte")     == 0) return actual <= threshold;
+    if (strcmp(op, "eq")      == 0) return actual == threshold;
+    if (strcmp(op, "between") == 0) return actual >= threshold && actual <= threshold2;
     return 0;
 }
 
@@ -253,6 +255,8 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             if (vop && vop[0]) snprintf(s->value_op, sizeof(s->value_op), "%s", vop);
             cJSON* vthresh = cJSON_GetObjectItem(trig, "value_threshold");
             if (vthresh) s->value_threshold = vthresh->valuedouble;
+            cJSON* vthresh2 = cJSON_GetObjectItem(trig, "value_threshold2");
+            if (vthresh2) s->value_threshold2 = vthresh2->valuedouble;
             cJSON* vhold = cJSON_GetObjectItem(trig, "value_hold_secs");
             if (vhold) s->value_hold_secs = (int)vhold->valuedouble;
 
@@ -378,7 +382,7 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
                 s->value_since = 0; s->value_hysteresis = 0;
                 continue;
             }
-            int passes = value_passes(vitem->valuedouble, s->value_op, s->value_threshold);
+            int passes = value_passes(vitem->valuedouble, s->value_op, s->value_threshold, s->value_threshold2);
             if (!passes) {
                 /* Condition dropped — reset so next activation can fire */
                 s->value_since = 0; s->value_hysteresis = 0;
