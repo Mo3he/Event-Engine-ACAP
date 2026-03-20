@@ -195,6 +195,14 @@ function parseVapixEventCatalog(xmlText) {
 function findCatalogMatch(t) {
   if (!vapixEventCatalog || !vapixEventCatalog.length) return -1;
   const keys = ['topic0','topic1','topic2','topic3'];
+  /* Topics may be stored as {topicN: {ns: val}} (object form from saved JSON /
+   * applyVapixEvent) or as {topicN_ns, topicN_val} flat keys (after
+   * collectTriggerRow re-reads form inputs).  Normalise to object form. */
+  const getTopic = k => {
+    if (t[k]) return t[k];
+    if (t[`${k}_val`]) return { [t[`${k}_ns`] || '']: t[`${k}_val`] };
+    return null;
+  };
   const cmp = (a, b) => {
     if (!a && !b) return true;
     if (!a || !b) return false;
@@ -202,12 +210,31 @@ function findCatalogMatch(t) {
     return ak === bk && a[ak] === b[bk];
   };
   /* Exact match first */
-  let idx = vapixEventCatalog.findIndex(ev => keys.every(k => cmp(ev.topics[k], t[k])));
+  let idx = vapixEventCatalog.findIndex(ev => keys.every(k => cmp(ev.topics[k], getTopic(k))));
   if (idx >= 0) return idx;
   /* Prefix match: trigger has fewer topic levels than catalog entry */
   return vapixEventCatalog.findIndex(ev =>
-    keys.every(k => !t[k] || cmp(ev.topics[k], t[k]))
+    keys.every(k => !getTopic(k) || cmp(ev.topics[k], getTopic(k)))
   );
+}
+
+function applyVapixEventAction(sel) {
+  /* Called from the vapix_query action dropdown — updates the hidden topic inputs */
+  const idx = parseInt(sel.value);
+  const ev = vapixEventCatalog && vapixEventCatalog[idx];
+  if (!ev) return;
+  const row = sel.closest('.tca-row');
+  ['topic0','topic1','topic2','topic3'].forEach(k => {
+    const nsEl  = row.querySelector(`[data-k="${k}_ns"]`);
+    const valEl = row.querySelector(`[data-k="${k}_val"]`);
+    if (!nsEl || !valEl) return;
+    if (ev.topics[k]) {
+      nsEl.value  = Object.keys(ev.topics[k])[0]   || '';
+      valEl.value = Object.values(ev.topics[k])[0] || '';
+    } else {
+      nsEl.value = ''; valEl.value = '';
+    }
+  });
 }
 
 function applyVapixEvent(rowIdx, idx) {
@@ -451,8 +478,13 @@ function triggerTypeOptions(selected) {
 function triggerFields(t, rowIdx) {
   const type = t.type || 'vapix_event';
   if (type === 'vapix_event') {
-    const ns  = k => t[k] ? Object.keys(t[k])[0]   || '' : '';
-    const val = k => t[k] ? Object.values(t[k])[0] || '' : '';
+    /* Topic data may be in object form {ns:val} (from applyVapixEvent / saved JSON)
+     * or in flat form topic0_ns / topic0_val (after collectTriggerRow reads form inputs).
+     * Handle both so rerenderTrigger doesn't lose the selected event. */
+    const ns  = k => t[`${k}_ns`]  !== undefined ? t[`${k}_ns`]
+                   : (t[k] ? Object.keys(t[k])[0]   || '' : '');
+    const val = k => t[`${k}_val`] !== undefined ? t[`${k}_val`]
+                   : (t[k] ? Object.values(t[k])[0] || '' : '');
     /* Hidden inputs so normalizeTrigger can still read topic values */
     const hiddenTopics = ['topic0','topic1','topic2','topic3'].map(k =>
       `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
@@ -469,26 +501,62 @@ function triggerFields(t, rowIdx) {
 
     const matchIdx  = findCatalogMatch(t);
     const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys : [];
+
+    /* Determine current condition type from saved fields */
+    const condType  = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : 'none'));
     const filterKey = t.filter_key || '';
     const filterVal = t.filter_value;
+    const valueKey  = t.value_key  || (dataKeys[0] || '');
+    const valueOp   = t.value_op   || 'gt';
+    const valueThr  = t.value_threshold !== undefined ? t.value_threshold : '';
+    const valueHold = t.value_hold_secs || 0;
 
-    const filterRow = dataKeys.length ? `
+    const condRow = dataKeys.length ? `
     <div class="form-row">
       <div class="form-group">
-        <label>Condition <span style="opacity:.6">(optional — only fire when…)</span></label>
+        <label>Value Condition <span style="opacity:.6">(optional — only fire when…)</span></label>
+        <select data-k="cond_type" onchange="rerenderTrigger(this)" style="margin-bottom:8px">
+          <option value="none"    ${condType==='none'    ?'selected':''}>Fire on every event</option>
+          <option value="boolean" ${condType==='boolean' ?'selected':''}>Boolean match (true / false)</option>
+          <option value="numeric" ${condType==='numeric' ?'selected':''}>Numeric threshold</option>
+        </select>
+        ${condType === 'boolean' ? `
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select data-k="filter_key">
-            <option value="">— no condition —</option>
+            <option value="">— pick field —</option>
             ${dataKeys.map(k =>
               `<option value="${escHtml(k)}" ${filterKey===k?'selected':''}>${escHtml(k)}</option>`
             ).join('')}
           </select>
           <select data-k="filter_value">
-            <option value="" ${filterVal==null?'selected':''}>= any value</option>
-            <option value="true"  ${filterVal===true ?'selected':''}>= true</option>
-            <option value="false" ${filterVal===false?'selected':''}>= false</option>
+            <option value="true"  ${filterVal===true ||filterVal==='true' ?'selected':''}>= true</option>
+            <option value="false" ${filterVal===false||filterVal==='false'?'selected':''}>= false</option>
           </select>
+        </div>` : ''}
+        ${condType === 'numeric' ? `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-k="value_key">
+            ${dataKeys.map(k =>
+              `<option value="${escHtml(k)}" ${valueKey===k?'selected':''}>${escHtml(k)}</option>`
+            ).join('')}
+          </select>
+          <select data-k="value_op">
+            <option value="gt"  ${valueOp==='gt' ?'selected':''}>is above</option>
+            <option value="lt"  ${valueOp==='lt' ?'selected':''}>is below</option>
+            <option value="gte" ${valueOp==='gte'?'selected':''}>is above or equal to</option>
+            <option value="lte" ${valueOp==='lte'?'selected':''}>is below or equal to</option>
+            <option value="eq"  ${valueOp==='eq' ?'selected':''}>equals</option>
+          </select>
+          <input type="number" data-k="value_threshold" step="any"
+                 value="${escHtml(String(valueThr))}" placeholder="0"
+                 style="width:90px">
         </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <span style="opacity:.7;font-size:12px">Hold for at least</span>
+          <input type="number" data-k="value_hold_secs" min="0" step="1"
+                 value="${valueHold}" style="width:70px">
+          <span style="opacity:.7;font-size:12px">seconds (0 = fire immediately)</span>
+        </div>` : ''}
       </div>
     </div>` : '';
 
@@ -507,7 +575,7 @@ function triggerFields(t, rowIdx) {
           : `<div class="form-hint">Choose which camera event fires this rule.</div>`}
       </div>
     </div>
-    ${filterRow}`;
+    ${condRow}`;
   }
   if (type === 'http_webhook') {
     const tok = t.token || generateToken();
@@ -820,6 +888,7 @@ const ACTION_TYPES = [
   { value: 'io_output',         label: 'I/O Output' },
   { value: 'audio_clip',        label: 'Audio Clip' },
   { value: 'send_syslog',       label: 'Send Syslog' },
+  { value: 'vapix_query',       label: 'VAPIX Event Query' },
   { value: 'fire_vapix_event',  label: 'Fire VAPIX Event' },
   { value: 'delay',             label: 'Delay' },
   { value: 'set_variable',      label: 'Set Variable' },
@@ -1124,6 +1193,39 @@ function actionFields(a) {
         </select>
       </div>
     </div>`;
+  if (type === 'vapix_query') {
+    /* Hidden topic inputs — mirroring the trigger pattern */
+    const ns  = k => a[k] ? Object.keys(a[k])[0]   || '' : '';
+    const val = k => a[k] ? Object.values(a[k])[0] || '' : '';
+    const hiddenTopics = ['topic0','topic1','topic2','topic3'].map(k =>
+      `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
+      `<input type="hidden" data-k="${k}_val" value="${escHtml(val(k))}">`
+    ).join('');
+    const matchIdx = vapixEventCatalog
+      ? vapixEventCatalog.findIndex((ev, _i) => {
+          const keys = ['topic0','topic1','topic2','topic3'];
+          const cmp = (x, y) => {
+            if (!x && !y) return true; if (!x || !y) return false;
+            const ak = Object.keys(x)[0], bk = Object.keys(y)[0];
+            return ak === bk && x[ak] === y[bk];
+          };
+          return keys.every(k => cmp(ev.topics[k], a[k]));
+        })
+      : -1;
+    return `${hiddenTopics}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Camera Event to Query</label>
+        <select onchange="applyVapixEventAction(this)">
+          <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
+          ${(vapixEventCatalog || []).map((ev, i) =>
+            `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
+          ).join('')}
+        </select>
+        <div class="form-hint">Fetches the latest data from this event and injects it as <code>{{trigger.FIELD}}</code> tokens for all subsequent actions in this rule. Useful with a Schedule trigger to poll current sensor values on demand.</div>
+      </div>
+    </div>`;
+  }
   if (type === 'fire_vapix_event') return `
     <div class="form-row">
       <div class="form-group">
@@ -1271,9 +1373,18 @@ function normalizeTrigger(t) {
     if (t.topic1_val) out.topic1 = { [t.topic1_ns || '']: t.topic1_val };
     if (t.topic2_val) out.topic2 = { [t.topic2_ns || '']: t.topic2_val };
     if (t.topic3_val) out.topic3 = { [t.topic3_ns || '']: t.topic3_val };
-    if (t.filter_key) out.filter_key = t.filter_key;
-    if (t.filter_value === 'true') out.filter_value = true;
-    else if (t.filter_value === 'false') out.filter_value = false;
+    const condType = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : 'none'));
+    if (condType === 'boolean') {
+      if (t.filter_key) out.filter_key = t.filter_key;
+      if (t.filter_value === 'true' || t.filter_value === true)   out.filter_value = true;
+      else if (t.filter_value === 'false' || t.filter_value === false) out.filter_value = false;
+    } else if (condType === 'numeric') {
+      if (t.value_key) out.value_key = t.value_key;
+      out.value_op        = t.value_op || 'gt';
+      out.value_threshold = parseFloat(t.value_threshold) || 0;
+      const hold = parseInt(t.value_hold_secs) || 0;
+      if (hold > 0) out.value_hold_secs = hold;
+    }
     if (t.type === 'io_input') { out.port = parseInt(t.port) || 1; out.edge = t.edge || 'rising'; }
   } else if (t.type === 'http_webhook') {
     out.token = t.token || '';
@@ -1337,6 +1448,13 @@ function normalizeAction(a) {
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
     out.qos    = parseInt(a.qos) || 0;
+  }
+  if (a.type === 'vapix_query') {
+    /* Reconstruct topic0-3 objects from the hidden _ns / _val fields */
+    ['topic0','topic1','topic2','topic3'].forEach(k => {
+      const v = a[`${k}_val`];
+      if (v) out[k] = { [a[`${k}_ns`] || '']: v };
+    });
   }
   return out;
 }

@@ -52,6 +52,15 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
 /* Called every 1s from main loop — checks counter threshold triggers */
 void Triggers_Tick(void);
 
+/* Register a passive subscription for a vapix_query action (caches data; never fires rules).
+ * action_cfg must contain topic0/topic1/topic2/topic3 keys identical to a VAPIX trigger.
+ * Must be called from the GMainLoop thread. */
+void Triggers_Subscribe_Passive(const char* rule_id, int action_idx, cJSON* action_cfg);
+
+/* Return the last-seen event data cached by a passive subscription matching topic_cfg.
+ * Returns a borrowed reference (do not free); NULL if not yet received. */
+cJSON* Triggers_Get_Cached(cJSON* topic_cfg);
+
 /* Returns catalog of subscribable trigger types for /triggers API */
 cJSON* Triggers_Catalog(void);
 

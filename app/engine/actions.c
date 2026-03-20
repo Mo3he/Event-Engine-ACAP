@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "actions.h"
+#include "triggers.h"
 #include "variables.h"
 #include "mqtt_client.h"
 #include "../ACAP.h"
@@ -463,6 +464,24 @@ static void action_run_rule(cJSON* cfg) {
     if (rid) RuleEngine_Dispatch_RuleFired(rid);
 }
 
+/* vapix_query — fetch cached VAPIX event data and inject into trigger_data
+ * so subsequent actions in the same rule can use {{trigger.FIELD}} tokens.
+ * Requires a passive subscription to be active (registered at rule load time). */
+static void action_vapix_query(cJSON* cfg, cJSON* trigger_data) {
+    cJSON* cached = Triggers_Get_Cached(cfg);
+    if (!cached) {
+        LOG_WARN("vapix_query: no cached data yet (event may not have fired since startup)");
+        return;
+    }
+    cJSON* item;
+    cJSON_ArrayForEach(item, cached) {
+        if (!item->string) continue;
+        /* Overwrite with latest data so subsequent actions get fresh values */
+        cJSON_DeleteItemFromObject(trigger_data, item->string);
+        cJSON_AddItemToObject(trigger_data, item->string, cJSON_Duplicate(item, 1));
+    }
+}
+
 /*-----------------------------------------------------
  * Async delay support
  *-----------------------------------------------------*/
@@ -526,6 +545,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "increment_counter") == 0) action_increment_counter(action);
         else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(action, trigger_data);
         else if (strcmp(type, "run_rule")          == 0) action_run_rule(action);
+        else if (strcmp(type, "vapix_query")       == 0) action_vapix_query(action, trigger_data);
         else LOG_WARN("unknown action type '%s'", type);
     }
 }

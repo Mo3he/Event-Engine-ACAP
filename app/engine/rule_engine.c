@@ -190,10 +190,20 @@ typedef struct { char rule_id[37]; cJSON* triggers; } SubscribeWork;
 static gboolean do_subscribe(gpointer data) {
     SubscribeWork* w = (SubscribeWork*)data;
     pthread_mutex_lock(&store_lock);
-    /* Find the rule to get the current triggers JSON */
     for (int i = 0; i < rule_count; i++) {
         if (strcmp(rules[i].id, w->rule_id) == 0) {
             Triggers_Subscribe_Rule(rules[i].id, rules[i].triggers_json);
+
+            /* Register passive subscriptions for any vapix_query actions so
+             * their event data is cached and available when the action runs. */
+            int aidx = 0;
+            cJSON* action;
+            cJSON_ArrayForEach(action, rules[i].actions_json) {
+                const char* atype = cJSON_GetStringValue(cJSON_GetObjectItem(action, "type"));
+                if (atype && strcmp(atype, "vapix_query") == 0)
+                    Triggers_Subscribe_Passive(rules[i].id, aidx, action);
+                aidx++;
+            }
             break;
         }
     }

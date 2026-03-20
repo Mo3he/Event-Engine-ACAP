@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <time.h>
 
 #include "triggers.h"
 #include "scheduler.h"
@@ -48,8 +49,20 @@ typedef struct {
 
     /* vapix_event fields — stored as JSON for matching */
     cJSON* topic_filter;   /* {topic0:{ns:val}, topic1:{ns:val}, ...} */
-    char   filter_key[64]; /* e.g. "active" */
+    char   filter_key[64]; /* e.g. "active" (boolean filter) */
     int    filter_value;   /* expected bool value (-1 = don't filter) */
+
+    /* Numeric value threshold filter (vapix_event only) */
+    char   value_key[64];      /* field name to compare, e.g. "MaxTemp" */
+    char   value_op[8];        /* "gt", "lt", "gte", "lte", "eq" */
+    double value_threshold;    /* comparison value */
+    int    value_hold_secs;    /* condition must hold for N secs; 0 = fire immediately */
+    time_t value_since;        /* when hold condition first became true; 0 = not active */
+    int    value_hysteresis;   /* 1 = fired for this activation; reset when cond drops */
+
+    /* Passive subscription — caches data but never fires rules */
+    int    passive;
+    cJSON* cached_data;        /* last-seen event data; we own this */
 
     /* http_webhook */
     char   token[128];
@@ -85,6 +98,18 @@ static void sched_fired(const char* rule_id, int trigger_index) {
     cJSON_AddStringToObject(data, "type", "schedule");
     fire_fn(rule_id, trigger_index, data);
     cJSON_Delete(data);
+}
+
+/*-----------------------------------------------------
+ * Numeric value comparison helper
+ *-----------------------------------------------------*/
+static int value_passes(double actual, const char* op, double threshold) {
+    if (strcmp(op, "gt")  == 0) return actual >  threshold;
+    if (strcmp(op, "lt")  == 0) return actual <  threshold;
+    if (strcmp(op, "gte") == 0) return actual >= threshold;
+    if (strcmp(op, "lte") == 0) return actual <= threshold;
+    if (strcmp(op, "eq")  == 0) return actual == threshold;
+    return 0;
 }
 
 /*-----------------------------------------------------
@@ -153,8 +178,8 @@ void Triggers_Cleanup(void) {
     for (int i = 0; i < sub_count; i++) {
         if (subs[i].acap_subscription_id > 0)
             ACAP_EVENTS_Unsubscribe(subs[i].acap_subscription_id);
-        if (subs[i].topic_filter)
-            cJSON_Delete(subs[i].topic_filter);
+        if (subs[i].topic_filter) cJSON_Delete(subs[i].topic_filter);
+        if (subs[i].cached_data)  cJSON_Delete(subs[i].cached_data);
     }
     sub_count = 0;
     Scheduler_Cleanup();
@@ -169,8 +194,8 @@ void Triggers_Unsubscribe_Rule(const char* rule_id) {
         if (strcmp(subs[i].rule_id, rule_id) == 0) {
             if (subs[i].acap_subscription_id > 0)
                 ACAP_EVENTS_Unsubscribe(subs[i].acap_subscription_id);
-            if (subs[i].topic_filter)
-                cJSON_Delete(subs[i].topic_filter);
+            if (subs[i].topic_filter) cJSON_Delete(subs[i].topic_filter);
+            if (subs[i].cached_data)  cJSON_Delete(subs[i].cached_data);
             if (i < sub_count - 1)
                 subs[i] = subs[sub_count - 1];
             sub_count--;
@@ -212,11 +237,21 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             }
             s->topic_filter = tf;
 
-            /* Optional value filter */
+            /* Optional boolean value filter */
             const char* fkey = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "filter_key"));
             if (fkey) snprintf(s->filter_key, sizeof(s->filter_key), "%s", fkey);
             cJSON* fval = cJSON_GetObjectItem(trig, "filter_value");
             if (fval) s->filter_value = cJSON_IsTrue(fval) ? 1 : 0;
+
+            /* Numeric value threshold filter */
+            const char* vkey = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "value_key"));
+            if (vkey && vkey[0]) snprintf(s->value_key, sizeof(s->value_key), "%s", vkey);
+            const char* vop = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "value_op"));
+            if (vop && vop[0]) snprintf(s->value_op, sizeof(s->value_op), "%s", vop);
+            cJSON* vthresh = cJSON_GetObjectItem(trig, "value_threshold");
+            if (vthresh) s->value_threshold = vthresh->valuedouble;
+            cJSON* vhold = cJSON_GetObjectItem(trig, "value_hold_secs");
+            if (vhold) s->value_hold_secs = (int)vhold->valuedouble;
 
             if (s->type == TRIG_IO_INPUT) {
                 cJSON* port_j = cJSON_GetObjectItem(trig, "port");
@@ -286,12 +321,23 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
         if (s->type != TRIG_VAPIX_EVENT && s->type != TRIG_IO_INPUT) continue;
         if (!event_topic_matches(s, event)) continue;
 
-        /* Optional value filter — data fields are at root level of event */
+        /* Update cache for all matching subs (passive and active).
+         * Flatten root-level event fields (excluding the "event" path key). */
+        cJSON_Delete(s->cached_data);
+        s->cached_data = cJSON_CreateObject();
+        cJSON* item;
+        cJSON_ArrayForEach(item, event) {
+            if (!item->string || strcmp(item->string, "event") == 0) continue;
+            cJSON_AddItemToObject(s->cached_data, item->string, cJSON_Duplicate(item, 1));
+        }
+
+        /* Passive subscriptions only cache — they never fire rules */
+        if (s->passive) continue;
+
+        /* Boolean value filter */
         if (s->filter_key[0] && s->filter_value >= 0) {
             cJSON* fv = cJSON_GetObjectItem(event, s->filter_key);
-            if (!fv) continue;
-            int actual = cJSON_IsTrue(fv) ? 1 : 0;
-            if (actual != s->filter_value) continue;
+            if (!fv || (cJSON_IsTrue(fv) ? 1 : 0) != s->filter_value) continue;
         }
 
         /* IO edge filter */
@@ -299,22 +345,44 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
             cJSON* st = cJSON_GetObjectItem(event, "state");
             if (st) {
                 int active = cJSON_IsTrue(st) ? 1 : 0;
-                if (s->io_edge == 0 && !active) continue; /* rising = want active */
+                if (s->io_edge == 0 && !active) continue; /* rising  = want active   */
                 if (s->io_edge == 1 &&  active) continue; /* falling = want inactive */
             }
         }
 
-        /* Build trigger_data for template engine.
-         * ACAP_EVENTS_Parse places all data fields at the root level of the event
-         * JSON (no nested "data" key), so flatten everything from root directly. */
+        /* Numeric value threshold filter */
+        if (s->value_key[0] && s->value_op[0]) {
+            cJSON* vitem = cJSON_GetObjectItem(event, s->value_key);
+            if (!vitem || !cJSON_IsNumber(vitem)) {
+                /* Field absent or non-numeric — reset and skip */
+                s->value_since = 0; s->value_hysteresis = 0;
+                continue;
+            }
+            int passes = value_passes(vitem->valuedouble, s->value_op, s->value_threshold);
+            if (s->value_hold_secs > 0) {
+                if (!passes) {
+                    /* Condition dropped — reset so next activation can fire */
+                    s->value_since = 0; s->value_hysteresis = 0;
+                    continue;
+                }
+                if (s->value_hysteresis) continue; /* already fired; waiting for reset */
+                if (!s->value_since) { s->value_since = time(NULL); continue; }
+                if ((time(NULL) - s->value_since) < (time_t)s->value_hold_secs) continue;
+                /* Hold duration reached — fire once and latch */
+                s->value_hysteresis = 1;
+            } else {
+                if (!passes) continue; /* fire every time condition passes (no hold) */
+            }
+        }
+
+        /* Build trigger_data from the cache we just populated */
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type", s->type == TRIG_IO_INPUT ? "io_input" : "vapix_event");
-        cJSON* item;
-        cJSON_ArrayForEach(item, event) {
-            if (!item->string) continue;
-            if (strcmp(item->string, "event") == 0) continue; /* skip topic path meta key */
-            if (!cJSON_GetObjectItem(tdata, item->string))
-                cJSON_AddItemToObject(tdata, item->string, cJSON_Duplicate(item, 1));
+        cJSON* ci;
+        cJSON_ArrayForEach(ci, s->cached_data) {
+            if (!ci->string) continue;
+            if (!cJSON_GetObjectItem(tdata, ci->string))
+                cJSON_AddItemToObject(tdata, ci->string, cJSON_Duplicate(ci, 1));
         }
 
         fire_fn(s->rule_id, s->trigger_index, tdata);
@@ -396,6 +464,75 @@ void Triggers_Tick(void) {
             s->counter_hysteresis = 0; /* reset — allow re-firing */
         }
     }
+}
+
+/*-----------------------------------------------------
+ * Passive subscription helpers (for vapix_query actions)
+ *-----------------------------------------------------*/
+
+void Triggers_Subscribe_Passive(const char* rule_id, int action_idx, cJSON* action_cfg) {
+    if (!rule_id || !action_cfg || sub_count >= MAX_SUBS) return;
+
+    Subscription* s = &subs[sub_count];
+    memset(s, 0, sizeof(Subscription));
+    snprintf(s->rule_id, sizeof(s->rule_id), "%s", rule_id);
+    s->type         = TRIG_VAPIX_EVENT;
+    s->trigger_index = -1;
+    s->filter_value  = -1;
+    s->passive       = 1;
+
+    cJSON* tf = cJSON_CreateObject();
+    const char* tkeys[] = {"topic0","topic1","topic2","topic3",NULL};
+    for (int k = 0; tkeys[k]; k++) {
+        cJSON* t = cJSON_GetObjectItem(action_cfg, tkeys[k]);
+        if (t) cJSON_AddItemToObject(tf, tkeys[k], cJSON_Duplicate(t, 1));
+    }
+    s->topic_filter = tf;
+
+    char name[128];
+    snprintf(name, sizeof(name), "passive_%s_%d", rule_id, action_idx);
+    cJSON* decl = cJSON_CreateObject();
+    cJSON_AddStringToObject(decl, "name", name);
+    for (int k = 0; tkeys[k]; k++) {
+        cJSON* t = cJSON_GetObjectItem(action_cfg, tkeys[k]);
+        if (t) cJSON_AddItemToObject(decl, tkeys[k], cJSON_Duplicate(t, 1));
+    }
+    int sub_id = ACAP_EVENTS_Subscribe(decl, NULL);
+    cJSON_Delete(decl);
+    s->acap_subscription_id = sub_id;
+    if (!sub_id) LOG_WARN("passive subscribe failed for rule %s action %d", rule_id, action_idx);
+
+    sub_count++;
+}
+
+cJSON* Triggers_Get_Cached(cJSON* topic_cfg) {
+    if (!topic_cfg) return NULL;
+
+    /* Build the expected path string from the requested config */
+    char expected[200] = "";
+    const char* keys[] = {"topic0","topic1","topic2","topic3",NULL};
+    for (int i = 0; keys[i]; i++) {
+        cJSON* t = cJSON_GetObjectItem(topic_cfg, keys[i]);
+        if (!t || !t->child || !t->child->valuestring || !t->child->valuestring[0]) continue;
+        if (expected[0]) strncat(expected, "/", sizeof(expected) - strlen(expected) - 1);
+        strncat(expected, t->child->valuestring, sizeof(expected) - strlen(expected) - 1);
+    }
+
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (!s->passive || !s->cached_data || !s->topic_filter) continue;
+
+        /* Build this passive sub's path and compare */
+        char sub_path[200] = "";
+        for (int k = 0; keys[k]; k++) {
+            cJSON* t = cJSON_GetObjectItem(s->topic_filter, keys[k]);
+            if (!t || !t->child || !t->child->valuestring || !t->child->valuestring[0]) continue;
+            if (sub_path[0]) strncat(sub_path, "/", sizeof(sub_path) - strlen(sub_path) - 1);
+            strncat(sub_path, t->child->valuestring, sizeof(sub_path) - strlen(sub_path) - 1);
+        }
+        if (strcmp(expected, sub_path) == 0) return s->cached_data; /* borrowed ref */
+    }
+    return NULL;
 }
 
 cJSON* Triggers_Catalog(void) {
