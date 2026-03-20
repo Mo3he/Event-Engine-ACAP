@@ -1,6 +1,6 @@
 # Event Engine — ACAP for Axis Cameras
 
-A powerful IFTTT-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks — and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, and more.
+A powerful IFTTT-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
 
 ---
 
@@ -8,9 +8,9 @@ A powerful IFTTT-style automation engine that runs directly on your Axis camera.
 
 Event Engine replaces and extends the built-in Axis event system with a flexible **If This Then That** rule engine. Each rule has:
 
-- **Triggers** — what starts the rule (one or more, evaluated as OR or AND)
-- **Conditions** — optional checks that must pass before actions run
-- **Actions** — what happens when the rule fires (one or more, run in sequence)
+- **Triggers** - what starts the rule (one or more, evaluated as OR or AND)
+- **Conditions** - optional checks that must pass before actions run
+- **Actions** - what happens when the rule fires (one or more, run in sequence)
 
 Rules are built in a clean web UI and take effect immediately — no reboot required.
 
@@ -20,68 +20,77 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 
 | Type | Description |
 |------|-------------|
-| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, etc.) selected from a live dropdown. Supports an optional numeric threshold condition (e.g. fire only when CO2 is above 1000 ppm) with optional hold duration to require the condition to persist for N seconds before triggering |
+| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition — boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, or daily time with day-of-week selection |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token |
-| **I/O Input** | Digital input port state change (rising/falling edge or level) |
-| **Counter Threshold** | When a named counter crosses a value |
-| **Rule Chain** | Another rule fires this one |
+| **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
+| **Counter Threshold** | When a named counter crosses a configured value |
+| **Rule Chain** | Fires when another named rule executes |
 
 ## Conditions
 
 | Type | Description |
 |------|-------------|
 | **Time Window** | Only allow firing between two times of day |
-| **I/O State** | Check current state of an I/O port |
+| **I/O State** | Check the current state of an I/O port |
 | **Counter Compare** | Compare a counter value against a threshold |
 | **Variable Compare** | Compare a named variable against a value |
-| **HTTP Check** | Make an HTTP request; pass only if response matches expected value |
+| **HTTP Check** | Make an HTTP request; pass only if the response matches an expected value |
 
 ## Actions
 
 | Type | Description |
 |------|-------------|
-| **MQTT Publish** | Publish a message to a topic with configurable QoS |
 | **HTTP Request** | GET, POST, PUT, or DELETE to any URL |
-| **Set Variable** | Create or update a named persistent variable |
-| **Increment Counter** | Add a value to a named counter |
+| **MQTT Publish** | Publish a message to a topic with configurable QoS and retain flag |
 | **Recording** | Start or stop a recording |
-| **Overlay Text** | Write text to the video stream (with optional auto-remove duration) |
+| **Overlay Text** | Write text to the video stream with an optional auto-remove duration |
 | **PTZ Preset** | Move the camera to a named preset position |
 | **I/O Output** | Set a digital output port high or low |
-| **Audio Clip** | Play a media clip on the camera |
-| **Siren / Light** | Activate or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
-| **VAPIX Event Query** | Fetch the latest data from a VAPIX event and inject it as template tokens for subsequent actions - useful for polling current sensor values on a schedule |
-| **Fire Rule** | Immediately trigger another rule |
-| **Delay** | Pause the action sequence for N seconds |
-| **VAPIX Event** | Fire a custom VAPIX event (visible to other Axis apps) |
+| **Audio Clip** | Play a named media clip on the camera |
+| **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
+| **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions — useful for polling sensor values on a schedule trigger |
+| **Set Variable** | Create or update a named persistent variable |
+| **Increment Counter** | Add or subtract a value from a named counter |
+| **Fire Rule** | Immediately trigger another rule by name |
+| **Delay** | Pause the action sequence for N seconds before continuing |
+| **Fire VAPIX Event** | Fire a custom VAPIX event visible to other Axis applications |
 | **Syslog** | Write a message to the system log |
 
 ---
 
-## Templates
+## Rule Settings
 
-Action fields (URL, body, MQTT payload, overlay text, etc.) support `{{token}}` substitution. Available tokens:
+Each rule has two optional execution controls:
 
-| Token | Value |
-|-------|-------|
+- **Cooldown** — minimum seconds between firings. Prevents rapid re-firing when a trigger fires repeatedly.
+- **Max Executions** — limit how many times the rule can fire, with a configurable period: per minute, per hour, per day, or lifetime total. The period counter resets automatically; the lifetime counter resets when the rule is saved.
+
+---
+
+## Dynamic Variables
+
+Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) support `{{variable}}` substitution. Use the **Insert variable** button in the rule editor to pick from available values.
+
+| Variable | Value |
+|----------|-------|
 | `{{timestamp}}` | ISO 8601 UTC timestamp |
 | `{{date}}` | YYYY-MM-DD |
 | `{{time}}` | HH:MM:SS |
 | `{{camera.serial}}` | Camera serial number |
 | `{{camera.model}}` | Camera model name |
 | `{{camera.ip}}` | Camera IP address |
-| `{{trigger_json}}` | Full trigger event data as a JSON string |
-| `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.Temperature}}`) |
+| `{{trigger_json}}` | Full trigger event data as a compact JSON string |
+| `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.CO2}}`) |
 | `{{var.NAME}}` | Value of a named variable |
 | `{{counter.NAME}}` | Value of a named counter |
 
-The rule editor shows which `{{trigger.*}}` keys are available based on the selected trigger type. Use `{{trigger_json}}` to publish all trigger data at once without picking individual fields.
+The rule editor shows which `{{trigger.*}}` keys are available for the selected trigger type.
 
-**Example — MQTT payload using trigger data:**
+**Example — MQTT payload with sensor data:**
 ```
-Camera {{camera.serial}} fired at {{timestamp}}: {{trigger_json}}
+Camera {{camera.serial}} at {{timestamp}}: {{trigger_json}}
 ```
 
 ---
@@ -104,10 +113,10 @@ Configure broker, port, credentials, client ID, and a base topic in the **MQTT**
 
 Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 
-- **Rules** — create, edit, duplicate, enable/disable, and delete rules
-- **Status** — engine status, MQTT connection state, device info, export/import
-- **Variables** — view and manage named variables and counters
-- **Event Log** — per-rule firing history with timestamps and result codes
+- **Rules** - create, edit, duplicate, enable/disable, and delete rules
+- **Status** - engine status, MQTT connection state, device info, export/import
+- **Variables** - view and manage named variables and counters
+- **Event Log** - per-rule firing history with timestamps and result codes
 
 ---
 
@@ -189,10 +198,10 @@ app/
 ├── manifest.json           # ACAP package manifest (schemaVersion 1.4.0)
 ├── Makefile
 ├── engine/
-│   ├── rule_engine.c       # Rule store, trigger dispatch, cooldown, chaining
-│   ├── triggers.c          # All trigger types — subscribe, match, extract data
+│   ├── rule_engine.c       # Rule store, trigger dispatch, cooldown, rate limiting
+│   ├── triggers.c          # All trigger types — subscribe, match, threshold, hold duration
 │   ├── conditions.c        # Condition evaluation
-│   ├── actions.c           # All action types + {{template}} engine
+│   ├── actions.c           # All action types + {{variable}} template engine
 │   ├── scheduler.c         # Cron, interval, and daily-time scheduler
 │   ├── mqtt_client.c       # MQTT 3.1.1 client over raw POSIX sockets
 │   ├── variables.c         # Named variables and counters (persistent)
