@@ -835,7 +835,7 @@ function actionTypeOptions(selected) {
 }
 
 function getTriggerTokens() {
-  const tokens = [];
+  const tokens = ['{{trigger_json}}'];  /* always available — full trigger data as JSON */
   for (const t of triggerRows) {
     if (t.type === 'vapix_event') {
       const idx = findCatalogMatch(t);

@@ -32,7 +32,8 @@ void Actions_Init(void) {
  *   {{camera.name}}      device model
  *   {{camera.serial}}    device serial
  *   {{camera.ip}}        device IPv4
- *   {{trigger.TYPE}}     top-level key from trigger_data
+ *   {{trigger.KEY}}      individual key from trigger_data (e.g. {{trigger.AverageTemp}})
+ *   {{trigger_json}}     all trigger data as a compact JSON object
  *   {{var.NAME}}         variable value
  *   {{counter.NAME}}     counter value
  *-----------------------------------------------------*/
@@ -68,7 +69,8 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
             }
 
             const char* replacement = NULL;
-            char tmp[256];
+            char  tmp[256];
+            char* dyn_replacement = NULL; /* malloc'd; freed after copying */
 
             if (strcmp(key, "timestamp") == 0) {
                 replacement = ACAP_DEVICE_ISOTime();
@@ -88,6 +90,15 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
                     if (cJSON_IsString(v)) replacement = v->valuestring;
                     else { cJSON_PrintPreallocated(v, tmp, sizeof(tmp), 0); replacement = tmp; }
                 }
+            } else if (strcmp(key, "trigger_json") == 0 && trigger_data) {
+                /* Serialize the full trigger data object, dropping the internal "type" key */
+                cJSON* copy = cJSON_Duplicate(trigger_data, 1);
+                if (copy) {
+                    cJSON_DeleteItemFromObject(copy, "type");
+                    dyn_replacement = cJSON_PrintUnformatted(copy);
+                    cJSON_Delete(copy);
+                    if (dyn_replacement) replacement = dyn_replacement;
+                }
             } else if (strncmp(key, "var.", 4) == 0) {
                 replacement = Variables_Get(key + 4);
             } else if (strncmp(key, "counter.", 8) == 0) {
@@ -104,6 +115,7 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
             memcpy(out + out_len, replacement, rlen);
             out_len += rlen;
             out[out_len] = '\0';
+            free(dyn_replacement);
             p = end + 2;
         } else {
             if (out_len + 2 > out_cap) {
