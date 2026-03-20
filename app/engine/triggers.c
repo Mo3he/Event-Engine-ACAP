@@ -359,20 +359,20 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
                 continue;
             }
             int passes = value_passes(vitem->valuedouble, s->value_op, s->value_threshold);
+            if (!passes) {
+                /* Condition dropped — reset so next activation can fire */
+                s->value_since = 0; s->value_hysteresis = 0;
+                continue;
+            }
+            /* Condition passes — apply hysteresis always so we fire once per activation */
+            if (s->value_hysteresis) continue; /* already fired; waiting for reset */
             if (s->value_hold_secs > 0) {
-                if (!passes) {
-                    /* Condition dropped — reset so next activation can fire */
-                    s->value_since = 0; s->value_hysteresis = 0;
-                    continue;
-                }
-                if (s->value_hysteresis) continue; /* already fired; waiting for reset */
+                /* Must hold for N seconds before firing */
                 if (!s->value_since) { s->value_since = time(NULL); continue; }
                 if ((time(NULL) - s->value_since) < (time_t)s->value_hold_secs) continue;
-                /* Hold duration reached — fire once and latch */
-                s->value_hysteresis = 1;
-            } else {
-                if (!passes) continue; /* fire every time condition passes (no hold) */
             }
+            /* Fire once and latch until condition clears */
+            s->value_hysteresis = 1;
         }
 
         /* Build trigger_data from the cache we just populated */
