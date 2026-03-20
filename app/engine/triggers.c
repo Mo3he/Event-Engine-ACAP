@@ -111,21 +111,30 @@ static cJSON* build_subscription_decl(const char* rule_id, int tidx, cJSON* cfg)
  *-----------------------------------------------------*/
 static int event_topic_matches(Subscription* s, cJSON* event) {
     if (!s->topic_filter) return 1; /* no filter = match all */
+
+    /* ACAP_EVENTS_Parse encodes topic levels into a single "event" path string
+     * (e.g. "VideoSource/Thermometry/TemperatureDetection") rather than as
+     * separate topic0/topic1/topic2 keys.  Build the expected path from the
+     * filter's topic values (local names only; namespace prefixes are ignored
+     * since they are lost during ACAP event parsing) and compare. */
+    cJSON* event_path = cJSON_GetObjectItem(event, "event");
+    if (!event_path || !event_path->valuestring) return 0;
+
+    char expected[200] = "";
     const char* keys[] = {"topic0", "topic1", "topic2", "topic3", NULL};
     for (int i = 0; keys[i]; i++) {
-        cJSON* expected = cJSON_GetObjectItem(s->topic_filter, keys[i]);
-        if (!expected) continue;
-        cJSON* actual = cJSON_GetObjectItem(event, keys[i]);
-        if (!actual) return 0;
-        /* expected is {"namespace": "value"} — compare each key */
-        cJSON* item;
-        cJSON_ArrayForEach(item, expected) {
-            cJSON* av = cJSON_GetObjectItem(actual, item->string);
-            if (!av || !av->valuestring) return 0;
-            if (strcmp(av->valuestring, item->valuestring) != 0) return 0;
-        }
+        cJSON* t = cJSON_GetObjectItem(s->topic_filter, keys[i]);
+        if (!t || !t->child || !t->child->valuestring || !t->child->valuestring[0]) continue;
+        if (expected[0]) strncat(expected, "/", sizeof(expected) - strlen(expected) - 1);
+        strncat(expected, t->child->valuestring, sizeof(expected) - strlen(expected) - 1);
     }
-    return 1;
+    /* Prefix match: if filter has fewer topic levels than the event, still match.
+     * e.g. filter "VideoSource/Thermometry" matches event path
+     * "VideoSource/Thermometry/TemperatureDetection". */
+    size_t elen = strlen(expected);
+    if (strncmp(event_path->valuestring, expected, elen) != 0) return 0;
+    char next = event_path->valuestring[elen];
+    return next == '\0' || next == '/';
 }
 
 /*-----------------------------------------------------
@@ -277,10 +286,9 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
         if (s->type != TRIG_VAPIX_EVENT && s->type != TRIG_IO_INPUT) continue;
         if (!event_topic_matches(s, event)) continue;
 
-        /* Optional value filter */
+        /* Optional value filter — data fields are at root level of event */
         if (s->filter_key[0] && s->filter_value >= 0) {
-            cJSON* data = cJSON_GetObjectItem(event, "data");
-            cJSON* fv   = data ? cJSON_GetObjectItem(data, s->filter_key) : NULL;
+            cJSON* fv = cJSON_GetObjectItem(event, s->filter_key);
             if (!fv) continue;
             int actual = cJSON_IsTrue(fv) ? 1 : 0;
             if (actual != s->filter_value) continue;
@@ -288,8 +296,7 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
 
         /* IO edge filter */
         if (s->type == TRIG_IO_INPUT && s->io_edge != 2) {
-            cJSON* data = cJSON_GetObjectItem(event, "data");
-            cJSON* st   = data ? cJSON_GetObjectItem(data, "state") : NULL;
+            cJSON* st = cJSON_GetObjectItem(event, "state");
             if (st) {
                 int active = cJSON_IsTrue(st) ? 1 : 0;
                 if (s->io_edge == 0 && !active) continue; /* rising = want active */
@@ -297,18 +304,17 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
             }
         }
 
-        /* Build trigger_data for template engine */
+        /* Build trigger_data for template engine.
+         * ACAP_EVENTS_Parse places all data fields at the root level of the event
+         * JSON (no nested "data" key), so flatten everything from root directly. */
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type", s->type == TRIG_IO_INPUT ? "io_input" : "vapix_event");
-        cJSON* ev_data = cJSON_GetObjectItem(event, "data");
-        if (ev_data) {
-            cJSON_AddItemToObject(tdata, "event_data", cJSON_Duplicate(ev_data, 1));
-            /* Flatten individual keys so {{trigger.KEY}} works (e.g. {{trigger.active}}) */
-            cJSON* item;
-            cJSON_ArrayForEach(item, ev_data) {
-                if (item->string && !cJSON_GetObjectItem(tdata, item->string))
-                    cJSON_AddItemToObject(tdata, item->string, cJSON_Duplicate(item, 1));
-            }
+        cJSON* item;
+        cJSON_ArrayForEach(item, event) {
+            if (!item->string) continue;
+            if (strcmp(item->string, "event") == 0) continue; /* skip topic path meta key */
+            if (!cJSON_GetObjectItem(tdata, item->string))
+                cJSON_AddItemToObject(tdata, item->string, cJSON_Duplicate(item, 1));
         }
 
         fire_fn(s->rule_id, s->trigger_index, tdata);

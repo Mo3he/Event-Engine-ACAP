@@ -823,7 +823,7 @@ function actionTypeOptions(selected) {
   ).join('');
 }
 
-function getTriggerTokenHint() {
+function getTriggerTokens() {
   const tokens = [];
   for (const t of triggerRows) {
     if (t.type === 'vapix_event') {
@@ -836,25 +836,62 @@ function getTriggerTokenHint() {
     } else if (t.type === 'mqtt_message') {
       tokens.push('{{trigger.topic}}', '{{trigger.payload}}');
     } else if (t.type === 'http_webhook') {
-      tokens.push('{{trigger.KEY}}');
+      tokens.push('{{trigger.source}}');
     } else if (t.type === 'counter_threshold') {
       tokens.push('{{trigger.counter}}', '{{trigger.value}}');
     } else if (t.type === 'io_input') {
       tokens.push('{{trigger.port}}', '{{trigger.state}}');
     }
   }
-  const triggerPart = tokens.length
-    ? [...new Set(tokens)].join(', ')
-    : '{{trigger.KEY}}';
-  const varPart = knownVarNames.length
-    ? knownVarNames.map(n => `{{var.${n}}}`).join(', ')
-    : '{{var.NAME}}';
-  return `<div class="form-hint">Supports: {{timestamp}}, {{date}}, {{camera.name}}, {{camera.serial}}, ${triggerPart}, ${varPart}, {{counter.NAME}}</div>`;
+  return [...new Set(tokens)];
+}
+
+function insertToken(sel) {
+  const token = sel.value;
+  if (!token) return;
+  sel.value = '';
+  const group = sel.closest('.form-group');
+  const target = group && (group.querySelector('textarea') || group.querySelector('input[type="text"]'));
+  if (!target) return;
+  const s = target.selectionStart, e = target.selectionEnd;
+  target.value = target.value.slice(0, s) + token + target.value.slice(e);
+  target.selectionStart = target.selectionEnd = s + token.length;
+  target.focus();
+}
+
+function getTokenInsertWidget() {
+  const triggerTokens = getTriggerTokens();
+  const triggerOpts = triggerTokens.length
+    ? `<optgroup label="Trigger">${triggerTokens.map(t => `<option value="${escHtml(t)}">${escHtml(t)}</option>`).join('')}</optgroup>`
+    : '';
+  const varOpts = knownVarNames.length
+    ? `<optgroup label="Variables">${knownVarNames.map(n => `<option value="{{var.${escHtml(n)}}}">{{var.${escHtml(n)}}}</option>`).join('')}</optgroup>`
+    : '';
+  return `<div class="form-hint" style="display:flex;align-items:center;gap:6px">
+    <select onchange="insertToken(this)" style="font-size:11px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:2px 6px;border-radius:4px;max-width:220px">
+      <option value="">Insert token…</option>
+      <optgroup label="Time">
+        <option value="{{timestamp}}">{{timestamp}}</option>
+        <option value="{{date}}">{{date}}</option>
+        <option value="{{time}}">{{time}}</option>
+      </optgroup>
+      <optgroup label="Camera">
+        <option value="{{camera.serial}}">{{camera.serial}}</option>
+        <option value="{{camera.model}}">{{camera.model}}</option>
+        <option value="{{camera.ip}}">{{camera.ip}}</option>
+      </optgroup>
+      ${triggerOpts}
+      ${varOpts}
+      <optgroup label="Counters">
+        <option value="{{counter.NAME}}">{{counter.NAME}}</option>
+      </optgroup>
+    </select>
+  </div>`;
 }
 
 function actionFields(a) {
   const type = a.type || 'http_request';
-  const hint = getTriggerTokenHint();
+  const hint = getTokenInsertWidget();
   if (type === 'http_request') return `
     <div class="form-row">
       <div class="form-group">
