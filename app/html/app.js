@@ -885,7 +885,7 @@ function toggleTokenPicker(btn) {
     groups.push({ label: 'Counters', tokens: ['{{counter.NAME}}'] });
 
   const row = (t) =>
-    `<button type="button" onclick="insertTokenFromPicker(${JSON.stringify(t)})"
+    `<button type="button" onclick="insertTokenFromPicker(${escHtml(JSON.stringify(t))})"
        style="display:block;width:100%;text-align:left;padding:4px 12px;font-size:11px;
               font-family:monospace;background:none;border:none;color:var(--text);
               cursor:pointer;white-space:nowrap"
