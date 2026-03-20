@@ -1014,7 +1014,8 @@ function toggleTokenPicker(btn) {
     'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);' +
     'border-radius:6px;max-height:240px;overflow-y:auto;min-width:200px;' +
     'box-shadow:0 4px 16px rgba(0,0,0,.5);padding:4px 0';
-  panel.innerHTML = groups.map(g => label(g.label) + g.tokens.map(row).join('')).join('');
+  const header = `<div style="padding:6px 12px 4px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border);margin-bottom:2px;">Click to insert into field above</div>`;
+  panel.innerHTML = header + groups.map(g => label(g.label) + g.tokens.map(row).join('')).join('');
   document.body.appendChild(panel);
 
   /* position below the button, flip left if near right edge */
@@ -1055,7 +1056,9 @@ function getTokenInsertWidget() {
   return `<div class="form-hint">
     <button type="button" class="btn btn-ghost btn-sm"
             onclick="toggleTokenPicker(this)"
-            style="font-size:11px;padding:2px 8px;font-family:monospace">{ } Insert token</button>
+            title="Insert a dynamic value placeholder — e.g. {{timestamp}} or {{trigger.Temperature}}"
+            style="font-size:11px;padding:2px 8px;font-family:monospace;">&#123;&#125; Insert variable</button>
+    <span style="margin-left:6px;opacity:0.6;font-size:11px;">— dynamically replaced when the rule fires</span>
   </div>`;
 }
 
