@@ -1,7 +1,7 @@
 [
   {
     "id": "00000000-0000-0000-0000-000000000001",
-    "name": "Motion → MQTT Alert",
+    "name": "(Example) Motion → MQTT Alert",
     "enabled": false,
     "triggers": [
       {
@@ -30,7 +30,7 @@
   },
   {
     "id": "00000000-0000-0000-0000-000000000002",
-    "name": "Webhook → HTTP POST with Payload",
+    "name": "(Example) Webhook → HTTP POST with Payload",
     "enabled": false,
     "triggers": [
       {
@@ -56,7 +56,7 @@
   },
   {
     "id": "00000000-0000-0000-0000-000000000003",
-    "name": "MQTT Message → Forward & Log",
+    "name": "(Example) MQTT Message → Forward & Log",
     "enabled": false,
     "triggers": [
       {
@@ -86,7 +86,7 @@
   },
   {
     "id": "00000000-0000-0000-0000-000000000004",
-    "name": "Schedule → Overlay Text",
+    "name": "(Example) Schedule → Overlay Text",
     "enabled": false,
     "triggers": [
       {
@@ -115,7 +115,7 @@
   },
   {
     "id": "00000000-0000-0000-0000-000000000005",
-    "name": "Motion → Start Recording (Business Hours)",
+    "name": "(Example) Motion → Start Recording (Business Hours)",
     "enabled": false,
     "triggers": [
       {
