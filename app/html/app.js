@@ -667,6 +667,11 @@ function triggerFields(t, rowIdx) {
           <option value="both"    ${t.edge==='both'    ? 'selected' : ''}>Both</option>
         </select>
       </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Hold duration (s)</label>
+        <input type="number" data-k="hold_secs" min="0" value="${t.hold_secs || 0}">
+        <div class="form-hint">Fire only if state holds for this many seconds (0 = immediate)</div>
+      </div>
     </div>`;
   if (type === 'counter_threshold') return `
     <div class="form-row">
@@ -1434,7 +1439,12 @@ function normalizeTrigger(t) {
       const hold = parseInt(t.value_hold_secs) || 0;
       if (hold > 0) out.value_hold_secs = hold;
     }
-    if (t.type === 'io_input') { out.port = parseInt(t.port) || 1; out.edge = t.edge || 'rising'; }
+    if (t.type === 'io_input') {
+      out.port = parseInt(t.port) || 1;
+      out.edge = t.edge || 'rising';
+      const hold = parseInt(t.hold_secs) || 0;
+      if (hold > 0) out.hold_secs = hold;
+    }
   } else if (t.type === 'http_webhook') {
     out.token = t.token || '';
   } else if (t.type === 'schedule') {

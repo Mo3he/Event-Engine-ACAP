@@ -69,7 +69,10 @@ typedef struct {
 
     /* io_input */
     int    io_port;
-    int    io_edge;    /* 0=rising, 1=falling, 2=both */
+    int    io_edge;       /* 0=rising, 1=falling, 2=both */
+    int    io_hold_secs;  /* must hold in triggered state for N secs; 0=fire immediately */
+    time_t io_since;      /* when edge first matched; 0=not pending */
+    int    io_last_state; /* last known state: 1=active, 0=inactive, -1=unknown */
 
     /* counter_threshold */
     char   counter_name[64];
@@ -260,6 +263,9 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
                 if (!edge || strcmp(edge, "rising") == 0) s->io_edge = 0;
                 else if (strcmp(edge, "falling") == 0) s->io_edge = 1;
                 else s->io_edge = 2;
+                cJSON* hold_j = cJSON_GetObjectItem(trig, "hold_secs");
+                if (hold_j) s->io_hold_secs = (int)hold_j->valuedouble;
+                s->io_last_state = -1;
             }
 
             /* Subscribe to VAPIX events */
@@ -340,14 +346,28 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
             if (!fv || (cJSON_IsTrue(fv) ? 1 : 0) != s->filter_value) continue;
         }
 
-        /* IO edge filter */
-        if (s->type == TRIG_IO_INPUT && s->io_edge != 2) {
+        /* IO edge filter + hold duration */
+        if (s->type == TRIG_IO_INPUT) {
             cJSON* st = cJSON_GetObjectItem(event, "state");
-            if (st) {
-                int active = cJSON_IsTrue(st) ? 1 : 0;
-                if (s->io_edge == 0 && !active) continue; /* rising  = want active   */
-                if (s->io_edge == 1 &&  active) continue; /* falling = want inactive */
+            int active = st ? (cJSON_IsTrue(st) ? 1 : 0) : -1;
+            if (active >= 0) s->io_last_state = active;
+
+            /* Check edge match */
+            int edge_matches = 1;
+            if (s->io_edge == 0 && active == 0) edge_matches = 0; /* rising  = want active   */
+            if (s->io_edge == 1 && active == 1) edge_matches = 0; /* falling = want inactive */
+
+            if (!edge_matches) {
+                s->io_since = 0; /* cancel any pending hold */
+                continue;
             }
+
+            if (s->io_hold_secs > 0) {
+                /* Start hold timer — actual fire happens in Triggers_Tick */
+                if (!s->io_since) s->io_since = time(NULL);
+                continue;
+            }
+            /* No hold — fall through to fire immediately */
         }
 
         /* Numeric value threshold filter */
@@ -445,6 +465,25 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
 
 void Triggers_Tick(void) {
     Scheduler_Tick();
+
+    /* IO input hold-duration triggers */
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->type != TRIG_IO_INPUT || !s->io_since || !s->io_hold_secs) continue;
+        if ((time(NULL) - s->io_since) < (time_t)s->io_hold_secs) continue;
+        s->io_since = 0; /* reset so it can re-arm on next edge */
+        cJSON* tdata = cJSON_CreateObject();
+        cJSON_AddStringToObject(tdata, "type", "io_input");
+        if (s->cached_data) {
+            cJSON* ci;
+            cJSON_ArrayForEach(ci, s->cached_data) {
+                if (ci->string && !cJSON_GetObjectItem(tdata, ci->string))
+                    cJSON_AddItemToObject(tdata, ci->string, cJSON_Duplicate(ci, 1));
+            }
+        }
+        fire_fn(s->rule_id, s->trigger_index, tdata);
+        cJSON_Delete(tdata);
+    }
 
     /* Counter threshold triggers */
     for (int i = 0; i < sub_count; i++) {
