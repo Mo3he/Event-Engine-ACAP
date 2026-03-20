@@ -1,0 +1,15 @@
+{
+  "engine": {
+    "max_log_entries": 200,
+    "webhook_token_required": true
+  },
+  "mqtt": {
+    "enabled": false,
+    "host": "",
+    "port": 1883,
+    "client_id": "acap_event_engine",
+    "username": "",
+    "password": "",
+    "keepalive": 60
+  }
+}

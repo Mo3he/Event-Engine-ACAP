@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1.7.1",
+  "acapPackageConf": {
+    "setup": {
+      "friendlyName": "Event Engine",
+      "appName": "acap_event_engine",
+      "vendor": "Mo3he",
+      "embeddedSdkVersion": "3.0",
+      "vendorUrl": "https://github.com/Mo3he",
+      "runMode": "respawn",
+      "version": "1.0.0"
+    },
+    "configuration": {
+      "settingPage": "index.html",
+      "httpConfig": [
+        {"name": "app",      "access": "admin", "type": "fastCgi"},
+        {"name": "settings", "access": "admin", "type": "fastCgi"},
+        {"name": "status",   "access": "admin", "type": "fastCgi"},
+        {"name": "engine",   "access": "admin", "type": "fastCgi"},
+        {"name": "rules",    "access": "admin", "type": "fastCgi"},
+        {"name": "triggers", "access": "admin", "type": "fastCgi"},
+        {"name": "actions",  "access": "admin", "type": "fastCgi"},
+        {"name": "events",   "access": "admin", "type": "fastCgi"},
+        {"name": "fire",     "access": "admin", "type": "fastCgi"},
+        {"name": "variables","access": "admin", "type": "fastCgi"}
+      ]
+    }
+  },
+  "resources": {
+    "dbus": {
+      "requiredMethods": [
+        "com.axis.HTTPConf1.VAPIXServiceAccounts1.GetCredentials"
+      ]
+    }
+  }
+}

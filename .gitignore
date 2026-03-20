@@ -1,0 +1,10 @@
+# Build outputs
+*.eap
+*.o
+app/engine/*.o
+
+# macOS
+.DS_Store
+
+# Docker
+.dockerignore

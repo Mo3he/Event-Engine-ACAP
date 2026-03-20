@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Engine</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div>
+      <h1>Event Engine</h1>
+      <div class="subtitle" id="header-subtitle">Loading...</div>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="rules">Rules</button>
+    <button class="tab-btn" data-tab="log">Event Log</button>
+    <button class="tab-btn" data-tab="variables">Variables</button>
+    <button class="tab-btn" data-tab="mqtt">MQTT</button>
+    <button class="tab-btn" data-tab="status">Status</button>
+    <a class="tab-btn" href="swagger.html" target="_blank" style="text-decoration:none;">API Docs</a>
+  </nav>
+
+  <!-- ===== Rules Tab ===== -->
+  <div id="tab-rules" class="tab-content active">
+    <div class="container">
+      <div class="rule-list-header">
+        <h2 style="font-size:15px;">Rules <span id="rule-count" style="color:var(--text-muted);font-weight:400;"></span></h2>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-sm" onclick="exportRules()" title="Download all rules as JSON">Export</button>
+          <label class="btn btn-ghost btn-sm" style="cursor:pointer;" title="Import rules from JSON file">
+            Import<input type="file" accept=".json" style="display:none;" onchange="importRules(this)">
+          </label>
+          <button class="btn btn-primary" onclick="openRuleEditor(null)">+ New Rule</button>
+        </div>
+      </div>
+      <div id="rules-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== Event Log Tab ===== -->
+  <div id="tab-log" class="tab-content">
+    <div class="container">
+      <div class="event-log-header">
+        <h2 style="font-size:15px;">Event Log</h2>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="log-rule-filter" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
+            <option value="">All Rules</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadEvents()">Refresh</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="event-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Rule</th>
+              <th>Result</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="event-log-body">
+            <tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Variables Tab ===== -->
+  <div id="tab-variables" class="tab-content">
+    <div class="container">
+      <div class="event-log-header">
+        <h2 style="font-size:15px;">Variables & Counters</h2>
+        <button class="btn btn-ghost btn-sm" onclick="loadVariables()">Refresh</button>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden;">
+        <table class="var-table">
+          <thead>
+            <tr><th>Name</th><th>Value</th><th></th></tr>
+          </thead>
+          <tbody id="variables-body">
+            <tr><td colspan="3" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== MQTT Tab ===== -->
+  <div id="tab-mqtt" class="tab-content">
+    <div class="container">
+      <div class="event-log-header">
+        <h2 style="font-size:15px;">MQTT Broker</h2>
+        <div id="mqtt-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+          <span id="mqtt-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
+          <span id="mqtt-status-text">Loading…</span>
+        </div>
+      </div>
+      <div class="card">
+        <form id="mqtt-form" onsubmit="saveMqttSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Broker Host</label>
+              <input type="text" name="host" placeholder="192.168.1.100 or broker.example.com">
+            </div>
+            <div class="form-group" style="flex:0 0 110px;">
+              <label>Port</label>
+              <input type="number" name="port" value="1883" min="1" max="65535">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Client ID</label>
+              <input type="text" name="client_id" value="acap_event_engine">
+            </div>
+            <div class="form-group">
+              <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="text" name="username" autocomplete="off">
+            </div>
+            <div class="form-group">
+              <label>Password <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="password" name="password" placeholder="(unchanged)" autocomplete="new-password">
+            </div>
+          </div>
+          <div class="form-row" style="align-items:flex-end;">
+            <div class="form-group" style="flex:0 0 130px;">
+              <label>Keepalive (seconds)</label>
+              <input type="number" name="keepalive" value="60" min="0">
+            </div>
+            <div class="form-group" style="flex:0 0 auto;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
+                <span style="font-size:13px;">Enabled</span>
+                <label class="toggle">
+                  <input type="checkbox" name="enabled">
+                  <span class="toggle-slider"></span>
+                </label>
+              </label>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="submit" class="btn btn-primary">Save MQTT Settings</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Status Tab ===== -->
+  <div id="tab-status" class="tab-content">
+    <div class="container">
+      <div class="status-grid" id="status-grid"></div>
+      <div class="card" id="device-card"></div>
+      <div class="card" style="margin-top:12px;">
+        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Export your rules and settings before uninstalling so you can restore them after reinstalling.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
+          <label class="btn btn-ghost" style="cursor:pointer;">
+            Import Rules<input type="file" accept=".json" style="display:none;" onchange="importRules(this)">
+          </label>
+          <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
+          <label class="btn btn-ghost" style="cursor:pointer;">
+            Import Settings<input type="file" accept=".json" style="display:none;" onchange="importSettings(this)">
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- #app -->
+
+<!-- ===== Rule Editor Modal ===== -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-title">New Rule</span>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body">
+      <!-- Injected by JS -->
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRule()">Save Rule</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Toast Container ===== -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

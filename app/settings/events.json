@@ -1,0 +1,29 @@
+[
+  {
+    "id": "RuleFired",
+    "name": "Event Engine: Rule Fired",
+    "state": false,
+    "show": true,
+    "data": [
+      {"name": "rule_id",   "type": "STRING"},
+      {"name": "rule_name", "type": "STRING"}
+    ]
+  },
+  {
+    "id": "RuleError",
+    "name": "Event Engine: Rule Error",
+    "state": false,
+    "show": true,
+    "data": [
+      {"name": "rule_id",  "type": "STRING"},
+      {"name": "message",  "type": "STRING"}
+    ]
+  },
+  {
+    "id": "EngineReady",
+    "name": "Event Engine: Ready",
+    "state": true,
+    "show": true,
+    "data": []
+  }
+]

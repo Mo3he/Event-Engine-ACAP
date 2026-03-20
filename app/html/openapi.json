@@ -1,0 +1,849 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ACAP Event Engine",
+    "description": "REST API for the Axis Event Engine ACAP — an IFTTT-style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (payloads, messages, etc.) support `{{...}}` substitution:\n- `{{timestamp}}` — ISO 8601 UTC timestamp\n- `{{camera.serial}}` — Device serial number\n- `{{camera.model}}` — Device model\n- `{{camera.ip}}` — Device IP address\n- `{{trigger.KEY}}` — Any key from the trigger event data\n- `{{var.NAME}}` — Named variable value\n- `{{counter.NAME}}` — Named counter value\n",
+    "version": "1.0.0",
+    "contact": {
+      "url": "https://github.com/Mo3he"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://{camera_ip}/local/acap_event_engine",
+      "description": "Camera (replace with device IP)",
+      "variables": {
+        "camera_ip": {
+          "default": "192.168.0.90",
+          "description": "IP address of the Axis camera"
+        }
+      }
+    }
+  ],
+  "security": [
+    { "basicAuth": [] }
+  ],
+  "components": {
+    "securitySchemes": {
+      "basicAuth": {
+        "type": "http",
+        "scheme": "basic",
+        "description": "Axis admin credentials"
+      }
+    },
+    "schemas": {
+      "Rule": {
+        "type": "object",
+        "required": ["name", "triggers", "actions"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "readOnly": true,
+            "example": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+          },
+          "name": { "type": "string", "example": "Motion → Record" },
+          "description": { "type": "string", "example": "Start recording on motion detection" },
+          "enabled": { "type": "boolean", "default": true },
+          "trigger_logic": {
+            "type": "string",
+            "enum": ["OR", "AND"],
+            "default": "OR",
+            "description": "How multiple triggers are combined"
+          },
+          "condition_logic": {
+            "type": "string",
+            "enum": ["AND", "OR"],
+            "default": "AND"
+          },
+          "cooldown_seconds": {
+            "type": "integer",
+            "default": 0,
+            "description": "Minimum seconds between consecutive firings"
+          },
+          "max_executions": {
+            "type": "integer",
+            "default": 0,
+            "description": "Max times rule can fire (0 = unlimited)"
+          },
+          "triggers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Trigger" }
+          },
+          "conditions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Condition" }
+          },
+          "actions": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Action" }
+          },
+          "execution_count": {
+            "type": "integer",
+            "readOnly": true
+          },
+          "last_fired": {
+            "type": "string",
+            "format": "date-time",
+            "readOnly": true
+          }
+        }
+      },
+      "Trigger": {
+        "type": "object",
+        "required": ["type"],
+        "discriminator": {
+          "propertyName": "type"
+        },
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["vapix_event", "webhook", "schedule", "manual", "variable_change", "io_input", "mqtt_message"],
+            "description": "Trigger type"
+          }
+        },
+        "example": {
+          "type": "vapix_event",
+          "topic": "tns1:VideoAnalytics/tnsaxis:MotionDetection",
+          "source": "0"
+        }
+      },
+      "TriggerVapixEvent": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["vapix_event"] },
+              "topic": {
+                "type": "string",
+                "description": "VAPIX event topic (ONVIF format)",
+                "example": "tns1:VideoAnalytics/tnsaxis:MotionDetection"
+              },
+              "source": {
+                "type": "string",
+                "description": "Source filter (e.g. channel number)",
+                "example": "0"
+              }
+            }
+          }
+        ]
+      },
+      "TriggerWebhook": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["webhook"] },
+              "token": {
+                "type": "string",
+                "description": "Secret token that must match POST /fire?token=TOKEN",
+                "example": "my-secret-token"
+              }
+            }
+          }
+        ]
+      },
+      "TriggerSchedule": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["schedule"] },
+              "schedule_type": {
+                "type": "string",
+                "enum": ["cron", "interval", "daily_time"]
+              },
+              "cron": {
+                "type": "string",
+                "description": "Cron expression (min hour dom mon dow)",
+                "example": "0 8 * * 1-5"
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "description": "For interval type: seconds between fires",
+                "example": 300
+              },
+              "time": {
+                "type": "string",
+                "description": "For daily_time: HH:MM",
+                "example": "08:00"
+              }
+            }
+          }
+        ]
+      },
+      "TriggerMqttMessage": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["mqtt_message"] },
+              "topic_filter": {
+                "type": "string",
+                "description": "MQTT topic filter. Supports + (single-level) and # (multi-level) wildcards",
+                "example": "sensors/+/temperature"
+              }
+            }
+          }
+        ]
+      },
+      "Condition": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["time_window", "event_state", "counter", "http_check", "io_state", "variable_compare"]
+          }
+        }
+      },
+      "Action": {
+        "type": "object",
+        "required": ["type"],
+        "discriminator": {
+          "propertyName": "type"
+        },
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "http_request", "recording", "overlay_text", "ptz_preset",
+              "io_output", "audio_clip", "send_syslog", "fire_vapix_event",
+              "delay", "set_variable", "increment_counter", "mqtt_publish", "run_rule"
+            ]
+          }
+        }
+      },
+      "ActionHttpRequest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["http_request"] },
+              "url": { "type": "string", "example": "http://example.com/notify" },
+              "method": { "type": "string", "enum": ["GET","POST","PUT"], "default": "POST" },
+              "body": { "type": "string", "example": "{\"event\":\"{{trigger.topic}}\"}" },
+              "headers": { "type": "string", "example": "Content-Type: application/json" }
+            }
+          }
+        ]
+      },
+      "ActionMqttPublish": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["mqtt_publish"] },
+              "topic": { "type": "string", "example": "cameras/{{camera.serial}}/events" },
+              "payload": { "type": "string", "example": "{\"ts\":\"{{timestamp}}\"}" },
+              "retain": { "type": "boolean", "default": false }
+            }
+          }
+        ]
+      },
+      "ActionDelay": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["delay"] },
+              "seconds": { "type": "integer", "minimum": 1, "example": 5 }
+            }
+          }
+        ]
+      },
+      "ActionSetVariable": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["set_variable"] },
+              "name": { "type": "string", "example": "last_motion_zone" },
+              "value": { "type": "string", "example": "{{trigger.source}}" }
+            }
+          }
+        ]
+      },
+      "ActionIncrementCounter": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["increment_counter"] },
+              "name": { "type": "string", "example": "motion_count" },
+              "operation": { "type": "string", "enum": ["increment","decrement","reset","set"], "default": "increment" },
+              "value": { "type": "number", "description": "For 'set' operation", "example": 0 }
+            }
+          }
+        ]
+      },
+      "ActionRunRule": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "enum": ["run_rule"] },
+              "rule_id": { "type": "string", "format": "uuid", "description": "ID of the rule to chain to" }
+            }
+          }
+        ]
+      },
+      "Variable": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "value": { "type": "string" },
+          "is_counter": { "type": "boolean" },
+          "updated": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "properties": {
+          "uptime": { "type": "number", "description": "Seconds since boot" },
+          "rules_total": { "type": "integer" },
+          "rules_enabled": { "type": "integer" },
+          "events_today": { "type": "integer" },
+          "time": { "type": "string", "format": "date-time" },
+          "engine_version": { "type": "string", "example": "1.0.0" },
+          "mqtt": {
+            "type": "object",
+            "properties": {
+              "connected": { "type": "boolean" },
+              "enabled": { "type": "boolean" },
+              "host": { "type": "string" },
+              "port": { "type": "integer" },
+              "reconnect_count": { "type": "integer" }
+            }
+          },
+          "device": {
+            "type": "object",
+            "properties": {
+              "serial": { "type": "string" },
+              "model": { "type": "string" },
+              "ip": { "type": "string" },
+              "firmware": { "type": "string" }
+            }
+          }
+        }
+      },
+      "Settings": {
+        "type": "object",
+        "properties": {
+          "engine": {
+            "type": "object",
+            "properties": {
+              "max_log_entries": { "type": "integer", "default": 200 },
+              "webhook_token_required": { "type": "boolean", "default": true }
+            }
+          },
+          "mqtt": {
+            "type": "object",
+            "properties": {
+              "enabled": { "type": "boolean" },
+              "host": { "type": "string" },
+              "port": { "type": "integer", "default": 1883 },
+              "client_id": { "type": "string", "default": "acap_event_engine" },
+              "username": { "type": "string" },
+              "password": { "type": "string", "format": "password" },
+              "keepalive": { "type": "integer", "default": 60 }
+            }
+          }
+        }
+      },
+      "EventLogEntry": {
+        "type": "object",
+        "properties": {
+          "ts": { "type": "string", "format": "date-time" },
+          "rule_id": { "type": "string", "format": "uuid" },
+          "rule_name": { "type": "string" },
+          "result": { "type": "string", "enum": ["ok","condition_failed","error","cooldown","max_executions"] },
+          "detail": { "type": "string" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/rules": {
+      "get": {
+        "summary": "List all rules",
+        "operationId": "listRules",
+        "tags": ["Rules"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "If provided, return a single rule by ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of rules (or single rule if id given)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "type": "array", "items": { "$ref": "#/components/schemas/Rule" } },
+                    { "$ref": "#/components/schemas/Rule" }
+                  ]
+                }
+              }
+            }
+          },
+          "404": { "description": "Rule not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a new rule",
+        "operationId": "createRule",
+        "tags": ["Rules"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Rule" },
+              "examples": {
+                "motion_record": {
+                  "summary": "Motion detection → start recording",
+                  "value": {
+                    "name": "Motion → Record",
+                    "enabled": true,
+                    "triggers": [{ "type": "vapix_event", "topic": "tns1:VideoAnalytics/tnsaxis:MotionDetection", "source": "0" }],
+                    "conditions": [],
+                    "actions": [{ "type": "recording", "operation": "start" }]
+                  }
+                },
+                "webhook_notify": {
+                  "summary": "Webhook → HTTP POST",
+                  "value": {
+                    "name": "Webhook → Notify",
+                    "enabled": true,
+                    "triggers": [{ "type": "webhook", "token": "my-secret-token" }],
+                    "conditions": [],
+                    "actions": [{ "type": "http_request", "url": "http://example.com/notify", "method": "POST", "body": "{\"ts\":\"{{timestamp}}\"}" }]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "status": { "type": "string", "example": "created" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request body" },
+          "500": { "description": "Failed to add rule" }
+        }
+      },
+      "put": {
+        "summary": "Update a rule",
+        "operationId": "updateRule",
+        "tags": ["Rules"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "Full rule object, or `{\"enabled\": true/false}` to toggle without full update",
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/Rule" },
+                  {
+                    "type": "object",
+                    "properties": { "enabled": { "type": "boolean" } },
+                    "required": ["enabled"]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" },
+          "404": { "description": "Rule not found" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a rule",
+        "operationId": "deleteRule",
+        "tags": ["Rules"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "404": { "description": "Rule not found" }
+        }
+      }
+    },
+    "/fire": {
+      "post": {
+        "summary": "Fire a rule manually or via webhook",
+        "operationId": "fireRule",
+        "tags": ["Rules"],
+        "description": "Two modes:\n- **Manual**: `{\"id\": \"<rule-uuid>\", \"trigger_data\": {...}}` — fires a specific rule directly\n- **Webhook**: `{\"token\": \"<token>\", \"payload\": {...}}` or `?token=TOKEN` — fires all rules with a matching webhook token\n",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Webhook token (alternative to body.token)"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "title": "Manual fire",
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                      "id": { "type": "string", "format": "uuid" },
+                      "trigger_data": { "type": "object", "additionalProperties": true }
+                    }
+                  },
+                  {
+                    "title": "Webhook fire",
+                    "type": "object",
+                    "required": ["token"],
+                    "properties": {
+                      "token": { "type": "string" },
+                      "payload": { "type": "object", "additionalProperties": true }
+                    }
+                  }
+                ]
+              },
+              "examples": {
+                "manual": {
+                  "summary": "Manual rule fire",
+                  "value": { "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+                },
+                "webhook": {
+                  "summary": "Webhook dispatch",
+                  "value": { "token": "my-secret-token", "payload": { "source": "doorbell" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Webhook mode: number of rules fired. Manual mode: OK text.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "rules_fired": { "type": "integer" } }
+                }
+              },
+              "text/plain": {
+                "schema": { "type": "string", "example": "OK" }
+              }
+            }
+          },
+          "400": { "description": "Missing id or token" },
+          "404": { "description": "Rule not found" },
+          "405": { "description": "POST required" }
+        }
+      }
+    },
+    "/triggers": {
+      "get": {
+        "summary": "List available trigger types",
+        "operationId": "listTriggerTypes",
+        "tags": ["Catalog"],
+        "responses": {
+          "200": {
+            "description": "Catalog of trigger types",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": { "type": "string" },
+                      "label": { "type": "string" },
+                      "description": { "type": "string" }
+                    }
+                  }
+                },
+                "example": [
+                  { "type": "vapix_event", "label": "VAPIX Event", "description": "Fire on any Axis camera event" },
+                  { "type": "webhook",     "label": "Webhook",     "description": "Fire via HTTP POST with a secret token" },
+                  { "type": "schedule",    "label": "Schedule",    "description": "Fire on a cron/interval/daily schedule" },
+                  { "type": "mqtt_message","label": "MQTT Message","description": "Fire when a matching MQTT message is received" },
+                  { "type": "io_input",    "label": "I/O Input",   "description": "Fire on digital input port state change" },
+                  { "type": "variable_change","label": "Variable Change","description": "Fire when a variable value changes" },
+                  { "type": "manual",      "label": "Manual",      "description": "Fire only via API or UI" }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/actions": {
+      "get": {
+        "summary": "List available action types",
+        "operationId": "listActionTypes",
+        "tags": ["Catalog"],
+        "responses": {
+          "200": {
+            "description": "Catalog of action types",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "type": { "type": "string" },
+                      "label": { "type": "string" },
+                      "description": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/variables": {
+      "get": {
+        "summary": "List all variables and counters",
+        "operationId": "listVariables",
+        "tags": ["Variables"],
+        "responses": {
+          "200": {
+            "description": "Map of variable names to variable objects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": { "$ref": "#/components/schemas/Variable" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Set a variable or counter",
+        "operationId": "setVariable",
+        "tags": ["Variables"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string", "example": "alarm_zone" },
+                  "value": { "type": "string", "example": "north" },
+                  "is_counter": { "type": "boolean", "default": false, "description": "If true, value is treated as a number and sets the counter" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "Missing name" }
+        }
+      },
+      "delete": {
+        "summary": "Delete a variable or counter",
+        "operationId": "deleteVariable",
+        "tags": ["Variables"],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "OK" },
+          "400": { "description": "Missing name parameter" }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "summary": "Get event log entries",
+        "operationId": "getEvents",
+        "tags": ["Monitoring"],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 50, "maximum": 1000 }
+          },
+          {
+            "name": "rule",
+            "in": "query",
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "Filter entries for a specific rule"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of event log entries (most recent first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/EventLogEntry" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/engine": {
+      "get": {
+        "summary": "Get engine status and device info",
+        "operationId": "getStatus",
+        "tags": ["Monitoring"],
+        "responses": {
+          "200": {
+            "description": "Engine and device status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Status" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/settings": {
+      "get": {
+        "summary": "Get application settings",
+        "operationId": "getSettings",
+        "tags": ["Settings"],
+        "responses": {
+          "200": {
+            "description": "Current settings",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Settings" }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Update settings (partial update supported)",
+        "operationId": "updateSettings",
+        "tags": ["Settings"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Settings" },
+              "examples": {
+                "mqtt_enable": {
+                  "summary": "Enable MQTT broker",
+                  "value": {
+                    "mqtt": {
+                      "enabled": true,
+                      "host": "broker.example.com",
+                      "port": 1883,
+                      "client_id": "axis-cam-01",
+                      "username": "camuser",
+                      "password": "secret",
+                      "keepalive": 60
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+    "/app": {
+      "get": {
+        "summary": "Get application data (variables + general info)",
+        "operationId": "getApp",
+        "tags": ["Monitoring"],
+        "responses": {
+          "200": {
+            "description": "Application data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "variables": {
+                      "type": "object",
+                      "additionalProperties": { "$ref": "#/components/schemas/Variable" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Rules",      "description": "Rule CRUD and manual firing" },
+    { "name": "Catalog",    "description": "Available trigger and action types" },
+    { "name": "Variables",  "description": "Named variables and counters" },
+    { "name": "Monitoring", "description": "Status, event log, and app data" },
+    { "name": "Settings",   "description": "Engine and MQTT configuration" }
+  ]
+}

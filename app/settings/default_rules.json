@@ -1,0 +1,87 @@
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000001",
+    "name": "Example: Log Motion to Syslog",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "vapix_event",
+        "topic0": {"tnsaxis": "VideoAnalytics"},
+        "topic1": {"tnsaxis": "MotionDetection"},
+        "filter_key": "active",
+        "filter_value": true
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [
+      {
+        "type": "time_window",
+        "start": "08:00",
+        "end": "18:00",
+        "days": [1, 2, 3, 4, 5]
+      }
+    ],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "send_syslog",
+        "message": "Motion detected at {{timestamp}} on camera {{camera.name}}"
+      }
+    ],
+    "cooldown": 30,
+    "max_executions": 0,
+    "tags": ["example", "motion"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000002",
+    "name": "Example: Webhook → HTTP POST",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "http_webhook",
+        "token": "change-me-to-a-secret"
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "http_request",
+        "url": "https://example.com/webhook",
+        "method": "POST",
+        "headers": "Content-Type: application/json",
+        "body": "{\"camera\":\"{{camera.serial}}\",\"time\":\"{{timestamp}}\"}"
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "webhook"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000003",
+    "name": "Example: Schedule → Overlay Text",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "schedule",
+        "schedule_type": "daily_time",
+        "time": "08:00",
+        "days": [1, 2, 3, 4, 5]
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "overlay_text",
+        "channel": 1,
+        "text": "Business Hours — {{date}}"
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "schedule"]
+  }
+]

@@ -1,0 +1,447 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <syslog.h>
+#include <glib.h>
+#include <curl/curl.h>
+#include <time.h>
+
+#include "actions.h"
+#include "variables.h"
+#include "mqtt_client.h"
+#include "../ACAP.h"
+
+#define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
+#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "actions: " fmt, ## args)
+
+/* Forward declaration — rule_engine.c provides this */
+extern void RuleEngine_Dispatch_RuleFired(const char* rule_id);
+
+void Actions_Init(void) {
+    /* Nothing to initialise currently */
+}
+
+/*-----------------------------------------------------
+ * Template engine
+ *
+ * Replaces {{key}} tokens in tmpl.
+ * Supported tokens:
+ *   {{timestamp}}        ISO-8601 timestamp
+ *   {{date}}             YYYY-MM-DD
+ *   {{time}}             HH:MM:SS
+ *   {{camera.name}}      device model
+ *   {{camera.serial}}    device serial
+ *   {{camera.ip}}        device IPv4
+ *   {{trigger.TYPE}}     top-level key from trigger_data
+ *   {{var.NAME}}         variable value
+ *   {{counter.NAME}}     counter value
+ *-----------------------------------------------------*/
+char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
+    if (!tmpl) return strdup("");
+
+    size_t out_cap = strlen(tmpl) * 2 + 256;
+    char* out = malloc(out_cap);
+    if (!out) return strdup(tmpl);
+    out[0] = '\0';
+    size_t out_len = 0;
+
+    const char* p = tmpl;
+    while (*p) {
+        if (p[0] == '{' && p[1] == '{') {
+            const char* end = strstr(p + 2, "}}");
+            if (!end) { /* no closing — copy rest literally */
+                size_t rem = strlen(p);
+                if (out_len + rem + 1 > out_cap) {
+                    out_cap = out_len + rem + 256;
+                    out = realloc(out, out_cap);
+                }
+                memcpy(out + out_len, p, rem);
+                out_len += rem;
+                out[out_len] = '\0';
+                break;
+            }
+            size_t key_len = end - (p + 2);
+            char key[128] = "";
+            if (key_len < sizeof(key)) {
+                memcpy(key, p + 2, key_len);
+                key[key_len] = '\0';
+            }
+
+            const char* replacement = NULL;
+            char tmp[256];
+
+            if (strcmp(key, "timestamp") == 0) {
+                replacement = ACAP_DEVICE_ISOTime();
+            } else if (strcmp(key, "date") == 0) {
+                replacement = ACAP_DEVICE_Date();
+            } else if (strcmp(key, "time") == 0) {
+                replacement = ACAP_DEVICE_Time();
+            } else if (strcmp(key, "camera.name") == 0) {
+                replacement = ACAP_DEVICE_Prop("model");
+            } else if (strcmp(key, "camera.serial") == 0) {
+                replacement = ACAP_DEVICE_Prop("serial");
+            } else if (strcmp(key, "camera.ip") == 0) {
+                replacement = ACAP_DEVICE_Prop("IPv4");
+            } else if (strncmp(key, "trigger.", 8) == 0 && trigger_data) {
+                cJSON* v = cJSON_GetObjectItem(trigger_data, key + 8);
+                if (v) {
+                    if (cJSON_IsString(v)) replacement = v->valuestring;
+                    else { cJSON_PrintPreallocated(v, tmp, sizeof(tmp), 0); replacement = tmp; }
+                }
+            } else if (strncmp(key, "var.", 4) == 0) {
+                replacement = Variables_Get(key + 4);
+            } else if (strncmp(key, "counter.", 8) == 0) {
+                snprintf(tmp, sizeof(tmp), "%g", Counter_Get(key + 8));
+                replacement = tmp;
+            }
+
+            if (!replacement) replacement = "";
+            size_t rlen = strlen(replacement);
+            if (out_len + rlen + 1 > out_cap) {
+                out_cap = out_len + rlen + 256;
+                out = realloc(out, out_cap);
+            }
+            memcpy(out + out_len, replacement, rlen);
+            out_len += rlen;
+            out[out_len] = '\0';
+            p = end + 2;
+        } else {
+            if (out_len + 2 > out_cap) {
+                out_cap = out_len + 256;
+                out = realloc(out, out_cap);
+            }
+            out[out_len++] = *p++;
+            out[out_len]   = '\0';
+        }
+    }
+    return out;
+}
+
+/*-----------------------------------------------------
+ * Individual action implementations
+ *-----------------------------------------------------*/
+
+/* http_request */
+static size_t curl_discard(void* p, size_t sz, size_t n, void* ud) {
+    (void)p; (void)ud; return sz * n;
+}
+
+static void action_http_request(cJSON* cfg, cJSON* trigger_data) {
+    const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
+    if (!url_tmpl) return;
+
+    char* url    = Actions_Expand_Template(url_tmpl, trigger_data);
+    char* body   = NULL;
+    const char* method = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "method"));
+    if (!method) method = "GET";
+
+    const char* body_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "body"));
+    if (body_tmpl) body = Actions_Expand_Template(body_tmpl, trigger_data);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { free(url); free(body); return; }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+    struct curl_slist* hdrs = NULL;
+    const char* hdrs_str = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "headers"));
+    if (hdrs_str) {
+        /* Each header on its own line */
+        char* hcopy = strdup(hdrs_str);
+        char* line;
+        char* saveptr;
+        line = strtok_r(hcopy, "\n", &saveptr);
+        while (line) {
+            /* strip leading/trailing whitespace */
+            while (*line == ' ' || *line == '\r') line++;
+            char* end = line + strlen(line) - 1;
+            while (end > line && (*end == ' ' || *end == '\r' || *end == '\n')) *end-- = '\0';
+            if (*line) hdrs = curl_slist_append(hdrs, line);
+            line = strtok_r(NULL, "\n", &saveptr);
+        }
+        free(hcopy);
+    }
+
+    if (strcmp(method, "POST") == 0) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        if (body) {
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)strlen(body));
+        } else {
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
+        }
+    } else if (strcmp(method, "PUT") == 0) {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        if (body) curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    } else if (strcmp(method, "DELETE") == 0) {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    }
+
+    if (hdrs) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK)
+        LOG_WARN("http_request to %s failed: %s", url, curl_easy_strerror(res));
+
+    if (hdrs) curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    free(url);
+    free(body);
+}
+
+/* recording */
+static void action_recording(cJSON* cfg) {
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    if (!op) op = "start";
+
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "apiVersion", "1.0");
+    cJSON_AddStringToObject(req, "method", strcmp(op, "stop") == 0 ? "stop" : "start");
+    cJSON* params = cJSON_AddObjectToObject(req, "params");
+    cJSON_AddStringToObject(params, "diskId", "SD_DISK");
+    const char* profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
+    cJSON_AddStringToObject(params, "streamProfile", profile ? profile : "Quality");
+    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
+    if (dur) cJSON_AddNumberToObject(params, "maxRecordingTime", dur->valuedouble);
+
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    char* resp = ACAP_VAPIX_Post("record.cgi", body);
+    free(body);
+    if (resp) free(resp);
+}
+
+/* overlay_text */
+static void action_overlay_text(cJSON* cfg, cJSON* trigger_data) {
+    int channel = 1;
+    cJSON* ch = cJSON_GetObjectItem(cfg, "channel");
+    if (ch) channel = (int)ch->valuedouble;
+
+    const char* text_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "text"));
+    if (!text_tmpl) return;
+    char* text = Actions_Expand_Template(text_tmpl, trigger_data);
+
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "apiVersion", "1.0");
+    cJSON_AddStringToObject(req, "method", "setTextOverlay");
+    cJSON* params = cJSON_AddObjectToObject(req, "params");
+    cJSON_AddNumberToObject(params, "camera", channel);
+    cJSON_AddStringToObject(params, "text", text);
+    free(text);
+
+    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
+    if (dur) cJSON_AddNumberToObject(params, "duration", dur->valuedouble);
+
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+    char* resp = ACAP_VAPIX_Post("dynamicoverlay.cgi", body);
+    free(body);
+    if (resp) free(resp);
+}
+
+/* ptz_preset */
+static void action_ptz_preset(cJSON* cfg) {
+    int channel = 1;
+    cJSON* ch = cJSON_GetObjectItem(cfg, "channel");
+    if (ch) channel = (int)ch->valuedouble;
+
+    const char* preset = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "preset"));
+    if (!preset) {
+        cJSON* pid = cJSON_GetObjectItem(cfg, "preset_id");
+        if (!pid) return;
+        char req[128];
+        snprintf(req, sizeof(req), "com/ptz.cgi?camera=%d&gotoserverpresetno=%d",
+                 channel, (int)pid->valuedouble);
+        char* resp = ACAP_VAPIX_Get(req);
+        if (resp) free(resp);
+    } else {
+        char req[256];
+        snprintf(req, sizeof(req), "com/ptz.cgi?camera=%d&gotoserverpresetname=%s",
+                 channel, preset);
+        char* resp = ACAP_VAPIX_Get(req);
+        if (resp) free(resp);
+    }
+}
+
+/* io_output */
+static void action_io_output(cJSON* cfg) {
+    cJSON* port_j = cJSON_GetObjectItem(cfg, "port");
+    if (!port_j) return;
+    int port = (int)port_j->valuedouble;
+    const char* state = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
+    if (!state) state = "active";
+
+    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
+    char req[128];
+    if (dur && dur->valuedouble > 0) {
+        snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s/%d",
+                 port, state, (int)dur->valuedouble);
+    } else {
+        snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s", port, state);
+    }
+    char* resp = ACAP_VAPIX_Get(req);
+    if (resp) free(resp);
+}
+
+/* audio_clip */
+static void action_audio_clip(cJSON* cfg) {
+    const char* clip = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "clip_name"));
+    if (!clip) return;
+    char req[256];
+    snprintf(req, sizeof(req), "audio/audioclip.cgi?audioClipId=%s", clip);
+    char* resp = ACAP_VAPIX_Get(req);
+    if (resp) free(resp);
+}
+
+/* send_syslog */
+static void action_send_syslog(cJSON* cfg, cJSON* trigger_data) {
+    const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
+    if (!msg_tmpl) return;
+    char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
+    int priority = LOG_INFO;
+    const char* lvl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "level"));
+    if (lvl) {
+        if (strcmp(lvl, "warning") == 0) priority = LOG_WARNING;
+        else if (strcmp(lvl, "error") == 0) priority = LOG_ERR;
+    }
+    syslog(priority, "EventEngine: %s", msg);
+    free(msg);
+}
+
+/* fire_vapix_event */
+static void action_fire_vapix_event(cJSON* cfg) {
+    const char* id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "event_id"));
+    if (!id) return;
+    cJSON* state = cJSON_GetObjectItem(cfg, "state");
+    if (state) {
+        ACAP_EVENTS_Fire_State(id, cJSON_IsTrue(state) ? 1 : 0);
+    } else {
+        ACAP_EVENTS_Fire(id);
+    }
+}
+
+/* set_variable */
+static void action_set_variable(cJSON* cfg, cJSON* trigger_data) {
+    const char* name     = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "name"));
+    const char* val_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
+    if (!name || !val_tmpl) return;
+    char* val = Actions_Expand_Template(val_tmpl, trigger_data);
+    Variables_Set(name, val);
+    free(val);
+}
+
+/* increment_counter */
+static void action_increment_counter(cJSON* cfg) {
+    const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "name"));
+    if (!name) return;
+    cJSON* delta_j = cJSON_GetObjectItem(cfg, "delta");
+    double delta = delta_j ? delta_j->valuedouble : 1.0;
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    if (op && strcmp(op, "reset") == 0)
+        Counter_Reset(name);
+    else if (op && strcmp(op, "set") == 0)
+        Counter_Set(name, delta);
+    else
+        Counter_Increment(name, delta);
+}
+
+/* mqtt_publish */
+static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
+    const char* topic_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "topic"));
+    if (!topic_tmpl) return;
+    char* topic = Actions_Expand_Template(topic_tmpl, trigger_data);
+
+    char* payload = NULL;
+    const char* payload_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "payload"));
+    if (payload_tmpl) payload = Actions_Expand_Template(payload_tmpl, trigger_data);
+
+    cJSON* retain_j = cJSON_GetObjectItem(cfg, "retain");
+    int retain = retain_j && cJSON_IsTrue(retain_j) ? 1 : 0;
+
+    if (!MQTT_Publish(topic, payload, retain))
+        LOG_WARN("mqtt_publish failed (not connected?)");
+
+    free(topic);
+    free(payload);
+}
+
+/* run_rule — forward to rule engine */
+static void action_run_rule(cJSON* cfg) {
+    const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
+    if (rid) RuleEngine_Dispatch_RuleFired(rid);
+}
+
+/*-----------------------------------------------------
+ * Async delay support
+ *-----------------------------------------------------*/
+typedef struct {
+    char    rule_id[37];
+    cJSON*  remaining_actions; /* cJSON array slice (we own this) */
+    cJSON*  trigger_data;      /* duplicated */
+} DelayCtx;
+
+static gboolean delay_resume(gpointer user_data);
+
+static void execute_from(const char* rule_id, cJSON* actions_array,
+                         int start_index, cJSON* trigger_data);
+
+static gboolean delay_resume(gpointer user_data) {
+    DelayCtx* ctx = (DelayCtx*)user_data;
+    execute_from(ctx->rule_id, ctx->remaining_actions, 0, ctx->trigger_data);
+    cJSON_Delete(ctx->remaining_actions);
+    cJSON_Delete(ctx->trigger_data);
+    free(ctx);
+    return G_SOURCE_REMOVE;
+}
+
+static void execute_from(const char* rule_id, cJSON* actions_array,
+                         int start_index, cJSON* trigger_data) {
+    int total = cJSON_GetArraySize(actions_array);
+    for (int i = start_index; i < total; i++) {
+        cJSON* action = cJSON_GetArrayItem(actions_array, i);
+        if (!action) continue;
+        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(action, "type"));
+        if (!type) continue;
+
+        if (strcmp(type, "delay") == 0) {
+            cJSON* sec_j = cJSON_GetObjectItem(action, "seconds");
+            int seconds = sec_j ? (int)sec_j->valuedouble : 1;
+            if (seconds < 1) seconds = 1;
+
+            /* Build remaining slice */
+            cJSON* remaining = cJSON_CreateArray();
+            for (int j = i + 1; j < total; j++)
+                cJSON_AddItemToArray(remaining, cJSON_Duplicate(cJSON_GetArrayItem(actions_array, j), 1));
+
+            DelayCtx* ctx = malloc(sizeof(DelayCtx));
+            snprintf(ctx->rule_id, sizeof(ctx->rule_id), "%s", rule_id ? rule_id : "");
+            ctx->remaining_actions = remaining;
+            ctx->trigger_data = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateNull();
+            g_timeout_add_seconds((guint)seconds, delay_resume, ctx);
+            return; /* stop synchronous execution */
+        }
+
+        /* Synchronous actions */
+        if      (strcmp(type, "http_request")      == 0) action_http_request(action, trigger_data);
+        else if (strcmp(type, "recording")         == 0) action_recording(action);
+        else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(action, trigger_data);
+        else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
+        else if (strcmp(type, "io_output")         == 0) action_io_output(action);
+        else if (strcmp(type, "audio_clip")        == 0) action_audio_clip(action);
+        else if (strcmp(type, "send_syslog")       == 0) action_send_syslog(action, trigger_data);
+        else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action);
+        else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);
+        else if (strcmp(type, "increment_counter") == 0) action_increment_counter(action);
+        else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(action, trigger_data);
+        else if (strcmp(type, "run_rule")          == 0) action_run_rule(action);
+        else LOG_WARN("unknown action type '%s'", type);
+    }
+}
+
+void Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_data) {
+    if (!actions_array) return;
+    execute_from(rule_id, actions_array, 0, trigger_data);
+}
