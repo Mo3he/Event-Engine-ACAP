@@ -87,6 +87,28 @@ function fmtTime(ts) {
          d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+const RULE_TYPE_LABELS = {
+  trigger: {
+    vapix_event: 'Camera Event', schedule: 'Schedule', mqtt_message: 'MQTT',
+    http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
+    rule_fired: 'Rule Fired'
+  },
+  condition: {
+    time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
+    variable_compare: 'Variable', http_check: 'HTTP Check'
+  },
+  action: {
+    http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
+    overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output',
+    audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
+    set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',
+    delay: 'Delay', fire_vapix_event: 'VAPIX Event', send_syslog: 'Syslog'
+  }
+};
+function ruleTypeLabel(group, type) {
+  return (RULE_TYPE_LABELS[group] && RULE_TYPE_LABELS[group][type]) || type;
+}
+
 function escHtml(s) {
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
@@ -315,9 +337,9 @@ function renderRules() {
       <div class="rule-meta">
         <div class="rule-name">${escHtml(r.name)}</div>
         <div class="rule-badges">
-          <span class="badge badge-trigger">${r.trigger_count || 0} trigger${r.trigger_count !== 1 ? 's' : ''}</span>
-          ${r.condition_count ? `<span class="badge badge-cond">${r.condition_count} condition${r.condition_count !== 1 ? 's' : ''}</span>` : ''}
-          <span class="badge badge-action">${r.action_count || 0} action${r.action_count !== 1 ? 's' : ''}</span>
+          ${(r.trigger_types||[]).map(t => `<span class="badge badge-trigger">${escHtml(ruleTypeLabel('trigger',t))}</span>`).join('')}
+          ${(r.condition_types||[]).map(t => `<span class="badge badge-cond">${escHtml(ruleTypeLabel('condition',t))}</span>`).join('')}
+          ${(r.action_types||[]).map(t => `<span class="badge badge-action">${escHtml(ruleTypeLabel('action',t))}</span>`).join('')}
           ${r.cooldown ? `<span class="badge">cooldown ${r.cooldown}s</span>` : ''}
         </div>
       </div>

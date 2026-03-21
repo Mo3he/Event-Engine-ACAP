@@ -325,6 +325,31 @@ cJSON* RuleEngine_List(void) {
                                 r->conditions_json ? cJSON_GetArraySize(r->conditions_json) : 0);
         cJSON_AddNumberToObject(obj, "action_count",
                                 r->actions_json ? cJSON_GetArraySize(r->actions_json) : 0);
+        /* Include type lists so the UI can build human-readable summaries */
+        cJSON* ttypes = cJSON_CreateArray();
+        if (r->triggers_json) {
+            cJSON* t; cJSON_ArrayForEach(t, r->triggers_json) {
+                cJSON* ty = cJSON_GetObjectItem(t, "type");
+                if (ty && ty->valuestring) cJSON_AddItemToArray(ttypes, cJSON_CreateString(ty->valuestring));
+            }
+        }
+        cJSON_AddItemToObject(obj, "trigger_types", ttypes);
+        cJSON* ctypes = cJSON_CreateArray();
+        if (r->conditions_json) {
+            cJSON* c; cJSON_ArrayForEach(c, r->conditions_json) {
+                cJSON* ty = cJSON_GetObjectItem(c, "type");
+                if (ty && ty->valuestring) cJSON_AddItemToArray(ctypes, cJSON_CreateString(ty->valuestring));
+            }
+        }
+        cJSON_AddItemToObject(obj, "condition_types", ctypes);
+        cJSON* atypes = cJSON_CreateArray();
+        if (r->actions_json) {
+            cJSON* a; cJSON_ArrayForEach(a, r->actions_json) {
+                cJSON* ty = cJSON_GetObjectItem(a, "type");
+                if (ty && ty->valuestring) cJSON_AddItemToArray(atypes, cJSON_CreateString(ty->valuestring));
+            }
+        }
+        cJSON_AddItemToObject(obj, "action_types", atypes);
         cJSON_AddItemToArray(arr, obj);
     }
     pthread_mutex_unlock(&store_lock);

@@ -8,7 +8,7 @@
       "embeddedSdkVersion": "3.0",
       "vendorUrl": "https://github.com/Mo3he",
       "runMode": "respawn",
-      "version": "1.5.0"
+      "version": "1.5.1"
     },
     "configuration": {
       "settingPage": "index.html",
