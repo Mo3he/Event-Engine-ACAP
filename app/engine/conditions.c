@@ -188,7 +188,7 @@ static int cond_variable_compare(cJSON* cfg) {
  * Public
  *-----------------------------------------------------*/
 
-int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data) {
+static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSON* trigger_data, int skip_expensive) {
     (void)trigger_data;
     if (!conditions_array || cJSON_GetArraySize(conditions_array) == 0)
         return 1; /* no conditions → always pass */
@@ -203,11 +203,11 @@ int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data)
 
         int pass = 0;
         if      (strcmp(type, "time_window")      == 0) pass = cond_time_window(cond);
-        else if (strcmp(type, "event_state")      == 0) pass = cond_event_state(cond);
         else if (strcmp(type, "counter")          == 0) pass = cond_counter(cond);
-        else if (strcmp(type, "http_check")       == 0) pass = cond_http_check(cond);
         else if (strcmp(type, "io_state")         == 0) pass = cond_io_state(cond);
         else if (strcmp(type, "variable_compare") == 0) pass = cond_variable_compare(cond);
+        else if (strcmp(type, "event_state")      == 0) pass = skip_expensive ? 1 : cond_event_state(cond);
+        else if (strcmp(type, "http_check")       == 0) pass = skip_expensive ? 1 : cond_http_check(cond);
         else { LOG_WARN("unknown condition type '%s'", type); continue; }
 
         if (logic == 0) { /* AND */
@@ -217,4 +217,12 @@ int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data)
         }
     }
     return result;
+}
+
+int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data) {
+    return conditions_evaluate_internal(conditions_array, logic, trigger_data, 0);
+}
+
+int Conditions_Evaluate_Lightweight(cJSON* conditions_array, int logic) {
+    return conditions_evaluate_internal(conditions_array, logic, NULL, 1);
 }

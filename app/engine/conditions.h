@@ -24,8 +24,10 @@ extern "C" {
  * trigger_data is passed through for potential template use in http_check.
  */
 
-/* logic: 0 = AND, 1 = OR */
+/* logic: 0 = AND, 1 = OR
+ * skip_expensive: if 1, http_check and event_state are treated as pass (not evaluated) */
 int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data);
+int Conditions_Evaluate_Lightweight(cJSON* conditions_array, int logic);
 
 #ifdef __cplusplus
 }

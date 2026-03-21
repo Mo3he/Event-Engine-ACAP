@@ -495,7 +495,7 @@ static int siren_condition_check(const char* rule_id, void* userdata) {
                 pthread_mutex_unlock(&store_lock);
                 return 1; /* no conditions — keep running */
             }
-            int pass = Conditions_Evaluate(r->conditions_json, r->condition_logic, NULL);
+            int pass = Conditions_Evaluate_Lightweight(r->conditions_json, r->condition_logic);
             pthread_mutex_unlock(&store_lock);
             return pass;
         }
