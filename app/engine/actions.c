@@ -18,49 +18,91 @@
 /* Forward declaration — rule_engine.c provides this */
 extern void RuleEngine_Dispatch_RuleFired(const char* rule_id);
 
-/* Active siren tracking for "while_active" mode */
-#define MAX_ACTIVE_SIRENS 32
-static struct { char rule_id[64]; char profile[128]; } active_sirens[MAX_ACTIVE_SIRENS];
-static int active_siren_count = 0;
+/* Forward declarations needed by while_active_undo (defined later in this file) */
+#define MAX_OVERLAY_CHANNELS 8
+static int overlay_identity[MAX_OVERLAY_CHANNELS];
+static int overlay_identity_init = 0;
+static void overlay_remove(int identity);
+
+/* Generic "while_active" tracking — one entry per active rule/action pair */
+#define MAX_WHILE_ACTIVE 64
+typedef struct {
+    char rule_id[64];
+    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output" */
+    char siren_profile[128];
+    int  overlay_channel;
+    int  io_port;
+    char io_restore[16];   /* opposite state to restore: "active" or "inactive" */
+} WhileActiveEntry;
+static WhileActiveEntry while_active_entries[MAX_WHILE_ACTIVE];
+static int while_active_count = 0;
+
+/* Register a new while_active entry, replacing any existing one for the same rule */
+static void while_active_register(WhileActiveEntry* e) {
+    for (int i = 0; i < while_active_count; i++) {
+        if (strcmp(while_active_entries[i].rule_id, e->rule_id) == 0 &&
+            strcmp(while_active_entries[i].atype,   e->atype)   == 0) {
+            while_active_entries[i] = *e;
+            return;
+        }
+    }
+    if (while_active_count < MAX_WHILE_ACTIVE)
+        while_active_entries[while_active_count++] = *e;
+}
+
+static void while_active_undo(WhileActiveEntry* e) {
+    if (strcmp(e->atype, "siren_light") == 0) {
+        cJSON* req = cJSON_CreateObject();
+        cJSON_AddStringToObject(req, "apiVersion", "1.0");
+        cJSON_AddStringToObject(req, "method", "stop");
+        cJSON* p = cJSON_AddObjectToObject(req, "params");
+        cJSON_AddStringToObject(p, "profile", e->siren_profile);
+        char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
+        char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
+        free(body); if (resp) free(resp);
+        LOG("while_active: stopped siren '%s' for rule %s", e->siren_profile, e->rule_id);
+    } else if (strcmp(e->atype, "recording") == 0) {
+        cJSON* req = cJSON_CreateObject();
+        cJSON_AddStringToObject(req, "apiVersion", "1.0");
+        cJSON_AddStringToObject(req, "method", "stop");
+        cJSON* p = cJSON_AddObjectToObject(req, "params");
+        cJSON_AddStringToObject(p, "diskId", "SD_DISK");
+        char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
+        char* resp = ACAP_VAPIX_Post("record.cgi", body);
+        free(body); if (resp) free(resp);
+        LOG("while_active: stopped recording for rule %s", e->rule_id);
+    } else if (strcmp(e->atype, "overlay_text") == 0) {
+        int ch = e->overlay_channel;
+        if (ch >= 1 && ch <= MAX_OVERLAY_CHANNELS && overlay_identity[ch - 1] >= 0) {
+            overlay_remove(overlay_identity[ch - 1]);
+            overlay_identity[ch - 1] = -1;
+            LOG("while_active: cleared overlay ch%d for rule %s", ch, e->rule_id);
+        }
+    } else if (strcmp(e->atype, "io_output") == 0) {
+        char req[128];
+        snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s", e->io_port, e->io_restore);
+        char* resp = ACAP_VAPIX_Get(req); if (resp) free(resp);
+        LOG("while_active: restored I/O port %d to %s for rule %s", e->io_port, e->io_restore, e->rule_id);
+    }
+}
 
 void Actions_Stop_Active_Siren(const char* rule_id) {
     if (!rule_id) return;
-    for (int i = 0; i < active_siren_count; i++) {
-        if (strcmp(active_sirens[i].rule_id, rule_id) == 0) {
-            cJSON* req = cJSON_CreateObject();
-            cJSON_AddStringToObject(req, "apiVersion", "1.0");
-            cJSON_AddStringToObject(req, "method", "stop");
-            cJSON* params = cJSON_AddObjectToObject(req, "params");
-            cJSON_AddStringToObject(params, "profile", active_sirens[i].profile);
-            char* body = cJSON_PrintUnformatted(req);
-            cJSON_Delete(req);
-            char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
-            free(body);
-            if (resp) free(resp);
-            LOG("siren_light: auto-stopped profile '%s' for rule %s", active_sirens[i].profile, rule_id);
-            active_sirens[i] = active_sirens[--active_siren_count];
+    for (int i = 0; i < while_active_count; i++) {
+        if (strcmp(while_active_entries[i].rule_id, rule_id) == 0 &&
+            strcmp(while_active_entries[i].atype, "siren_light") == 0) {
+            while_active_undo(&while_active_entries[i]);
+            while_active_entries[i] = while_active_entries[--while_active_count];
             return;
         }
     }
 }
 
-/* Iterate active sirens — callback returns 0 to stop (siren should be stopped), 1 to keep */
 void Actions_ForEach_Active_Siren(int (*cb)(const char* rule_id, void* userdata), void* userdata) {
-    for (int i = 0; i < active_siren_count; ) {
-        if (!cb(active_sirens[i].rule_id, userdata)) {
-            /* Callback says stop — send stop and remove */
-            cJSON* req = cJSON_CreateObject();
-            cJSON_AddStringToObject(req, "apiVersion", "1.0");
-            cJSON_AddStringToObject(req, "method", "stop");
-            cJSON* params = cJSON_AddObjectToObject(req, "params");
-            cJSON_AddStringToObject(params, "profile", active_sirens[i].profile);
-            char* body = cJSON_PrintUnformatted(req);
-            cJSON_Delete(req);
-            char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
-            free(body);
-            if (resp) free(resp);
-            LOG("siren_light: condition-stop profile '%s' for rule %s", active_sirens[i].profile, active_sirens[i].rule_id);
-            active_sirens[i] = active_sirens[--active_siren_count];
+    for (int i = 0; i < while_active_count; ) {
+        if (!cb(while_active_entries[i].rule_id, userdata)) {
+            while_active_undo(&while_active_entries[i]);
+            while_active_entries[i] = while_active_entries[--while_active_count];
         } else {
             i++;
         }
@@ -68,7 +110,7 @@ void Actions_ForEach_Active_Siren(int (*cb)(const char* rule_id, void* userdata)
 }
 
 void Actions_Init(void) {
-    active_siren_count = 0;
+    while_active_count = 0;
 }
 
 /*-----------------------------------------------------
@@ -255,25 +297,38 @@ static void action_http_request(cJSON* cfg, cJSON* trigger_data) {
 }
 
 /* recording */
-static void action_recording(cJSON* cfg) {
+static void action_recording(const char* rule_id, cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     if (!op) op = "start";
+    int starting = strcmp(op, "stop") != 0;
 
     cJSON* req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "apiVersion", "1.0");
-    cJSON_AddStringToObject(req, "method", strcmp(op, "stop") == 0 ? "stop" : "start");
+    cJSON_AddStringToObject(req, "method", starting ? "start" : "stop");
     cJSON* params = cJSON_AddObjectToObject(req, "params");
     cJSON_AddStringToObject(params, "diskId", "SD_DISK");
-    const char* profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
-    cJSON_AddStringToObject(params, "streamProfile", profile ? profile : "Quality");
-    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
-    if (dur) cJSON_AddNumberToObject(params, "maxRecordingTime", dur->valuedouble);
+    if (starting) {
+        const char* profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
+        cJSON_AddStringToObject(params, "streamProfile", profile ? profile : "Quality");
+        cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
+        if (dur) cJSON_AddNumberToObject(params, "maxRecordingTime", dur->valuedouble);
+    }
 
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
     char* resp = ACAP_VAPIX_Post("record.cgi", body);
     free(body);
     if (resp) free(resp);
+
+    if (starting && rule_id) {
+        cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+        if (wa && cJSON_IsTrue(wa)) {
+            WhileActiveEntry e = {0};
+            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+            snprintf(e.atype,   sizeof(e.atype),   "recording");
+            while_active_register(&e);
+        }
+    }
 }
 
 /* overlay_text
@@ -282,10 +337,6 @@ static void action_recording(cJSON* cfg) {
  * overlay slot on repeated firings.  After reboot the identity is -1 and
  * a new overlay is created automatically.
  */
-#define MAX_OVERLAY_CHANNELS 8
-static int overlay_identity[MAX_OVERLAY_CHANNELS]; /* -1 = not yet created */
-static int overlay_identity_init = 0;
-
 static void overlay_remove(int identity) {
     char body[64];
     snprintf(body, sizeof(body), "{\"apiVersion\":\"1.0\",\"method\":\"remove\",\"params\":{\"identity\":%d}}", identity);
@@ -303,7 +354,7 @@ static gboolean overlay_remove_cb(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
-static void action_overlay_text(cJSON* cfg, cJSON* trigger_data) {
+static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     if (!overlay_identity_init) {
         for (int i = 0; i < MAX_OVERLAY_CHANNELS; i++) overlay_identity[i] = -1;
         overlay_identity_init = 1;
@@ -356,7 +407,7 @@ static void action_overlay_text(cJSON* cfg, cJSON* trigger_data) {
             if (cJSON_GetObjectItem(resp_j, "error") && identity >= 0) {
                 overlay_identity[channel - 1] = -1;
                 cJSON_Delete(resp_j);
-                action_overlay_text(cfg, trigger_data); /* one retry */
+                action_overlay_text(rule_id, cfg, trigger_data); /* one retry */
                 return;
             }
             /* On addText success, store the returned identity */
@@ -374,6 +425,15 @@ static void action_overlay_text(cJSON* cfg, cJSON* trigger_data) {
         g_timeout_add_seconds((guint)duration,
                               overlay_remove_cb,
                               GINT_TO_POINTER(overlay_identity[channel - 1]));
+    } else if (duration == 0 && rule_id) {
+        cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+        if (wa && cJSON_IsTrue(wa)) {
+            WhileActiveEntry e = {0};
+            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+            snprintf(e.atype,   sizeof(e.atype),   "overlay_text");
+            e.overlay_channel = channel;
+            while_active_register(&e);
+        }
     }
 }
 
@@ -402,7 +462,7 @@ static void action_ptz_preset(cJSON* cfg) {
 }
 
 /* io_output */
-static void action_io_output(cJSON* cfg) {
+static void action_io_output(const char* rule_id, cJSON* cfg) {
     cJSON* port_j = cJSON_GetObjectItem(cfg, "port");
     if (!port_j) return;
     int port = (int)port_j->valuedouble;
@@ -419,6 +479,20 @@ static void action_io_output(cJSON* cfg) {
     }
     char* resp = ACAP_VAPIX_Get(req);
     if (resp) free(resp);
+
+    /* Register while_active only when no duration (duration handles its own reset) */
+    if ((!dur || dur->valuedouble == 0) && rule_id) {
+        cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+        if (wa && cJSON_IsTrue(wa)) {
+            WhileActiveEntry e = {0};
+            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+            snprintf(e.atype,   sizeof(e.atype),   "io_output");
+            e.io_port = port;
+            snprintf(e.io_restore, sizeof(e.io_restore), "%s",
+                     strcmp(state, "active") == 0 ? "inactive" : "active");
+            while_active_register(&e);
+        }
+    }
 }
 
 /* audio_clip */
@@ -529,18 +603,11 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
     if (!stopping && rule_id) {
         cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
         if (wa && cJSON_IsTrue(wa)) {
-            /* Register for auto-stop when condition clears */
-            for (int i = 0; i < active_siren_count; i++) {
-                if (strcmp(active_sirens[i].rule_id, rule_id) == 0) {
-                    active_sirens[i] = active_sirens[--active_siren_count];
-                    break;
-                }
-            }
-            if (active_siren_count < MAX_ACTIVE_SIRENS) {
-                snprintf(active_sirens[active_siren_count].rule_id,  sizeof(active_sirens[0].rule_id),  "%s", rule_id);
-                snprintf(active_sirens[active_siren_count].profile,  sizeof(active_sirens[0].profile),  "%s", profile);
-                active_siren_count++;
-            }
+            WhileActiveEntry e = {0};
+            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+            snprintf(e.atype,   sizeof(e.atype),   "siren_light");
+            snprintf(e.siren_profile, sizeof(e.siren_profile), "%s", profile);
+            while_active_register(&e);
         }
     }
 }
@@ -621,10 +688,10 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
 
         /* Synchronous actions */
         if      (strcmp(type, "http_request")      == 0) action_http_request(action, trigger_data);
-        else if (strcmp(type, "recording")         == 0) action_recording(action);
-        else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(action, trigger_data);
+        else if (strcmp(type, "recording")         == 0) action_recording(rule_id, action);
+        else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(rule_id, action, trigger_data);
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
-        else if (strcmp(type, "io_output")         == 0) action_io_output(action);
+        else if (strcmp(type, "io_output")         == 0) action_io_output(rule_id, action);
         else if (strcmp(type, "audio_clip")        == 0) action_audio_clip(action);
         else if (strcmp(type, "siren_light")       == 0) action_siren_light(rule_id, action);
         else if (strcmp(type, "send_syslog")       == 0) action_send_syslog(action, trigger_data);

@@ -1129,20 +1129,30 @@ function actionFields(a) {
         ${hint}
       </div>
     </div>`;
-  if (type === 'recording') return `
+  if (type === 'recording') {
+    const recStart = (a.operation || 'start') === 'start';
+    return `
     <div class="form-row">
       <div class="form-group">
         <label>Operation</label>
-        <select data-k="operation">
-          <option value="start" ${(a.operation||'start')==='start' ? 'selected' : ''}>Start Recording</option>
-          <option value="stop"  ${a.operation==='stop' ? 'selected' : ''}>Stop Recording</option>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="start" ${recStart ? 'selected' : ''}>Start Recording</option>
+          <option value="stop"  ${!recStart ? 'selected' : ''}>Stop Recording</option>
         </select>
       </div>
       <div class="form-group">
-        <label>Max Duration (seconds, 0=unlimited)</label>
+        <label>Max Duration (s, 0=unlimited)</label>
         <input type="number" data-k="duration" min="0" value="${a.duration || 0}">
       </div>
-    </div>`;
+    </div>
+    ${recStart ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically stop when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
+  }
   if (type === 'overlay_text') return `
     <div class="form-row">
       <div class="form-group">
@@ -1158,7 +1168,7 @@ function actionFields(a) {
       </div>
       <div class="form-group" style="flex:0 0 130px;">
         <label>Duration (s, 0=keep)</label>
-        <input type="number" data-k="duration" min="0" value="${a.duration || 0}">
+        <input type="number" data-k="duration" min="0" value="${a.duration || 0}" onchange="rerenderAction(this)">
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Position</label>
@@ -1181,7 +1191,14 @@ function actionFields(a) {
           <option value="semiTransparent" ${a.text_color==='semiTransparent' ? 'selected':''}>Semi-transparent</option>
         </select>
       </div>
-    </div>`;
+    </div>
+    ${!(parseInt(a.duration) > 0) ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically clear overlay when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
   if (type === 'ptz_preset') {
     let presetControl, channelControl = '';
     if (ptzPresets === null) {
@@ -1210,7 +1227,9 @@ function actionFields(a) {
       ${channelControl}
     </div>`;
   }
-  if (type === 'io_output') return `
+  if (type === 'io_output') {
+    const ioDur = parseInt(a.duration) || 0;
+    return `
     <div class="form-row">
       <div class="form-group">
         <label>Port</label>
@@ -1224,10 +1243,18 @@ function actionFields(a) {
         </select>
       </div>
       <div class="form-group">
-        <label>Duration (seconds, 0=permanent)</label>
-        <input type="number" data-k="duration" min="0" value="${a.duration || 0}">
+        <label>Duration (s, 0=permanent)</label>
+        <input type="number" data-k="duration" min="0" value="${ioDur}" onchange="rerenderAction(this)">
       </div>
-    </div>`;
+    </div>
+    ${ioDur === 0 ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically reset port when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
+  }
   if (type === 'audio_clip') {
     let clipControl;
     if (audioClips === null) {
@@ -1588,6 +1615,12 @@ function normalizeAction(a) {
     out.profile = a.profile || '';
     if (out.signal_action === 'start') out.while_active = a.while_active === true;
   }
+  if (a.type === 'recording' && (out.operation || 'start') === 'start')
+    out.while_active = a.while_active === true;
+  if (a.type === 'overlay_text' && !(parseInt(a.duration) > 0))
+    out.while_active = a.while_active === true;
+  if (a.type === 'io_output' && !(parseInt(a.duration) > 0))
+    out.while_active = a.while_active === true;
   return out;
 }
 
