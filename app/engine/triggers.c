@@ -8,6 +8,7 @@
 #include "scheduler.h"
 #include "variables.h"
 #include "mqtt_client.h"
+#include "actions.h"
 #include "../ACAP.h"
 
 /* Simple MQTT topic filter matching (supports + and #) */
@@ -347,7 +348,15 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
         /* Boolean value filter */
         if (s->filter_key[0] && s->filter_value >= 0) {
             cJSON* fv = cJSON_GetObjectItem(event, s->filter_key);
-            if (!fv || (cJSON_IsTrue(fv) ? 1 : 0) != s->filter_value) continue;
+            if (!fv || (cJSON_IsTrue(fv) ? 1 : 0) != s->filter_value) {
+                Actions_Stop_Active_Siren(s->rule_id);
+                continue;
+            }
+        } else if (!s->value_key[0]) {
+            /* No filter — stop siren if event carries active=false */
+            cJSON* av = cJSON_GetObjectItem(event, "active");
+            if (av && cJSON_IsBool(av) && !cJSON_IsTrue(av))
+                Actions_Stop_Active_Siren(s->rule_id);
         }
 
         /* IO edge filter + hold duration */
@@ -385,6 +394,7 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
             int passes = value_passes(vitem->valuedouble, s->value_op, s->value_threshold, s->value_threshold2);
             if (!passes) {
                 /* Condition dropped — reset so next activation can fire */
+                if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
                 s->value_since = 0; s->value_hysteresis = 0;
                 continue;
             }

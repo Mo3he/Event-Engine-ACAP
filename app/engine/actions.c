@@ -18,8 +18,34 @@
 /* Forward declaration — rule_engine.c provides this */
 extern void RuleEngine_Dispatch_RuleFired(const char* rule_id);
 
+/* Active siren tracking for "while_active" mode */
+#define MAX_ACTIVE_SIRENS 32
+static struct { char rule_id[64]; char profile[128]; } active_sirens[MAX_ACTIVE_SIRENS];
+static int active_siren_count = 0;
+
+void Actions_Stop_Active_Siren(const char* rule_id) {
+    if (!rule_id) return;
+    for (int i = 0; i < active_siren_count; i++) {
+        if (strcmp(active_sirens[i].rule_id, rule_id) == 0) {
+            cJSON* req = cJSON_CreateObject();
+            cJSON_AddStringToObject(req, "apiVersion", "1.0");
+            cJSON_AddStringToObject(req, "method", "stop");
+            cJSON* params = cJSON_AddObjectToObject(req, "params");
+            cJSON_AddStringToObject(params, "profile", active_sirens[i].profile);
+            char* body = cJSON_PrintUnformatted(req);
+            cJSON_Delete(req);
+            char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
+            free(body);
+            if (resp) free(resp);
+            LOG("siren_light: auto-stopped profile '%s' for rule %s", active_sirens[i].profile, rule_id);
+            active_sirens[i] = active_sirens[--active_siren_count];
+            return;
+        }
+    }
+}
+
 void Actions_Init(void) {
-    /* Nothing to initialise currently */
+    active_siren_count = 0;
 }
 
 /*-----------------------------------------------------
@@ -459,11 +485,12 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
 }
 
 /* siren_light — control Axis Siren and Light via VAPIX */
-static void action_siren_light(cJSON* cfg) {
+static void action_siren_light(const char* rule_id, cJSON* cfg) {
     const char* signal_action = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "signal_action"));
     const char* profile        = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
     if (!profile || profile[0] == '\0') { LOG_WARN("siren_light: no profile specified"); return; }
-    const char* method = (signal_action && strcmp(signal_action, "stop") == 0) ? "stop" : "start";
+    int stopping = (signal_action && strcmp(signal_action, "stop") == 0);
+    const char* method = stopping ? "stop" : "start";
 
     cJSON* req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "apiVersion", "1.0");
@@ -475,6 +502,24 @@ static void action_siren_light(cJSON* cfg) {
     char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
     free(body);
     if (resp) free(resp);
+
+    if (!stopping && rule_id) {
+        cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+        if (wa && cJSON_IsTrue(wa)) {
+            /* Register for auto-stop when condition clears */
+            for (int i = 0; i < active_siren_count; i++) {
+                if (strcmp(active_sirens[i].rule_id, rule_id) == 0) {
+                    active_sirens[i] = active_sirens[--active_siren_count];
+                    break;
+                }
+            }
+            if (active_siren_count < MAX_ACTIVE_SIRENS) {
+                snprintf(active_sirens[active_siren_count].rule_id,  sizeof(active_sirens[0].rule_id),  "%s", rule_id);
+                snprintf(active_sirens[active_siren_count].profile,  sizeof(active_sirens[0].profile),  "%s", profile);
+                active_siren_count++;
+            }
+        }
+    }
 }
 
 /* run_rule — forward to rule engine */
@@ -558,7 +603,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
         else if (strcmp(type, "io_output")         == 0) action_io_output(action);
         else if (strcmp(type, "audio_clip")        == 0) action_audio_clip(action);
-        else if (strcmp(type, "siren_light")       == 0) action_siren_light(action);
+        else if (strcmp(type, "siren_light")       == 0) action_siren_light(rule_id, action);
         else if (strcmp(type, "send_syslog")       == 0) action_send_syslog(action, trigger_data);
         else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action);
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);

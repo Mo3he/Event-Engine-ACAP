@@ -1261,20 +1261,30 @@ function actionFields(a) {
       }
       profileControl = `<select data-k="profile">${opts}</select>`;
     }
+    const isStart = (a.signal_action || 'start') === 'start';
     return `
     <div class="form-row">
       <div class="form-group" style="flex:0 0 120px;">
         <label>Action</label>
-        <select data-k="signal_action">
-          <option value="start" ${(a.signal_action||'start')==='start' ? 'selected':''}>Start</option>
-          <option value="stop"  ${a.signal_action==='stop' ? 'selected':''}>Stop</option>
+        <select data-k="signal_action" onchange="rerenderAction(this)">
+          <option value="start" ${isStart ? 'selected':''}>Start</option>
+          <option value="stop"  ${!isStart ? 'selected':''}>Stop</option>
         </select>
       </div>
       <div class="form-group">
         <label>Profile</label>${profileControl}
-        <div class="form-hint">Profile names are configured in the camera's Siren and Light settings. Start with no duration runs until stopped.</div>
+        <div class="form-hint">Profile names are configured in the camera's Siren and Light settings.</div>
       </div>
-    </div>`;
+    </div>
+    ${isStart ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+          Run while active - automatically stop when the triggering condition clears
+        </label>
+      </div>
+    </div>` : ''}`;
   }
   if (type === 'send_syslog') return `
     <div class="form-row">
@@ -1441,6 +1451,18 @@ function renderActionList() {
   `).join('');
 }
 
+function rerenderAction(sel) {
+  const row = sel.closest('.tca-row');
+  const i = parseInt(row.id.replace('arow-', ''));
+  const el = document.getElementById('arow-' + i);
+  if (!el) return;
+  const data = { type: actionRows[i].type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[i] = data;
+  renderActionList();
+}
 function addActionRow() { actionRows.push({ type: 'http_request' }); renderActionList(); }
 function removeActionRow(i) { actionRows.splice(i, 1); renderActionList(); }
 function changeActionType(i, type) { actionRows[i] = { type }; renderActionList(); }
@@ -1458,7 +1480,7 @@ function collectRows(rows, prefix) {
     if (!el) return _;
     const data = { type: _.type };
     el.querySelectorAll('[data-k]').forEach(inp => {
-      data[inp.dataset.k] = inp.value;
+      data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
     });
     return data;
   });
@@ -1564,6 +1586,7 @@ function normalizeAction(a) {
   if (a.type === 'siren_light') {
     out.signal_action = a.signal_action || 'start';
     out.profile = a.profile || '';
+    if (out.signal_action === 'start') out.while_active = a.while_active === true;
   }
   return out;
 }
