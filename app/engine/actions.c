@@ -44,6 +44,29 @@ void Actions_Stop_Active_Siren(const char* rule_id) {
     }
 }
 
+/* Iterate active sirens — callback returns 0 to stop (siren should be stopped), 1 to keep */
+void Actions_ForEach_Active_Siren(int (*cb)(const char* rule_id, void* userdata), void* userdata) {
+    for (int i = 0; i < active_siren_count; ) {
+        if (!cb(active_sirens[i].rule_id, userdata)) {
+            /* Callback says stop — send stop and remove */
+            cJSON* req = cJSON_CreateObject();
+            cJSON_AddStringToObject(req, "apiVersion", "1.0");
+            cJSON_AddStringToObject(req, "method", "stop");
+            cJSON* params = cJSON_AddObjectToObject(req, "params");
+            cJSON_AddStringToObject(params, "profile", active_sirens[i].profile);
+            char* body = cJSON_PrintUnformatted(req);
+            cJSON_Delete(req);
+            char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
+            free(body);
+            if (resp) free(resp);
+            LOG("siren_light: condition-stop profile '%s' for rule %s", active_sirens[i].profile, active_sirens[i].rule_id);
+            active_sirens[i] = active_sirens[--active_siren_count];
+        } else {
+            i++;
+        }
+    }
+}
+
 void Actions_Init(void) {
     active_siren_count = 0;
 }

@@ -485,9 +485,29 @@ void RuleEngine_Dispatch_RuleFired(const char* rule_id) {
     Triggers_On_Rule_Fired(rule_id);
 }
 
+static int siren_condition_check(const char* rule_id, void* userdata) {
+    (void)userdata;
+    pthread_mutex_lock(&store_lock);
+    for (int i = 0; i < rule_count; i++) {
+        if (strcmp(rules[i].id, rule_id) == 0) {
+            Rule* r = &rules[i];
+            if (!r->enabled || !r->conditions_json || cJSON_GetArraySize(r->conditions_json) == 0) {
+                pthread_mutex_unlock(&store_lock);
+                return 1; /* no conditions — keep running */
+            }
+            int pass = Conditions_Evaluate(r->conditions_json, r->condition_logic, NULL);
+            pthread_mutex_unlock(&store_lock);
+            return pass;
+        }
+    }
+    pthread_mutex_unlock(&store_lock);
+    return 0; /* rule gone — stop siren */
+}
+
 void RuleEngine_Tick(void) {
     Triggers_Tick();
     Variables_Flush();
+    Actions_ForEach_Active_Siren(siren_condition_check, NULL);
 }
 
 int RuleEngine_Fire(const char* id, cJSON* trigger_data) {

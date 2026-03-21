@@ -37,6 +37,7 @@ void  Actions_Init(void);
 void  Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_data);
 char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data); /* caller must free() */
 void  Actions_Stop_Active_Siren(const char* rule_id); /* stop while_active siren if running */
+void  Actions_ForEach_Active_Siren(int (*cb)(const char* rule_id, void* userdata), void* userdata);
 
 #ifdef __cplusplus
 }
