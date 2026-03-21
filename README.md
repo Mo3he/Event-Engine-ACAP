@@ -24,7 +24,7 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 | Type | Description |
 |------|-------------|
 | **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition — boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
-| **Schedule** | Cron expression, fixed interval, or daily time with day-of-week selection |
+| **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token |
 | **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
@@ -39,13 +39,13 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 | **I/O State** | Check the current state of an I/O port |
 | **Counter Compare** | Compare a counter value against a threshold |
 | **Variable Compare** | Compare a named variable against a value |
-| **HTTP Check** | Make an HTTP request; pass only if the response matches an expected value |
+| **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
 
 ## Actions
 
 | Type | Description |
 |------|-------------|
-| **HTTP Request** | GET, POST, PUT, or DELETE to any URL |
+| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error) — log, MQTT publish, or secondary HTTP request |
 | **MQTT Publish** | Publish a message to a topic with configurable QoS and retain flag |
 | **Recording** | Start or stop a recording |
 | **Overlay Text** | Write text to the video stream with an optional auto-remove duration |
@@ -67,8 +67,16 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 
 Each rule has two optional execution controls:
 
-- **Cooldown** — minimum seconds between firings. Prevents rapid re-firing when a trigger fires repeatedly.
+- **Cooldown** — minimum seconds between firings. Prevents alert floods when a trigger fires repeatedly.
 - **Max Executions** — limit how many times the rule can fire, with a configurable period: per minute, per hour, per day, or lifetime total. The period counter resets automatically; the lifetime counter resets when the rule is saved.
+
+### Arm / Disarm Pattern
+
+Use the **Variable Compare** condition with a variable named `system.armed` (value `"true"` or `"false"`) to make rules only fire when the system is armed. Example rules shipped in the default template:
+
+1. **Arm System via MQTT** — subscribe to `cameras/<serial>/arm`, set `system.armed = "true"`
+2. **Disarm System via MQTT** — same topic, set `system.armed = "false"`
+3. **Motion Alert When Armed** — motion trigger with a Variable Compare condition on `system.armed = "true"`
 
 ---
 
@@ -88,6 +96,7 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 | `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.CO2}}`) |
 | `{{var.NAME}}` | Value of a named variable |
 | `{{counter.NAME}}` | Value of a named counter |
+| `{{trigger.snapshot_base64}}` | Base64-encoded JPEG snapshot (only when **Attach snapshot** is enabled on the HTTP Request action) |
 
 The rule editor shows which `{{trigger.*}}` keys are available for the selected trigger type.
 
@@ -117,9 +126,9 @@ Configure broker, port, credentials, client ID, and a base topic in the **MQTT**
 Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 
 - **Rules** - create, edit, duplicate, enable/disable, and delete rules
-- **Status** - engine status, MQTT connection state, device info, export/import
-- **Variables** - view and manage named variables and counters
 - **Event Log** - per-rule firing history with timestamps and result codes
+- **Variables** - view and manage named variables and counters
+- **Settings** - engine settings (location for sunrise/sunset), MQTT broker configuration, device info, and backup/restore
 
 ---
 

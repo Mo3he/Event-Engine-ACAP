@@ -225,22 +225,74 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
  * Individual action implementations
  *-----------------------------------------------------*/
 
+/* Forward declaration — execute_from is defined later in this file, but called by action_http_request */
+static void execute_from(const char* rule_id, cJSON* actions_array,
+                         int start_index, cJSON* trigger_data);
+
+/* Base64 encoding for snapshot attachment */
+static const char b64_chars[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static char* base64_encode(const unsigned char* data, size_t len) {
+    size_t out_len = 4 * ((len + 2) / 3);
+    char* out = malloc(out_len + 1);
+    if (!out) return NULL;
+    size_t i = 0, j = 0;
+    while (i < len) {
+        unsigned int a = (i < len) ? (unsigned char)data[i++] : 0;
+        unsigned int b = (i < len) ? (unsigned char)data[i++] : 0;
+        unsigned int c = (i < len) ? (unsigned char)data[i++] : 0;
+        unsigned int triple = (a << 16) | (b << 8) | c;
+        out[j++] = b64_chars[(triple >> 18) & 0x3F];
+        out[j++] = b64_chars[(triple >> 12) & 0x3F];
+        out[j++] = b64_chars[(triple >>  6) & 0x3F];
+        out[j++] = b64_chars[(triple      ) & 0x3F];
+    }
+    if (len % 3 >= 1) out[out_len - 1] = '=';
+    if (len % 3 == 1) out[out_len - 2] = '=';
+    out[out_len] = '\0';
+    return out;
+}
+
 /* http_request */
 static size_t curl_discard(void* p, size_t sz, size_t n, void* ud) {
     (void)p; (void)ud; return sz * n;
 }
 
-static void action_http_request(cJSON* cfg, cJSON* trigger_data) {
+static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
     if (!url_tmpl) return;
 
-    char* url    = Actions_Expand_Template(url_tmpl, trigger_data);
+    /* Optional snapshot attachment: fetch JPEG and inject as {{snapshot_base64}} */
+    cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
+    char* snap_b64 = NULL;
+    cJSON* td_with_snap = NULL; /* extended trigger_data that includes snapshot_base64 */
+    if (snap_j && cJSON_IsTrue(snap_j)) {
+        size_t snap_len = 0;
+        char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+        if (snap_raw && snap_len > 0) {
+            snap_b64 = base64_encode((unsigned char*)snap_raw, snap_len);
+            free(snap_raw);
+        }
+        if (snap_b64) {
+            /* Add snapshot_base64 to a copy of trigger_data so {{trigger.snapshot_base64}} expands */
+            td_with_snap = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
+            if (td_with_snap)
+                cJSON_AddStringToObject(td_with_snap, "snapshot_base64", snap_b64);
+        }
+    }
+    cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
+
+    char* url    = Actions_Expand_Template(url_tmpl, effective_td);
     char* body   = NULL;
     const char* method = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "method"));
     if (!method) method = "GET";
 
     const char* body_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "body"));
-    if (body_tmpl) body = Actions_Expand_Template(body_tmpl, trigger_data);
+    if (body_tmpl) body = Actions_Expand_Template(body_tmpl, effective_td);
+
+    if (td_with_snap) cJSON_Delete(td_with_snap);
+    free(snap_b64);
 
     CURL* curl = curl_easy_init();
     if (!curl) { free(url); free(body); return; }
@@ -287,13 +339,26 @@ static void action_http_request(cJSON* cfg, cJSON* trigger_data) {
     if (hdrs) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK)
+    long http_code = 0;
+    if (res == CURLE_OK)
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    else
         LOG_WARN("http_request to %s failed: %s", url, curl_easy_strerror(res));
 
     if (hdrs) curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     free(url);
     free(body);
+
+    /* On failure (curl error or non-2xx), run on_failure actions if defined */
+    int failed = (res != CURLE_OK) || (http_code < 200) || (http_code >= 300);
+    if (failed) {
+        cJSON* on_failure = cJSON_GetObjectItem(cfg, "on_failure");
+        if (on_failure && cJSON_IsArray(on_failure) && cJSON_GetArraySize(on_failure) > 0) {
+            LOG("http_request failed (curl=%d, http=%ld) — running on_failure actions", (int)res, http_code);
+            execute_from(rule_id, on_failure, 0, trigger_data);
+        }
+    }
 }
 
 /* recording */
@@ -647,9 +712,6 @@ typedef struct {
 
 static gboolean delay_resume(gpointer user_data);
 
-static void execute_from(const char* rule_id, cJSON* actions_array,
-                         int start_index, cJSON* trigger_data);
-
 static gboolean delay_resume(gpointer user_data) {
     DelayCtx* ctx = (DelayCtx*)user_data;
     execute_from(ctx->rule_id, ctx->remaining_actions, 0, ctx->trigger_data);
@@ -687,7 +749,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         }
 
         /* Synchronous actions */
-        if      (strcmp(type, "http_request")      == 0) action_http_request(action, trigger_data);
+        if      (strcmp(type, "http_request")      == 0) action_http_request(rule_id, action, trigger_data);
         else if (strcmp(type, "recording")         == 0) action_recording(rule_id, action);
         else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(rule_id, action, trigger_data);
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);

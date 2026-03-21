@@ -20,8 +20,7 @@
     <button class="tab-btn active" data-tab="rules">Rules</button>
     <button class="tab-btn" data-tab="log">Event Log</button>
     <button class="tab-btn" data-tab="variables">Variables</button>
-    <button class="tab-btn" data-tab="mqtt">MQTT</button>
-    <button class="tab-btn" data-tab="status">Status</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
     <a class="tab-btn" href="swagger.html" target="_blank" style="text-decoration:none;">API Docs</a>
   </nav>
 
@@ -92,17 +91,45 @@
     </div>
   </div>
 
-  <!-- ===== MQTT Tab ===== -->
-  <div id="tab-mqtt" class="tab-content">
+  <!-- ===== Settings Tab ===== -->
+  <div id="tab-settings" class="tab-content">
     <div class="container">
-      <div class="event-log-header">
-        <h2 style="font-size:15px;">MQTT Broker</h2>
-        <div id="mqtt-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
-          <span id="mqtt-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
-          <span id="mqtt-status-text">Loading…</span>
-        </div>
+
+      <!-- Status -->
+      <div class="status-grid" id="status-grid"></div>
+      <div class="card" id="device-card" style="margin-bottom:16px;"></div>
+
+      <!-- Engine Settings -->
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">ENGINE SETTINGS</h3>
+        <form id="engine-settings-form" onsubmit="saveEngineSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Latitude</label>
+              <input type="number" step="0.0001" name="latitude" id="engine-lat" value="0" placeholder="e.g. 59.3293">
+              <div class="form-hint">Used by Sunrise/Sunset schedule triggers. Degrees North (+) or South (−).</div>
+            </div>
+            <div class="form-group">
+              <label>Longitude</label>
+              <input type="number" step="0.0001" name="longitude" id="engine-lon" value="0" placeholder="e.g. 18.0686">
+              <div class="form-hint">Degrees East (+) or West (−).</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="submit" class="btn btn-primary">Save Engine Settings</button>
+          </div>
+        </form>
       </div>
-      <div class="card">
+
+      <!-- MQTT Settings -->
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">MQTT BROKER</h3>
+          <div id="mqtt-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+            <span id="mqtt-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
+            <span id="mqtt-status-text">Loading…</span>
+          </div>
+        </div>
         <form id="mqtt-form" onsubmit="saveMqttSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
           <div class="form-row">
             <div class="form-group">
@@ -148,15 +175,9 @@
           </div>
         </form>
       </div>
-    </div>
-  </div>
 
-  <!-- ===== Status Tab ===== -->
-  <div id="tab-status" class="tab-content">
-    <div class="container">
-      <div class="status-grid" id="status-grid"></div>
-      <div class="card" id="device-card"></div>
-      <div class="card" style="margin-top:12px;">
+      <!-- Backup & Restore -->
+      <div class="card">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
           Export your rules and settings before uninstalling so you can restore them after reinstalling.
@@ -172,6 +193,7 @@
           </label>
         </div>
       </div>
+
     </div>
   </div>
 

@@ -1,7 +1,9 @@
 {
   "engine": {
     "max_log_entries": 200,
-    "webhook_token_required": true
+    "webhook_token_required": true,
+    "latitude": 0.0,
+    "longitude": 0.0
   },
   "mqtt": {
     "enabled": false,

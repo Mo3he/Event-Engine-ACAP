@@ -143,6 +143,41 @@ static int cond_http_check(cJSON* cfg) {
     int ok = 1;
     if (exp_status && (long)exp_status->valuedouble != http_code) ok = 0;
     if (ok && exp_body && buf.data && strstr(buf.data, exp_body) == NULL) ok = 0;
+
+    /* JSONPath check: dot-notation traversal into parsed JSON response */
+    const char* json_path     = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "json_path"));
+    const char* json_expected = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "json_expected"));
+    if (ok && json_path && json_expected && buf.data) {
+        cJSON* root = cJSON_Parse(buf.data);
+        if (!root) {
+            ok = 0; /* expected JSON but body is not valid JSON */
+        } else {
+            /* Walk the dot-separated path */
+            char path_copy[256];
+            strncpy(path_copy, json_path, sizeof(path_copy) - 1);
+            path_copy[sizeof(path_copy) - 1] = '\0';
+            cJSON* node = root;
+            char* token = strtok(path_copy, ".");
+            while (token && node) {
+                node = cJSON_GetObjectItem(node, token);
+                token = strtok(NULL, ".");
+            }
+            if (!node) {
+                ok = 0; /* path not found */
+            } else {
+                char val_str[256] = {0};
+                if (cJSON_IsString(node))
+                    strncpy(val_str, node->valuestring, sizeof(val_str) - 1);
+                else if (cJSON_IsNumber(node))
+                    snprintf(val_str, sizeof(val_str), "%g", node->valuedouble);
+                else if (cJSON_IsBool(node))
+                    strncpy(val_str, cJSON_IsTrue(node) ? "true" : "false", sizeof(val_str) - 1);
+                if (strcmp(val_str, json_expected) != 0) ok = 0;
+            }
+            cJSON_Delete(root);
+        }
+    }
+
     free(buf.data);
     return ok;
 }

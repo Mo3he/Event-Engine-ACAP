@@ -2130,6 +2130,64 @@ char* ACAP_VAPIX_Get(const char* endpoint) {
     return response;
 }
 
+/* Binary-safe write callback for ACAP_VAPIX_GetBinary */
+struct acap_binary_buf { char* data; size_t size; };
+static size_t acap_binary_write_cb(char* ptr, size_t sz, size_t nmemb, void* ud) {
+    struct acap_binary_buf* buf = (struct acap_binary_buf*)ud;
+    size_t total = sz * nmemb;
+    char* newdata = realloc(buf->data, buf->size + total);
+    if (!newdata) return 0;
+    memcpy(newdata + buf->size, ptr, total);
+    buf->data = newdata;
+    buf->size += total;
+    return total;
+}
+
+char* ACAP_VAPIX_GetBinary(const char* endpoint, size_t* out_size) {
+    if (!VAPIX_CURL || !endpoint || !out_size) return NULL;
+    *out_size = 0;
+
+    const char* host = VAPIX_Credentials ? "127.0.0.12" : "127.0.0.1";
+    size_t url_size = strlen("http:///axis-cgi/") + strlen(host) + strlen(endpoint) + 1;
+    char* url = malloc(url_size);
+    if (!url) return NULL;
+    snprintf(url, url_size, "http://%s/axis-cgi/%s", host, endpoint);
+
+    struct acap_binary_buf buf = {NULL, 0};
+    pthread_mutex_lock(&vapix_mutex);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_URL, url);
+    if (VAPIX_Credentials) {
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_USERPWD, VAPIX_Credentials);
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    } else {
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPAUTH, 0L);
+    }
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEFUNCTION, acap_binary_write_cb);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &buf);
+
+    CURLcode res = curl_easy_perform(VAPIX_CURL);
+    pthread_mutex_unlock(&vapix_mutex);
+    free(url);
+
+    if (res != CURLE_OK) {
+        LOG_WARN("%s: %d: %s", __func__, res, curl_easy_strerror(res));
+        free(buf.data);
+        return NULL;
+    }
+
+    long response_code;
+    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    if (response_code >= 300) {
+        LOG_WARN("%s: HTTP %ld\n", __func__, response_code);
+        free(buf.data);
+        return NULL;
+    }
+
+    *out_size = buf.size;
+    return buf.data;
+}
+
 char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
     if (!VAPIX_Credentials || !VAPIX_CURL || !endpoint || !request) {
         LOG_WARN("%s: Invalid input\n", __func__);

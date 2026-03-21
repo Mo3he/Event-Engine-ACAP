@@ -72,8 +72,7 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'log')       loadEvents();
     if (btn.dataset.tab === 'variables') loadVariables();
-    if (btn.dataset.tab === 'status')    loadStatus();
-    if (btn.dataset.tab === 'mqtt')      loadMqttSettings();
+    if (btn.dataset.tab === 'settings')  { loadStatus(); loadMqttSettings(); loadEngineSettings(); }
   });
 });
 
@@ -442,9 +441,9 @@ function buildRuleForm(rule) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Cooldown (seconds)</label>
+        <label>Cooldown (s, 0 = off)</label>
         <input id="f-cooldown" type="number" min="0" value="${rule ? rule.cooldown || 0 : 0}" placeholder="0 = no cooldown">
-        <div class="form-hint">Minimum seconds between firings</div>
+        <div class="form-hint">Prevents the rule from firing again for this many seconds after it triggers. Useful to avoid alert floods.</div>
       </div>
       <div class="form-group">
         <label>Max Executions</label>
@@ -662,9 +661,10 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Schedule Type</label>
         <select data-k="schedule_type" onchange="rerenderTrigger(this)">
-          <option value="daily_time" ${(t.schedule_type||'daily_time')==='daily_time' ? 'selected' : ''}>Daily Time</option>
-          <option value="interval"   ${t.schedule_type==='interval'   ? 'selected' : ''}>Interval</option>
-          <option value="cron"       ${t.schedule_type==='cron'       ? 'selected' : ''}>Cron Expression</option>
+          <option value="daily_time"    ${(t.schedule_type||'daily_time')==='daily_time'    ? 'selected' : ''}>Daily Time</option>
+          <option value="interval"      ${t.schedule_type==='interval'      ? 'selected' : ''}>Interval</option>
+          <option value="cron"          ${t.schedule_type==='cron'          ? 'selected' : ''}>Cron Expression</option>
+          <option value="astronomical"  ${t.schedule_type==='astronomical'  ? 'selected' : ''}>Sunrise / Sunset</option>
         </select>
       </div>
     </div>
@@ -693,6 +693,33 @@ function triggerFields(t, rowIdx) {
         <label>Cron Expression</label>
         <input type="text" data-k="cron" value="${escHtml(t.cron || '0 * * * *')}" placeholder="0 * * * *">
         <div class="form-hint">minute hour dom month dow  (e.g. "0 8 * * 1-5" = weekdays at 08:00)</div>
+      </div>
+    </div>` : ''}
+    ${t.schedule_type === 'astronomical' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event</label>
+        <select data-k="event">
+          <option value="sunrise" ${(t.event||'sunrise')==='sunrise' ? 'selected' : ''}>Sunrise</option>
+          <option value="sunset"  ${t.event==='sunset'  ? 'selected' : ''}>Sunset</option>
+          <option value="dawn"    ${t.event==='dawn'    ? 'selected' : ''}>Civil Dawn (−6°)</option>
+          <option value="dusk"    ${t.event==='dusk'    ? 'selected' : ''}>Civil Dusk (−6°)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Offset (minutes, + = later)</label>
+        <input type="number" data-k="offset_minutes" value="${t.offset_minutes || 0}" placeholder="0">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Latitude</label>
+        <input type="number" step="0.0001" data-k="latitude" value="${t.latitude !== undefined ? t.latitude : 0}" placeholder="e.g. 59.33">
+        <div class="form-hint">Set in engine settings or override per rule</div>
+      </div>
+      <div class="form-group">
+        <label>Longitude</label>
+        <input type="number" step="0.0001" data-k="longitude" value="${t.longitude !== undefined ? t.longitude : 0}" placeholder="e.g. 18.07">
       </div>
     </div>` : ''}`;
   if (type === 'io_input') return `
@@ -875,6 +902,7 @@ function conditionFields(c) {
       <div class="form-group">
         <label>Variable Name</label>
         <input type="text" data-k="name" value="${escHtml(c.name || '')}" placeholder="my_var">
+        <div class="form-hint">Tip: use <b>system.armed</b> = "true"/"false" for arm/disarm patterns</div>
       </div>
       <div class="form-group">
         <label>Operator</label>
@@ -919,6 +947,19 @@ function conditionFields(c) {
       <div class="form-group">
         <label>Expected Body Contains (optional)</label>
         <input type="text" data-k="expected_body" value="${escHtml(c.expected_body || '')}" placeholder="ok">
+        <div class="form-hint">Simple substring match in the response body</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>JSON Path (optional)</label>
+        <input type="text" data-k="json_path" value="${escHtml(c.json_path || '')}" placeholder="status.value">
+        <div class="form-hint">Dot-notation path into JSON response, e.g. <b>data.temperature</b></div>
+      </div>
+      <div class="form-group">
+        <label>JSON Expected Value</label>
+        <input type="text" data-k="json_expected" value="${escHtml(c.json_expected || '')}" placeholder="ok">
+        <div class="form-hint">Value at the JSON path must equal this (string comparison)</div>
       </div>
     </div>`;
   return '';
@@ -1017,9 +1058,12 @@ function toggleTokenPicker(btn) {
 
   /* build token groups */
   const triggerTokens = getTriggerTokens();
+  /* Check if any action in the current form has attach_snapshot enabled */
+  const hasSnapshot = actionRows.some(a => a.type === 'http_request' && a.attach_snapshot);
   const groups = [
     { label: 'Time',    tokens: ['{{timestamp}}', '{{date}}', '{{time}}'] },
-    { label: 'Camera',  tokens: ['{{camera.serial}}', '{{camera.model}}', '{{camera.ip}}'] },
+    { label: 'Camera',  tokens: ['{{camera.serial}}', '{{camera.model}}', '{{camera.ip}}',
+                                 ...(hasSnapshot ? ['{{trigger.snapshot_base64}}'] : [])] },
   ];
   if (triggerTokens.length)
     groups.push({ label: 'Trigger', tokens: triggerTokens });
@@ -1096,6 +1140,47 @@ function getTokenInsertWidget() {
   </div>`;
 }
 
+function renderOnFailureFields(a) {
+  /* on_failure is stored as array; for UI we support one fallback action.
+   * Also handle the flat form fields used during re-render after collectRows. */
+  const fb = (a.on_failure && a.on_failure[0]) || {};
+  const fbType = a.on_failure_type || fb.type || '';
+  return `
+  <div class="form-row" style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px;">
+    <div class="form-group">
+      <label>On Failure — Fallback action</label>
+      <select data-k="on_failure_type" onchange="rerenderAction(this)">
+        <option value=""              ${!fbType              ? 'selected' : ''}>None</option>
+        <option value="send_syslog"  ${fbType==='send_syslog'  ? 'selected' : ''}>Log message</option>
+        <option value="mqtt_publish" ${fbType==='mqtt_publish' ? 'selected' : ''}>MQTT publish</option>
+        <option value="http_request" ${fbType==='http_request' ? 'selected' : ''}>HTTP request</option>
+      </select>
+      <div class="form-hint">Executed when the HTTP request fails (non-2xx or network error)</div>
+    </div>
+  </div>
+  ${fbType === 'send_syslog' ? `
+  <div class="form-row"><div class="form-group">
+    <label>Log Message</label>
+    <input type="text" data-k="on_failure_message" value="${escHtml(a.on_failure_message || fb.message || 'HTTP request failed')}" placeholder="HTTP request failed">
+  </div></div>` : ''}
+  ${fbType === 'mqtt_publish' ? `
+  <div class="form-row">
+    <div class="form-group">
+      <label>Fallback MQTT Topic</label>
+      <input type="text" data-k="on_failure_topic" value="${escHtml(a.on_failure_topic || fb.topic || '')}">
+    </div>
+    <div class="form-group">
+      <label>Fallback Payload</label>
+      <input type="text" data-k="on_failure_payload" value="${escHtml(a.on_failure_payload || fb.payload || 'http_request_failed')}">
+    </div>
+  </div>` : ''}
+  ${fbType === 'http_request' ? `
+  <div class="form-row"><div class="form-group">
+    <label>Fallback URL (GET)</label>
+    <input type="text" data-k="on_failure_url" value="${escHtml(a.on_failure_url || fb.url || '')}" placeholder="https://example.com/alert">
+  </div></div>` : ''}`;
+}
+
 function actionFields(a) {
   const type = a.type || 'http_request';
   const hint = getTokenInsertWidget();
@@ -1128,7 +1213,15 @@ function actionFields(a) {
         <textarea data-k="body" placeholder='{"key": "{{trigger.value}}"}'>${escHtml(a.body || '')}</textarea>
         ${hint}
       </div>
-    </div>`;
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Attach camera snapshot
+      </label>
+      <div class="form-hint">Fetches a JPEG from the camera and injects it as <b>{{trigger.snapshot_base64}}</b> — use in the body to send the image as base64.</div>
+    </div></div>
+    ${renderOnFailureFields(a)}`;
   if (type === 'recording') {
     const recStart = (a.operation || 'start') === 'start';
     return `
@@ -1551,6 +1644,12 @@ function normalizeTrigger(t) {
       out.interval_seconds = parseInt(t.interval_seconds) || 60;
     } else if (out.schedule_type === 'cron') {
       out.cron = t.cron || '0 * * * *';
+    } else if (out.schedule_type === 'astronomical') {
+      out.event = t.event || 'sunrise';
+      out.latitude = parseFloat(t.latitude) || 0;
+      out.longitude = parseFloat(t.longitude) || 0;
+      const offMin = parseFloat(t.offset_minutes) || 0;
+      if (offMin !== 0) out.offset_minutes = offMin;
     }
   } else if (t.type === 'mqtt_message') {
     out.topic_filter = t.topic_filter || '#';
@@ -1577,6 +1676,7 @@ function normalizeCondition(c) {
   } else if (c.type === 'http_check') {
     out.url = c.url; out.expected_status = parseInt(c.expected_status) || 200;
     if (c.expected_body) out.expected_body = c.expected_body;
+    if (c.json_path) { out.json_path = c.json_path; out.json_expected = c.json_expected || ''; }
   }
   return out;
 }
@@ -1621,6 +1721,18 @@ function normalizeAction(a) {
     out.while_active = a.while_active === true;
   if (a.type === 'io_output' && !(parseInt(a.duration) > 0))
     out.while_active = a.while_active === true;
+  if (a.type === 'http_request') {
+    out.attach_snapshot = a.attach_snapshot === true;
+    /* Fallback action chain */
+    const fbType = a.on_failure_type || '';
+    if (fbType === 'send_syslog') {
+      out.on_failure = [{ type: 'send_syslog', message: a.on_failure_message || 'HTTP request failed' }];
+    } else if (fbType === 'mqtt_publish') {
+      out.on_failure = [{ type: 'mqtt_publish', topic: a.on_failure_topic || '', payload: a.on_failure_payload || 'http_request_failed', qos: 0, retain: false }];
+    } else if (fbType === 'http_request') {
+      out.on_failure = [{ type: 'http_request', url: a.on_failure_url || '', method: 'GET' }];
+    }
+  }
   return out;
 }
 
@@ -1823,6 +1935,30 @@ function updateMqttStatusBadge(mq) {
   }
 }
 
+async function loadEngineSettings() {
+  try {
+    const settings = await API.get('settings');
+    const eng = (settings && settings.engine) || {};
+    const lat = document.getElementById('engine-lat');
+    const lon = document.getElementById('engine-lon');
+    if (lat) lat.value = eng.latitude !== undefined ? eng.latitude : 0;
+    if (lon) lon.value = eng.longitude !== undefined ? eng.longitude : 0;
+  } catch(e) { /* non-fatal */ }
+}
+
+async function saveEngineSettings(event) {
+  event.preventDefault();
+  const lat = parseFloat(document.getElementById('engine-lat').value) || 0;
+  const lon = parseFloat(document.getElementById('engine-lon').value) || 0;
+  try {
+    const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
+    if (!r.ok) throw new Error(await r.text());
+    toast('Engine settings saved');
+  } catch(e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
+}
+
 async function loadMqttSettings() {
   try {
     const settings = await API.get('settings');
@@ -1958,11 +2094,13 @@ function startPoll() {
     const activeTab = document.querySelector('.tab-btn.active');
     if (!activeTab) return;
     const tab = activeTab.dataset.tab;
-    if (tab === 'rules')  loadRules();
-    else if (tab === 'log')    loadEvents();
-    else if (tab === 'status') loadStatus();
-    /* mqtt tab: only refresh the status badge, not the form */
-    else if (tab === 'mqtt') API.getStatus().then(s => updateMqttStatusBadge((s && s.mqtt) || {})).catch(() => {});
+    if (tab === 'rules')    loadRules();
+    else if (tab === 'log') loadEvents();
+    /* settings tab: only refresh the status widgets, not the forms */
+    else if (tab === 'settings') {
+      loadStatus();
+      API.getStatus().then(s => updateMqttStatusBadge((s && s.mqtt) || {})).catch(() => {});
+    }
   }, 10000);
 }
 

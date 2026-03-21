@@ -114,6 +114,100 @@
     "tags": ["example", "schedule", "overlay"]
   },
   {
+    "id": "00000000-0000-0000-0000-000000000006",
+    "name": "(Example) Arm System via MQTT",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "mqtt_message",
+        "topic_filter": "cameras/{{camera.serial}}/arm",
+        "payload_filter": "arm"
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "set_variable",
+        "name": "system.armed",
+        "value": "true"
+      },
+      {
+        "type": "send_syslog",
+        "message": "System ARMED via MQTT"
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "arm", "security"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000007",
+    "name": "(Example) Disarm System via MQTT",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "mqtt_message",
+        "topic_filter": "cameras/{{camera.serial}}/arm",
+        "payload_filter": "disarm"
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "set_variable",
+        "name": "system.armed",
+        "value": "false"
+      },
+      {
+        "type": "send_syslog",
+        "message": "System DISARMED via MQTT"
+      }
+    ],
+    "cooldown": 0,
+    "max_executions": 0,
+    "tags": ["example", "arm", "security"]
+  },
+  {
+    "id": "00000000-0000-0000-0000-000000000008",
+    "name": "(Example) Motion Alert When Armed",
+    "enabled": false,
+    "triggers": [
+      {
+        "type": "vapix_event",
+        "topic0": {"tnsaxis": "VideoAnalytics"},
+        "topic1": {"tnsaxis": "MotionDetection"},
+        "filter_key": "active",
+        "filter_value": true
+      }
+    ],
+    "trigger_logic": "OR",
+    "conditions": [
+      {
+        "type": "variable_compare",
+        "name": "system.armed",
+        "op": "eq",
+        "value": "true"
+      }
+    ],
+    "condition_logic": "AND",
+    "actions": [
+      {
+        "type": "mqtt_publish",
+        "topic": "cameras/{{camera.serial}}/alert",
+        "payload": "{\"event\":\"motion\",\"camera\":\"{{camera.serial}}\",\"time\":\"{{timestamp}}\"}",
+        "qos": 1,
+        "retain": false
+      }
+    ],
+    "cooldown": 30,
+    "max_executions": 0,
+    "tags": ["example", "motion", "arm", "security"]
+  },
+  {
     "id": "00000000-0000-0000-0000-000000000005",
     "name": "(Example) Motion → Start Recording (Business Hours)",
     "enabled": false,

@@ -811,6 +811,19 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body);
  */
 char* ACAP_VAPIX_Post_Path_Raw(const char* path, const char* body, long* http_code_out);
 
+/**
+ * @brief Fetch binary data from a VAPIX endpoint (e.g. JPEG snapshot).
+ *
+ * Unlike ACAP_VAPIX_Get(), this function is safe for binary responses because
+ * it tracks the response length separately rather than relying on strlen().
+ *
+ * @param endpoint  CGI path under /axis-cgi/, e.g. "jpg/image.cgi"
+ * @param out_size  Set to the number of bytes in the returned buffer.
+ * @return  Heap-allocated buffer containing the raw response, or NULL on error.
+ *          Caller MUST free() the returned buffer.
+ */
+char* ACAP_VAPIX_GetBinary(const char* endpoint, size_t* out_size);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 #include <syslog.h>
 
 #include "scheduler.h"
@@ -10,9 +11,16 @@
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "scheduler: " fmt, ## args)
 
 #define MAX_SCHEDULES 256
-#define SCHED_CRON        0
-#define SCHED_INTERVAL    1
-#define SCHED_DAILY_TIME  2
+#define SCHED_CRON          0
+#define SCHED_INTERVAL      1
+#define SCHED_DAILY_TIME    2
+#define SCHED_ASTRONOMICAL  3
+
+/* Astronomical event types */
+#define ASTRO_SUNRISE  0
+#define ASTRO_SUNSET   1
+#define ASTRO_DAWN     2  /* civil dawn (-6°) */
+#define ASTRO_DUSK     3  /* civil dusk (-6°) */
 
 typedef struct {
     char    rule_id[37];
@@ -36,6 +44,14 @@ typedef struct {
     int       days_mask;      /* bitmask: bit0=Sun ... bit6=Sat */
     int       fired_today;    /* reset at midnight crossover */
     int       prev_sod;       /* previous seconds_of_day reading */
+
+    /* astronomical fields */
+    double    astro_lat;        /* latitude in degrees */
+    double    astro_lon;        /* longitude in degrees */
+    int       astro_event;      /* ASTRO_SUNRISE/SUNSET/DAWN/DUSK */
+    int       astro_offset_sec; /* offset in seconds (positive = later) */
+    int       astro_sod;        /* computed seconds-of-day for today's event (-1 = not yet computed) */
+    int       astro_yday;       /* tm_yday when astro_sod was last computed */
 } ScheduleEntry;
 
 static ScheduleEntry    entries[MAX_SCHEDULES];
@@ -132,6 +148,67 @@ static int days_array_to_mask(cJSON* days) {
 }
 
 /*-----------------------------------------------------
+ * Solar calculation (NOAA simplified algorithm)
+ * Returns seconds-of-day in local time, or -1 if the event doesn't
+ * occur today (polar day/night).
+ *-----------------------------------------------------*/
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+static int compute_solar_event(double lat, double lon, int event, time_t now) {
+    struct tm* gm = gmtime(&now);
+    int doy = gm->tm_yday + 1; /* 1-366 */
+
+    double lat_r = lat * M_PI / 180.0;
+
+    /* Solar declination (degrees) — Spencer formula approximation */
+    double B = 2.0 * M_PI * (doy - 1) / 365.0;
+    double decl = 0.006918 - 0.399912 * cos(B) + 0.070257 * sin(B)
+                - 0.006758 * cos(2.0*B) + 0.000907 * sin(2.0*B)
+                - 0.002697 * cos(3.0*B) + 0.00148  * sin(3.0*B);
+    /* decl is in radians */
+
+    /* Solar depression angle below horizon */
+    double elev_r;
+    if (event == ASTRO_SUNRISE || event == ASTRO_SUNSET)
+        elev_r = (-0.833) * M_PI / 180.0;  /* standard refraction correction */
+    else
+        elev_r = (-6.0) * M_PI / 180.0;    /* civil twilight */
+
+    /* Hour angle */
+    double cos_ha = (sin(elev_r) - sin(lat_r) * sin(decl)) /
+                    (cos(lat_r) * cos(decl));
+    if (cos_ha < -1.0 || cos_ha > 1.0) return -1; /* polar day/night */
+    double ha_deg = acos(cos_ha) * 180.0 / M_PI;
+
+    /* Equation of time (minutes) */
+    double eot = 229.18 * (0.000075 + 0.001868*cos(B) - 0.032077*sin(B)
+                 - 0.014615*cos(2.0*B) - 0.04089*sin(2.0*B));
+
+    /* Solar noon in minutes UTC */
+    double solar_noon_utc_min = 720.0 - 4.0 * lon - eot;
+
+    double event_utc_min;
+    if (event == ASTRO_SUNRISE || event == ASTRO_DAWN)
+        event_utc_min = solar_noon_utc_min - 4.0 * ha_deg;
+    else
+        event_utc_min = solar_noon_utc_min + 4.0 * ha_deg;
+
+    /* Convert UTC minutes to local seconds-of-day */
+    struct tm* local_tm = localtime(&now);
+    /* tm_gmtoff is POSIX extension (available on Linux) */
+    long tz_offset_sec = local_tm->tm_gmtoff;
+
+    double event_local_sec = event_utc_min * 60.0 + (double)tz_offset_sec;
+    /* Normalize to 0..86400 */
+    while (event_local_sec < 0)      event_local_sec += 86400.0;
+    while (event_local_sec >= 86400) event_local_sec -= 86400.0;
+
+    return (int)event_local_sec;
+}
+
+/*-----------------------------------------------------
  * Public API
  *-----------------------------------------------------*/
 
@@ -187,6 +264,29 @@ int Scheduler_Register(const char* rule_id, int trigger_index, cJSON* config) {
         e->fired_today = 0;
         e->prev_sod    = -1;
         e->type = SCHED_DAILY_TIME;
+
+    } else if (strcmp(stype, "astronomical") == 0) {
+        cJSON* lat_j = cJSON_GetObjectItem(config, "latitude");
+        cJSON* lon_j = cJSON_GetObjectItem(config, "longitude");
+        if (!lat_j || !lon_j) {
+            LOG_WARN("astronomical schedule missing lat/lon for rule %s", rule_id);
+            return 0;
+        }
+        e->astro_lat = lat_j->valuedouble;
+        e->astro_lon = lon_j->valuedouble;
+        const char* ev = cJSON_GetStringValue(cJSON_GetObjectItem(config, "event"));
+        if (!ev || strcmp(ev, "sunrise") == 0) e->astro_event = ASTRO_SUNRISE;
+        else if (strcmp(ev, "sunset")  == 0)   e->astro_event = ASTRO_SUNSET;
+        else if (strcmp(ev, "dawn")    == 0)    e->astro_event = ASTRO_DAWN;
+        else if (strcmp(ev, "dusk")    == 0)    e->astro_event = ASTRO_DUSK;
+        else                                    e->astro_event = ASTRO_SUNRISE;
+        cJSON* off_j = cJSON_GetObjectItem(config, "offset_minutes");
+        e->astro_offset_sec = off_j ? (int)(off_j->valuedouble * 60.0) : 0;
+        e->astro_sod  = -1;  /* not yet computed */
+        e->astro_yday = -1;
+        e->fired_today = 0;
+        e->prev_sod    = -1;
+        e->type = SCHED_ASTRONOMICAL;
 
     } else {
         LOG_WARN("unknown schedule_type '%s' for rule %s", stype, rule_id);
@@ -259,6 +359,32 @@ void Scheduler_Tick(void) {
                 sod >= e->seconds_of_day &&
                 sod <  e->seconds_of_day + 60 &&  /* 1-minute window */
                 (e->days_mask & (1 << dow))) {
+                e->fired_today = 1;
+                fire_cb(e->rule_id, e->trigger_index);
+            }
+            break;
+        }
+        case SCHED_ASTRONOMICAL: {
+            /* Detect midnight crossover — reset for new day */
+            if (e->prev_sod > 0 && sod < e->prev_sod)
+                e->fired_today = 0;
+            e->prev_sod = sod;
+
+            /* Recompute event time once per day */
+            if (e->astro_yday != tm->tm_yday) {
+                int raw = compute_solar_event(e->astro_lat, e->astro_lon, e->astro_event, now);
+                e->astro_sod  = (raw >= 0) ? raw + e->astro_offset_sec : -1;
+                if (e->astro_sod >= 86400) e->astro_sod -= 86400;
+                if (e->astro_sod < 0 && raw >= 0) e->astro_sod += 86400;
+                e->astro_yday = tm->tm_yday;
+                if (e->astro_sod >= 0)
+                    LOG("astronomical event for rule %s today at %02d:%02d",
+                        e->rule_id, e->astro_sod / 3600, (e->astro_sod % 3600) / 60);
+            }
+
+            if (!e->fired_today && e->astro_sod >= 0 &&
+                sod >= e->astro_sod &&
+                sod <  e->astro_sod + 60) {  /* 1-minute window */
                 e->fired_today = 1;
                 fire_cb(e->rule_id, e->trigger_index);
             }
