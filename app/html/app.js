@@ -963,7 +963,7 @@ function getTriggerTokens() {
     } else if (t.type === 'http_webhook') {
       tokens.push('{{trigger.source}}');
     } else if (t.type === 'counter_threshold') {
-      tokens.push('{{trigger.counter}}', '{{trigger.value}}');
+      tokens.push('{{trigger.counter_name}}', '{{trigger.counter_value}}');
     } else if (t.type === 'io_input') {
       tokens.push('{{trigger.port}}', '{{trigger.state}}');
     }
