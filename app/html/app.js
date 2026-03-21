@@ -1808,8 +1808,9 @@ function downloadJSON(filename, data) {
 
 async function exportRules() {
   try {
-    const rules = await API.getRules();
-    downloadJSON('event_engine_rules.json', rules);
+    const summaries = await API.getRules();
+    const full = await Promise.all(summaries.map(r => API.getRule(r.id)));
+    downloadJSON('event_engine_rules.json', full);
   } catch(e) {
     toast('Export failed: ' + e.message, 'error');
   }
