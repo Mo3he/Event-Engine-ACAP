@@ -105,16 +105,19 @@
         <form id="engine-settings-form" onsubmit="saveEngineSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
           <div class="form-row">
             <div class="form-group">
-              <label>Latitude</label>
-              <input type="number" step="0.0001" name="latitude" id="engine-lat" value="0" placeholder="e.g. 59.3293">
-              <div class="form-hint">Used by Sunrise/Sunset schedule triggers. Degrees North (+) or South (−).</div>
+              <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
+              <input type="number" step="0.0001" name="latitude" id="engine-lat" value="0" placeholder="e.g. 59.3293"
+                     oninput="refreshSolarPreview(parseFloat(this.value)||0, parseFloat(document.getElementById('engine-lon').value)||0, 'engine-solar-preview')">
+              <div class="form-hint">North is positive (e.g. 59.3293), South is negative (e.g. −33.8688). Used by Sunrise/Sunset triggers.</div>
             </div>
             <div class="form-group">
-              <label>Longitude</label>
-              <input type="number" step="0.0001" name="longitude" id="engine-lon" value="0" placeholder="e.g. 18.0686">
-              <div class="form-hint">Degrees East (+) or West (−).</div>
+              <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
+              <input type="number" step="0.0001" name="longitude" id="engine-lon" value="0" placeholder="e.g. 18.0686"
+                     oninput="refreshSolarPreview(parseFloat(document.getElementById('engine-lat').value)||0, parseFloat(this.value)||0, 'engine-solar-preview')">
+              <div class="form-hint">East is positive (e.g. 18.0686), West is negative (e.g. −73.9442).</div>
             </div>
           </div>
+          <div id="engine-solar-preview"></div>
           <div style="display:flex;justify-content:flex-end;">
             <button type="submit" class="btn btn-primary">Save Engine Settings</button>
           </div>

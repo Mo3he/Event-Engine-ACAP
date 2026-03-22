@@ -699,7 +699,7 @@ function triggerFields(t, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Event</label>
-        <select data-k="event">
+        <select data-k="event" id="astro-event-${rowIdx}" onchange="refreshAstroTriggerPreview(${rowIdx})">
           <option value="sunrise" ${(t.event||'sunrise')==='sunrise' ? 'selected' : ''}>Sunrise</option>
           <option value="sunset"  ${t.event==='sunset'  ? 'selected' : ''}>Sunset</option>
           <option value="dawn"    ${t.event==='dawn'    ? 'selected' : ''}>Civil Dawn (−6°)</option>
@@ -708,20 +708,28 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Offset (minutes, + = later)</label>
-        <input type="number" data-k="offset_minutes" value="${t.offset_minutes || 0}" placeholder="0">
+        <input type="number" data-k="offset_minutes" id="astro-offset-${rowIdx}"
+               value="${t.offset_minutes || 0}" placeholder="0"
+               oninput="refreshAstroTriggerPreview(${rowIdx})">
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Latitude</label>
-        <input type="number" step="0.0001" data-k="latitude" value="${t.latitude !== undefined ? t.latitude : 0}" placeholder="e.g. 59.33">
-        <div class="form-hint">Set in engine settings or override per rule</div>
+        <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
+        <input type="number" step="0.0001" data-k="latitude" id="astro-lat-${rowIdx}"
+               value="${t.latitude !== undefined ? t.latitude : 0}" placeholder="e.g. 59.3293"
+               oninput="refreshAstroTriggerPreview(${rowIdx})">
+        <div class="form-hint">North is positive (e.g. 59.33), South is negative (e.g. −33.87)</div>
       </div>
       <div class="form-group">
-        <label>Longitude</label>
-        <input type="number" step="0.0001" data-k="longitude" value="${t.longitude !== undefined ? t.longitude : 0}" placeholder="e.g. 18.07">
+        <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
+        <input type="number" step="0.0001" data-k="longitude" id="astro-lon-${rowIdx}"
+               value="${t.longitude !== undefined ? t.longitude : 0}" placeholder="e.g. 18.0686"
+               oninput="refreshAstroTriggerPreview(${rowIdx})">
+        <div class="form-hint">East is positive (e.g. 18.07), West is negative (e.g. −73.94)</div>
       </div>
-    </div>` : ''}`;
+    </div>
+    <div id="astro-preview-${rowIdx}"></div>` : ''}`;
   if (type === 'io_input') return `
     <div class="form-row">
       <div class="form-group">
@@ -808,6 +816,12 @@ function renderTriggerList() {
       <div class="tca-fields">${triggerFields(t, i)}</div>
     </div>
   `).join('');
+  /* Initialise solar previews for any astronomical triggers */
+  triggerRows.forEach((t, i) => {
+    if ((t.type === 'schedule' || t.schedule_type === 'astronomical') &&
+        t.schedule_type === 'astronomical')
+      refreshAstroTriggerPreview(i);
+  });
 }
 
 function addTriggerRow() {
@@ -1935,6 +1949,87 @@ function updateMqttStatusBadge(mq) {
   }
 }
 
+/*------------------------------------------------------------
+ * Solar event calculator (mirrors scheduler.c algorithm)
+ * Returns "HH:MM" local time string, or null (polar day/night).
+ *------------------------------------------------------------*/
+function calcSolarEvent(lat, lon, eventType, offsetMin) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const doy = Math.floor((now - start) / 86400000); /* 1-366 */
+
+  const B = 2 * Math.PI * (doy - 1) / 365;
+  /* Spencer formula for solar declination (radians) */
+  const decl = 0.006918 - 0.399912*Math.cos(B) + 0.070257*Math.sin(B)
+             - 0.006758*Math.cos(2*B) + 0.000907*Math.sin(2*B)
+             - 0.002697*Math.cos(3*B) + 0.00148 *Math.sin(3*B);
+
+  const lat_r = lat * Math.PI / 180;
+  const elev_r = (eventType === 'sunrise' || eventType === 'sunset')
+               ? -0.833 * Math.PI / 180   /* sunrise/sunset */
+               : -6.0   * Math.PI / 180;  /* civil dawn/dusk */
+
+  const cos_ha = (Math.sin(elev_r) - Math.sin(lat_r) * Math.sin(decl))
+               / (Math.cos(lat_r) * Math.cos(decl));
+  if (cos_ha < -1 || cos_ha > 1) return null; /* polar */
+
+  const ha_deg = Math.acos(cos_ha) * 180 / Math.PI;
+
+  /* Equation of time (minutes) */
+  const eot = 229.18 * (0.000075 + 0.001868*Math.cos(B) - 0.032077*Math.sin(B)
+            - 0.014615*Math.cos(2*B) - 0.04089*Math.sin(2*B));
+
+  const solar_noon_utc = 720 - 4*lon - eot; /* minutes UTC */
+  const event_utc = (eventType === 'sunrise' || eventType === 'dawn')
+                  ? solar_noon_utc - 4*ha_deg
+                  : solar_noon_utc + 4*ha_deg;
+
+  /* JS timezone offset is minutes *west*; negate to get east offset */
+  const tz_offset = -now.getTimezoneOffset();
+  let mins = event_utc + tz_offset + (offsetMin || 0);
+  mins = ((mins % 1440) + 1440) % 1440;
+
+  const h = Math.floor(mins / 60);
+  const m = Math.floor(mins % 60);
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+}
+
+function refreshSolarPreview(lat, lon, containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (isNaN(lat) || isNaN(lon)) { el.textContent = ''; return; }
+  const events = [
+    { key: 'dawn',    label: 'Civil dawn' },
+    { key: 'sunrise', label: 'Sunrise' },
+    { key: 'sunset',  label: 'Sunset' },
+    { key: 'dusk',    label: 'Civil dusk' },
+  ];
+  const parts = events.map(e => {
+    const t = calcSolarEvent(lat, lon, e.key, 0);
+    return t ? `<span style="margin-right:14px;"><b>${e.label}</b> ${t}</span>` : '';
+  }).filter(Boolean).join('');
+  el.innerHTML = parts
+    ? `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">${parts}</div>`
+    : `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">No sunrise/sunset at this location today (polar)</div>`;
+}
+
+function refreshAstroTriggerPreview(rowIdx) {
+  const latEl    = document.getElementById(`astro-lat-${rowIdx}`);
+  const lonEl    = document.getElementById(`astro-lon-${rowIdx}`);
+  const eventEl  = document.getElementById(`astro-event-${rowIdx}`);
+  const offsetEl = document.getElementById(`astro-offset-${rowIdx}`);
+  const preview  = document.getElementById(`astro-preview-${rowIdx}`);
+  if (!latEl || !lonEl || !preview) return;
+  const lat    = parseFloat(latEl.value)    || 0;
+  const lon    = parseFloat(lonEl.value)    || 0;
+  const ev     = eventEl  ? eventEl.value   : 'sunrise';
+  const offset = offsetEl ? parseFloat(offsetEl.value) || 0 : 0;
+  const t      = calcSolarEvent(lat, lon, ev, offset);
+  preview.innerHTML = t
+    ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Today: <b>${t}</b></div>`
+    : `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">No event at this location today</div>`;
+}
+
 async function loadEngineSettings() {
   try {
     const settings = await API.get('settings');
@@ -1943,6 +2038,7 @@ async function loadEngineSettings() {
     const lon = document.getElementById('engine-lon');
     if (lat) lat.value = eng.latitude !== undefined ? eng.latitude : 0;
     if (lon) lon.value = eng.longitude !== undefined ? eng.longitude : 0;
+    refreshSolarPreview(parseFloat(lat && lat.value) || 0, parseFloat(lon && lon.value) || 0, 'engine-solar-preview');
   } catch(e) { /* non-fatal */ }
 }
 
@@ -1954,6 +2050,7 @@ async function saveEngineSettings(event) {
     const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
     if (!r.ok) throw new Error(await r.text());
     toast('Engine settings saved');
+    refreshSolarPreview(lat, lon, 'engine-solar-preview');
   } catch(e) {
     toast('Failed to save: ' + e.message, 'error');
   }
