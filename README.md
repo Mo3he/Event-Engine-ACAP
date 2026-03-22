@@ -1,4 +1,4 @@
-# Event Engine — ACAP for Axis Cameras
+# Event Engine - ACAP for Axis Cameras
 
 A powerful IFTTT(If This Then That)-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
 
@@ -12,7 +12,7 @@ Event Engine replaces and extends the built-in Axis event system with a flexible
 - **Conditions** - optional checks that must pass before actions run
 - **Actions** - what happens when the rule fires (one or more, run in sequence)
 
-Rules are built in a clean web UI and take effect immediately — no reboot required.
+Rules are built in a clean web UI and take effect immediately - no reboot required.
 
 <img width="397" height="591" alt="Screenshot 2026-03-21 at 06 14 23" src="https://github.com/user-attachments/assets/eacb1931-904c-409a-a9c2-2649cf5255d1" />
 <img width="406" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/ce711052-7bc4-41ad-9599-721cefb50ab2" />
@@ -23,7 +23,7 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 
 | Type | Description |
 |------|-------------|
-| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition — boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
+| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition - boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token |
@@ -45,7 +45,7 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 
 | Type | Description |
 |------|-------------|
-| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error) — log, MQTT publish, or secondary HTTP request |
+| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error) - log, MQTT publish, or secondary HTTP request |
 | **MQTT Publish** | Publish a message to a topic with configurable QoS and retain flag |
 | **Recording** | Start or stop a recording |
 | **Overlay Text** | Write text to the video stream with an optional auto-remove duration |
@@ -53,7 +53,7 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 | **I/O Output** | Set a digital output port high or low |
 | **Audio Clip** | Play a named media clip on the camera |
 | **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
-| **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions — useful for polling sensor values on a schedule trigger |
+| **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
 | **Set Variable** | Create or update a named persistent variable |
 | **Increment Counter** | Add or subtract a value from a named counter |
 | **Fire Rule** | Immediately trigger another rule by name |
@@ -67,16 +67,16 @@ Rules are built in a clean web UI and take effect immediately — no reboot requ
 
 Each rule has two optional execution controls:
 
-- **Cooldown** — minimum seconds between firings. Prevents alert floods when a trigger fires repeatedly.
-- **Max Executions** — limit how many times the rule can fire, with a configurable period: per minute, per hour, per day, or lifetime total. The period counter resets automatically; the lifetime counter resets when the rule is saved.
+- **Cooldown** - minimum seconds between firings. Prevents alert floods when a trigger fires repeatedly.
+- **Max Executions** - limit how many times the rule can fire, with a configurable period: per minute, per hour, per day, or lifetime total. The period counter resets automatically; the lifetime counter resets when the rule is saved.
 
 ### Arm / Disarm Pattern
 
 Use the **Variable Compare** condition with a variable named `system.armed` (value `"true"` or `"false"`) to make rules only fire when the system is armed. Example rules shipped in the default template:
 
-1. **Arm System via MQTT** — subscribe to `cameras/<serial>/arm`, set `system.armed = "true"`
-2. **Disarm System via MQTT** — same topic, set `system.armed = "false"`
-3. **Motion Alert When Armed** — motion trigger with a Variable Compare condition on `system.armed = "true"`
+1. **Arm System via MQTT** - subscribe to `cameras/<serial>/arm`, set `system.armed = "true"`
+2. **Disarm System via MQTT** - same topic, set `system.armed = "false"`
+3. **Motion Alert When Armed** - motion trigger with a Variable Compare condition on `system.armed = "true"`
 
 ---
 
@@ -100,7 +100,7 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 
 The rule editor shows which `{{trigger.*}}` keys are available for the selected trigger type.
 
-**Example — MQTT payload with sensor data:**
+**Example - MQTT payload with sensor data:**
 ```
 Camera {{camera.serial}} at {{timestamp}}: {{trigger_json}}
 ```
@@ -135,7 +135,7 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 ## Requirements
 
 - Axis camera running **AXIS OS 11.0 or later**
-- [Docker](https://www.docker.com/) — only needed if building from source
+- [Docker](https://www.docker.com/) - only needed if building from source
 
 ---
 
@@ -145,8 +145,8 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
 
 1. Go to `http://<camera-ip>/#settings/apps`
 2. Click **Add app** and upload the `.eap` for your camera's architecture:
-   - `Event_Engine_1_0_0_aarch64.eap` — Cortex-A53 and newer (most cameras from ~2017 onwards)
-   - `Event_Engine_1_0_0_armv7hf.eap` — Cortex-A9 (older cameras)
+   - `Event_Engine_1_0_0_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
+   - `Event_Engine_1_0_0_armv7hf.eap` - Cortex-A9 (older cameras)
 3. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
@@ -169,7 +169,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET / POST / DELETE | `/rules` | Rule CRUD — POST without `id` creates, POST with `?id=` updates |
+| GET / POST / DELETE | `/rules` | Rule CRUD - POST without `id` creates, POST with `?id=` updates |
 | POST | `/fire` | Fire a rule manually or via webhook token |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET | `/actions` | Available action types and their schemas |
@@ -211,7 +211,7 @@ app/
 ├── Makefile
 ├── engine/
 │   ├── rule_engine.c       # Rule store, trigger dispatch, cooldown, rate limiting
-│   ├── triggers.c          # All trigger types — subscribe, match, threshold, hold duration
+│   ├── triggers.c          # All trigger types - subscribe, match, threshold, hold duration
 │   ├── conditions.c        # Condition evaluation
 │   ├── actions.c           # All action types + {{variable}} template engine
 │   ├── scheduler.c         # Cron, interval, and daily-time scheduler
