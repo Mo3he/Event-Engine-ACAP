@@ -1482,33 +1482,62 @@ function actionFields(a) {
     </div>`;
   }
   if (type === 'fire_vapix_event') {
+    const knownIds = ['RuleFired', 'RuleError', 'EngineReady'];
     const evId = a.event_id || 'RuleFired';
-    const isEngineReady = evId === 'EngineReady';
+    const isCustom = !knownIds.includes(evId);
+    const isStateful = evId === 'EngineReady' || (isCustom && (a.state === true || a.state === 'true' || a.state === false || a.state === 'false'));
+    const selectVal = isCustom ? 'custom' : evId;
     return `
     <div class="form-row">
       <div class="form-group">
         <label>Event</label>
-        <select data-k="event_id" onchange="rerenderAction(this)">
-          <option value="RuleFired"   ${evId === 'RuleFired'   ? 'selected' : ''}>Rule Fired</option>
-          <option value="RuleError"   ${evId === 'RuleError'   ? 'selected' : ''}>Rule Error</option>
-          <option value="EngineReady" ${evId === 'EngineReady' ? 'selected' : ''}>Engine Ready</option>
+        <select data-k="_event_preset" onchange="rerenderAction(this)">
+          <option value="RuleFired"   ${selectVal === 'RuleFired'   ? 'selected' : ''}>Rule Fired</option>
+          <option value="RuleError"   ${selectVal === 'RuleError'   ? 'selected' : ''}>Rule Error</option>
+          <option value="EngineReady" ${selectVal === 'EngineReady' ? 'selected' : ''}>Engine Ready</option>
+          <option value="custom"      ${selectVal === 'custom'      ? 'selected' : ''}>Custom…</option>
         </select>
-        <div class="form-hint">${
+        ${!isCustom ? `<div class="form-hint">${
           evId === 'RuleFired'   ? 'Signals other ACAP apps that a rule fired. Fired automatically — use this to fire it manually from another rule.' :
           evId === 'RuleError'   ? 'Signals other ACAP apps that a rule encountered an error.' :
           evId === 'EngineReady' ? 'Stateful on/off signal. Set High when the system is active, Low when inactive. Other apps can subscribe to this state.' : ''
-        }</div>
+        }</div>` : ''}
       </div>
-      ${isEngineReady ? `
-      <div class="form-group" style="flex:0 0 140px;">
+    </div>
+    ${isCustom ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event ID</label>
+        <input type="text" data-k="event_id" value="${escHtml(evId === 'RuleFired' && isCustom ? '' : evId)}" placeholder="e.g. MyCustomEvent">
+        <div class="form-hint">Must match an event declared by an ACAP application on this camera.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Type</label>
+        <select data-k="_custom_stateful" onchange="rerenderAction(this)">
+          <option value=""     ${!isStateful ? 'selected' : ''}>Stateless (pulse)</option>
+          <option value="true" ${isStateful  ? 'selected' : ''}>Stateful (High/Low)</option>
+        </select>
+      </div>
+      ${isStateful ? `
+      <div class="form-group" style="flex:0 0 120px;">
         <label>State</label>
         <select data-k="state">
           <option value="true"  ${a.state === true || a.state === 'true'  ? 'selected' : ''}>High (on)</option>
           <option value="false" ${a.state === false || a.state === 'false' ? 'selected' : ''}>Low (off)</option>
         </select>
       </div>` : ''}
-    </div>
-    <div class="form-hint" style="margin-top:4px;">These events are visible to other Axis ACAP applications on this camera via the VAPIX event system.</div>`
+    </div>` : ''}
+    ${evId === 'EngineReady' ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>State</label>
+        <select data-k="state">
+          <option value="true"  ${a.state === true || a.state === 'true'  ? 'selected' : ''}>High (on)</option>
+          <option value="false" ${a.state === false || a.state === 'false' ? 'selected' : ''}>Low (off)</option>
+        </select>
+      </div>
+    </div>` : ''}
+    <div class="form-hint" style="margin-top:4px;">VAPIX events are visible to other Axis ACAP applications on this camera.</div>`
   }
   if (type === 'delay') return `
     <div class="form-row">
@@ -1737,10 +1766,16 @@ function normalizeAction(a) {
   if (out.value    !== undefined && a.type === 'increment_counter')
     out.delta = parseFloat(out.value) || 0;
   if (a.type === 'fire_vapix_event') {
-    if (a.event_id === 'EngineReady') {
-      out.state = a.state === 'true' || a.state === true;
+    const preset = a._event_preset || a.event_id || 'RuleFired';
+    if (preset === 'custom') {
+      out.event_id = a.event_id || '';
+      const isStateful = a._custom_stateful === 'true';
+      if (isStateful) out.state = a.state === 'true' || a.state === true;
+    } else {
+      out.event_id = preset;
+      if (preset === 'EngineReady') out.state = a.state === 'true' || a.state === true;
+      /* RuleFired and RuleError are stateless — no state field */
     }
-    /* RuleFired and RuleError are stateless — no state field */
   }
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
@@ -1789,12 +1824,6 @@ async function saveRule() {
   if (!name) { toast('Rule name is required', 'error'); return; }
   if (!triggerRows.length) { toast('At least one trigger is required', 'error'); return; }
   if (!actionRows.length) { toast('At least one action is required', 'error'); return; }
-
-  const logicActive = (container, val) => {
-    if (!container) return val;
-    const active = container.querySelector('.logic-btn.active');
-    return active ? active.textContent.trim() : val;
-  };
 
   const rule = {
     name,
