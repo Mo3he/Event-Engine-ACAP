@@ -1219,7 +1219,7 @@ function actionFields(a) {
         </select>
       </div>
       <div class="form-group">
-        <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional, for Basic/Digest auth)</span></label>
+        <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
         <input type="text" data-k="username" value="${escHtml(a.username || '')}" autocomplete="off">
       </div>
       <div class="form-group">
@@ -1481,21 +1481,35 @@ function actionFields(a) {
       </div>
     </div>`;
   }
-  if (type === 'fire_vapix_event') return `
+  if (type === 'fire_vapix_event') {
+    const evId = a.event_id || 'RuleFired';
+    const isEngineReady = evId === 'EngineReady';
+    return `
     <div class="form-row">
       <div class="form-group">
-        <label>Event ID</label>
-        <input type="text" data-k="event_id" value="${escHtml(a.event_id || '')}" placeholder="RuleFired">
-      </div>
-      <div class="form-group">
-        <label>State (for stateful events)</label>
-        <select data-k="state">
-          <option value=""      ${!a.state ? 'selected' : ''}>Stateless (pulse)</option>
-          <option value="true"  ${a.state === true || a.state === 'true'  ? 'selected' : ''}>High (1)</option>
-          <option value="false" ${a.state === false || a.state === 'false' ? 'selected' : ''}>Low (0)</option>
+        <label>Event</label>
+        <select data-k="event_id" onchange="rerenderAction(this)">
+          <option value="RuleFired"   ${evId === 'RuleFired'   ? 'selected' : ''}>Rule Fired</option>
+          <option value="RuleError"   ${evId === 'RuleError'   ? 'selected' : ''}>Rule Error</option>
+          <option value="EngineReady" ${evId === 'EngineReady' ? 'selected' : ''}>Engine Ready</option>
         </select>
+        <div class="form-hint">${
+          evId === 'RuleFired'   ? 'Signals other ACAP apps that a rule fired. Fired automatically — use this to fire it manually from another rule.' :
+          evId === 'RuleError'   ? 'Signals other ACAP apps that a rule encountered an error.' :
+          evId === 'EngineReady' ? 'Stateful on/off signal. Set High when the system is active, Low when inactive. Other apps can subscribe to this state.' : ''
+        }</div>
       </div>
-    </div>`;
+      ${isEngineReady ? `
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>State</label>
+        <select data-k="state">
+          <option value="true"  ${a.state === true || a.state === 'true'  ? 'selected' : ''}>High (on)</option>
+          <option value="false" ${a.state === false || a.state === 'false' ? 'selected' : ''}>Low (off)</option>
+        </select>
+      </div>` : ''}
+    </div>
+    <div class="form-hint" style="margin-top:4px;">These events are visible to other Axis ACAP applications on this camera via the VAPIX event system.</div>`
+  }
   if (type === 'delay') return `
     <div class="form-row">
       <div class="form-group">
@@ -1722,8 +1736,11 @@ function normalizeAction(a) {
   if (out.delta    !== undefined) out.delta    = parseFloat(out.delta)  || 1;
   if (out.value    !== undefined && a.type === 'increment_counter')
     out.delta = parseFloat(out.value) || 0;
-  if (a.type === 'fire_vapix_event' && a.state !== '') {
-    out.state = a.state === 'true';
+  if (a.type === 'fire_vapix_event') {
+    if (a.event_id === 'EngineReady') {
+      out.state = a.state === 'true' || a.state === true;
+    }
+    /* RuleFired and RuleError are stateless — no state field */
   }
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
