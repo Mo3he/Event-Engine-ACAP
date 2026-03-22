@@ -1219,6 +1219,16 @@ function actionFields(a) {
         </select>
       </div>
       <div class="form-group">
+        <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional, for Basic/Digest auth)</span></label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Password <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="password" data-k="password" value="${escHtml(a.password || '')}" placeholder="(unchanged)" autocomplete="new-password">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
         <label>Headers (one per line, key: value)</label>
         <textarea data-k="headers" placeholder="Content-Type: application/json">${escHtml(a.headers || '')}</textarea>
       </div>
@@ -1699,7 +1709,7 @@ function normalizeCondition(c) {
 
 function normalizeAction(a) {
   const out = { type: a.type };
-  const pass = ['url','method','headers','body','operation','duration','text','channel',
+  const pass = ['url','method','headers','body','username','password','operation','duration','text','channel',
                  'preset','port','state','clip_name','message','level','event_id',
                  'seconds','name','value','delta','rule_id','cron','interval_seconds',
                  'schedule_type','time','counter_name','op','token','edge',

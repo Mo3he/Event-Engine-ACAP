@@ -302,6 +302,16 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
+    /* HTTP Basic/Digest authentication */
+    const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
+    const char* password = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));
+    if (username && *username) {
+        char userpwd[512];
+        snprintf(userpwd, sizeof(userpwd), "%s:%s", username, password ? password : "");
+        curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+        curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+    }
+
     struct curl_slist* hdrs = NULL;
     const char* hdrs_str = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "headers"));
     if (hdrs_str) {
