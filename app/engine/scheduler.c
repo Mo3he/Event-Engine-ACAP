@@ -6,6 +6,7 @@
 #include <syslog.h>
 
 #include "scheduler.h"
+#include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "scheduler: " fmt, ## args)
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "scheduler: " fmt, ## args)
@@ -268,12 +269,23 @@ int Scheduler_Register(const char* rule_id, int trigger_index, cJSON* config) {
     } else if (strcmp(stype, "astronomical") == 0) {
         cJSON* lat_j = cJSON_GetObjectItem(config, "latitude");
         cJSON* lon_j = cJSON_GetObjectItem(config, "longitude");
-        if (!lat_j || !lon_j) {
-            LOG_WARN("astronomical schedule missing lat/lon for rule %s", rule_id);
-            return 0;
+        double lat_val = lat_j ? lat_j->valuedouble : 0.0;
+        double lon_val = lon_j ? lon_j->valuedouble : 0.0;
+        /* Fall back to engine settings lat/lon if trigger doesn't specify them */
+        if (lat_val == 0.0 && lon_val == 0.0) {
+            cJSON* eng = ACAP_Get_Config("engine");
+            if (eng) {
+                cJSON* elat = cJSON_GetObjectItem(eng, "latitude");
+                cJSON* elon = cJSON_GetObjectItem(eng, "longitude");
+                if (elat) lat_val = elat->valuedouble;
+                if (elon) lon_val = elon->valuedouble;
+            }
         }
-        e->astro_lat = lat_j->valuedouble;
-        e->astro_lon = lon_j->valuedouble;
+        if (lat_val == 0.0 && lon_val == 0.0) {
+            LOG_WARN("astronomical schedule has no lat/lon for rule %s — solar time may be wrong", rule_id);
+        }
+        e->astro_lat = lat_val;
+        e->astro_lon = lon_val;
         const char* ev = cJSON_GetStringValue(cJSON_GetObjectItem(config, "event"));
         if (!ev || strcmp(ev, "sunrise") == 0) e->astro_event = ASTRO_SUNRISE;
         else if (strcmp(ev, "sunset")  == 0)   e->astro_event = ASTRO_SUNSET;

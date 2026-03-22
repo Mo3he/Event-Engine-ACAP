@@ -49,6 +49,8 @@ let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
 let sirenProfiles = null;     /* null=loading, []=none or not supported, [{name,label},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
+let engineLat = 0;            /* engine settings latitude — used as default for astronomical triggers */
+let engineLon = 0;            /* engine settings longitude */
 
 /* ===================================================
  * Toast
@@ -717,14 +719,14 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
         <input type="number" step="0.0001" data-k="latitude" id="astro-lat-${rowIdx}"
-               value="${t.latitude !== undefined ? t.latitude : 0}" placeholder="e.g. 59.3293"
+               value="${t.latitude !== undefined ? t.latitude : engineLat}" placeholder="e.g. 59.3293"
                oninput="refreshAstroTriggerPreview(${rowIdx})">
         <div class="form-hint">North is positive (e.g. 59.33), South is negative (e.g. −33.87)</div>
       </div>
       <div class="form-group">
         <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
         <input type="number" step="0.0001" data-k="longitude" id="astro-lon-${rowIdx}"
-               value="${t.longitude !== undefined ? t.longitude : 0}" placeholder="e.g. 18.0686"
+               value="${t.longitude !== undefined ? t.longitude : engineLon}" placeholder="e.g. 18.0686"
                oninput="refreshAstroTriggerPreview(${rowIdx})">
         <div class="form-hint">East is positive (e.g. 18.07), West is negative (e.g. −73.94)</div>
       </div>
@@ -2034,11 +2036,13 @@ async function loadEngineSettings() {
   try {
     const settings = await API.get('settings');
     const eng = (settings && settings.engine) || {};
+    engineLat = eng.latitude !== undefined ? eng.latitude : 0;
+    engineLon = eng.longitude !== undefined ? eng.longitude : 0;
     const lat = document.getElementById('engine-lat');
     const lon = document.getElementById('engine-lon');
-    if (lat) lat.value = eng.latitude !== undefined ? eng.latitude : 0;
-    if (lon) lon.value = eng.longitude !== undefined ? eng.longitude : 0;
-    refreshSolarPreview(parseFloat(lat && lat.value) || 0, parseFloat(lon && lon.value) || 0, 'engine-solar-preview');
+    if (lat) lat.value = engineLat;
+    if (lon) lon.value = engineLon;
+    refreshSolarPreview(engineLat, engineLon, 'engine-solar-preview');
   } catch(e) { /* non-fatal */ }
 }
 
@@ -2049,6 +2053,8 @@ async function saveEngineSettings(event) {
   try {
     const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
     if (!r.ok) throw new Error(await r.text());
+    engineLat = lat;
+    engineLon = lon;
     toast('Engine settings saved');
     refreshSolarPreview(lat, lon, 'engine-solar-preview');
   } catch(e) {
@@ -2212,6 +2218,12 @@ window.addEventListener('DOMContentLoaded', () => {
   loadPtzPresets();
   loadAudioClips();
   loadSirenProfiles();
+  /* Load engine lat/lon early so astronomical trigger defaults are correct */
+  API.get('settings').then(s => {
+    const eng = (s && s.engine) || {};
+    if (eng.latitude  !== undefined) engineLat = eng.latitude;
+    if (eng.longitude !== undefined) engineLon = eng.longitude;
+  }).catch(() => {});
   API.getVariables().then(v => {
     knownVarNames     = Object.keys(v || {}).filter(k => !(v[k] && v[k].is_counter));
     knownCounterNames = Object.keys(v || {}).filter(k =>   v[k] && v[k].is_counter);
