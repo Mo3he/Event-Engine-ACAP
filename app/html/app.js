@@ -1483,9 +1483,10 @@ function actionFields(a) {
   }
   if (type === 'fire_vapix_event') {
     const knownIds = ['RuleFired', 'RuleError', 'EngineReady'];
-    const evId = a.event_id || 'RuleFired';
-    const isCustom = !knownIds.includes(evId);
-    const isStateful = evId === 'EngineReady' || (isCustom && (a.state === true || a.state === 'true' || a.state === false || a.state === 'false'));
+    const preset = a._event_preset || '';
+    const isCustom = preset === 'custom' || (!preset && !knownIds.includes(a.event_id || 'RuleFired'));
+    const evId = isCustom ? (a.event_id || '') : (knownIds.includes(preset) ? preset : (a.event_id || 'RuleFired'));
+    const isStateful = evId === 'EngineReady' || (isCustom && a._custom_stateful === 'true');
     const selectVal = isCustom ? 'custom' : evId;
     return `
     <div class="form-row">
@@ -1508,7 +1509,7 @@ function actionFields(a) {
     <div class="form-row">
       <div class="form-group">
         <label>Event ID</label>
-        <input type="text" data-k="event_id" value="${escHtml(evId === 'RuleFired' && isCustom ? '' : evId)}" placeholder="e.g. MyCustomEvent">
+        <input type="text" data-k="event_id" value="${escHtml(knownIds.includes(evId) ? '' : evId)}" placeholder="e.g. MyCustomEvent">
         <div class="form-hint">Must match an event declared by an ACAP application on this camera.</div>
       </div>
       <div class="form-group" style="flex:0 0 160px;">
