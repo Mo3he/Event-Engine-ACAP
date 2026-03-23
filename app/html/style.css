@@ -19,6 +19,22 @@
   --transition: 0.18s ease;
 }
 
+[data-theme="light"] {
+  --bg: #f0f2f7;
+  --surface: #ffffff;
+  --surface2: #e8ebf2;
+  --border: #ced3e0;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-danger: #dc2626;
+  --accent-success: #16a34a;
+  --accent-warning: #d97706;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --text-dim: #9ca3af;
+  --shadow: 0 4px 24px rgba(0,0,0,.1);
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background: var(--bg);
@@ -163,6 +179,9 @@ header .subtitle {
 .badge-trigger { background: #1e2d4f; color: #7eb0f5; }
 .badge-action  { background: #1e3928; color: #6dd97e; }
 .badge-cond    { background: #2d2b1e; color: #d9bc6d; }
+[data-theme="light"] .badge-trigger { background: #dbeafe; color: #1d4ed8; }
+[data-theme="light"] .badge-action  { background: #dcfce7; color: #15803d; }
+[data-theme="light"] .badge-cond    { background: #fef9c3; color: #a16207; }
 
 .rule-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
@@ -218,6 +237,7 @@ header .subtitle {
 .event-blocked { color: var(--text-muted); }
 .event-badge-fired   { background: #1e3928; color: var(--accent-success); }
 .event-badge-blocked { background: var(--surface2); color: var(--text-muted); }
+[data-theme="light"] .event-badge-fired { background: #dcfce7; }
 
 /* ===== Variables ===== */
 .var-table { width: 100%; border-collapse: collapse; }
@@ -397,6 +417,13 @@ header .subtitle {
 .tca-trigger { background: #1e2d4f; color: #7eb0f5; }
 .tca-condition { background: #2d2b1e; color: #d9bc6d; }
 .tca-action { background: #1e3928; color: #6dd97e; }
+[data-theme="light"] .form-group input,
+[data-theme="light"] .form-group select,
+[data-theme="light"] .form-group textarea { background: #ffffff; border-color: #b0b8cc; }
+
+[data-theme="light"] .tca-trigger   { background: #dbeafe; color: #1d4ed8; }
+[data-theme="light"] .tca-condition { background: #fef9c3; color: #a16207; }
+[data-theme="light"] .tca-action    { background: #dcfce7; color: #15803d; }
 
 .tca-remove {
   margin-left: auto;
