@@ -2,6 +2,9 @@
 *.o
 app/engine/*.o
 
+# Built packages (distributed via GitHub releases)
+*.eap
+
 # macOS
 .DS_Store
 
