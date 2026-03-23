@@ -424,13 +424,23 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
     }
 }
 
+/* Constant-time string comparison to prevent timing attacks on webhook tokens */
+static int token_equals(const char* a, const char* b) {
+    size_t la = strlen(a), lb = strlen(b);
+    unsigned char diff = (la != lb);
+    size_t len = la < lb ? la : lb;
+    for (size_t i = 0; i < len; i++)
+        diff |= (unsigned char)a[i] ^ (unsigned char)b[i];
+    return diff == 0;
+}
+
 int Triggers_On_Webhook(const char* token, cJSON* payload) {
     if (!fire_fn) return 0;
     int fired = 0;
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
         if (s->type != TRIG_HTTP_WEBHOOK) continue;
-        if (s->token[0] && strcmp(s->token, token ? token : "") != 0) continue;
+        if (s->token[0] && !token_equals(s->token, token ? token : "")) continue;
 
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type", "http_webhook");

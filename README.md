@@ -26,7 +26,7 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 | **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition - boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
-| **HTTP Webhook** | External POST request with a secret token |
+| **HTTP Webhook** | External POST request with a secret token. Requires viewer-level camera credentials |
 | **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
 | **Counter Threshold** | When a named counter crosses a configured value |
 | **Rule Chain** | Fires when another named rule executes |
@@ -43,23 +43,60 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 
 ## Actions
 
+Actions are grouped by category in the rule editor.
+
+### Notifications
+
 | Type | Description |
 |------|-------------|
 | **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error) - log, MQTT publish, or secondary HTTP request |
 | **MQTT Publish** | Publish a message to a topic with configurable QoS and retain flag |
+| **Snapshot Upload** | Capture a JPEG from the camera and POST or PUT it to a URL with optional Basic Auth |
+| **Send Syslog** | Write a message to the system log |
+
+### Camera
+
+| Type | Description |
+|------|-------------|
 | **Recording** | Start or stop a recording |
 | **Overlay Text** | Write text to the video stream with an optional auto-remove duration |
 | **PTZ Preset** | Move the camera to a named preset position |
-| **I/O Output** | Set a digital output port high or low |
+| **Guard Tour** | Start or stop a configured PTZ guard tour. Available tours are loaded from the camera and shown in a dropdown |
+| **IR Cut Filter** | Force the IR cut filter **On** (day mode), **Off** (night mode), or restore **Auto** switching |
+| **Privacy Mask** | Enable or disable a named privacy mask |
+| **Wiper** | Trigger the windshield wiper |
+| **Light Control** | Control an Axis illuminator (white light or IR LED) with optional intensity |
+
+### Audio / Visual
+
+| Type | Description |
+|------|-------------|
 | **Audio Clip** | Play a named media clip on the camera |
 | **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
-| **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
+
+### I/O
+
+| Type | Description |
+|------|-------------|
+| **I/O Output** | Set a digital output port high or low with an optional duration |
+
+### Logic
+
+| Type | Description |
+|------|-------------|
+| **Delay** | Pause the action sequence for N seconds before continuing |
 | **Set Variable** | Create or update a named persistent variable |
 | **Increment Counter** | Add or subtract a value from a named counter |
-| **Fire Rule** | Immediately trigger another rule by name |
-| **Delay** | Pause the action sequence for N seconds before continuing |
+| **Run Rule** | Immediately trigger another rule by name |
+
+### Advanced
+
+| Type | Description |
+|------|-------------|
 | **Fire VAPIX Event** | Fire a custom VAPIX event visible to other Axis applications |
-| **Syslog** | Write a message to the system log |
+| **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
+| **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only — incorrect values can disrupt camera operation** |
+| **ACAP Control** | Start, stop, or restart another installed ACAP application |
 
 ---
 
@@ -145,8 +182,8 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
 
 1. Go to `http://<camera-ip>/#settings/apps`
 2. Click **Add app** and upload the `.eap` for your camera's architecture:
-   - `Event_Engine_1_0_0_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
-   - `Event_Engine_1_0_0_armv7hf.eap` - Cortex-A9 (older cameras)
+   - `Event_Engine_1_6_9_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
+   - `Event_Engine_1_6_9_armv7hf.eap` - Cortex-A9 (older cameras)
 3. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
@@ -165,12 +202,12 @@ Requires Docker. The build pulls `axisecp/acap-native-sdk:12.0.0` automatically 
 
 ## API
 
-All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth (admin credentials).
+All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth (admin credentials), except `/fire` which requires viewer-level credentials.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET / POST / DELETE | `/rules` | Rule CRUD - POST without `id` creates, POST with `?id=` updates |
-| POST | `/fire` | Fire a rule manually or via webhook token |
+| POST | `/fire` | Fire a rule manually or via webhook token (viewer credentials) |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET | `/actions` | Available action types and their schemas |
 | GET / POST / DELETE | `/variables` | Named variables and counters |
@@ -186,7 +223,7 @@ Interactive docs: `http://<camera-ip>/local/acap_event_engine/swagger.html`
 Trigger a rule from any external system:
 
 ```bash
-curl -u admin:pass -X POST \
+curl -u viewer:pass -X POST \
   "http://<camera-ip>/local/acap_event_engine/fire" \
   -H "Content-Type: application/json" \
   -d '{"token": "my-secret-token", "payload": {"source": "doorbell"}}'

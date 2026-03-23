@@ -711,6 +711,298 @@ static void action_vapix_query(cJSON* cfg, cJSON* trigger_data) {
     }
 }
 
+/* guard_tour — start or stop a configured PTZ guard tour via param.cgi
+ * Tours are stored as root.GuardTour.G<n>.Name / .Running.
+ * We scan up to 32 slots to find the tour by name, then set Running=yes/no. */
+static void action_guard_tour(cJSON* cfg) {
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    int starting = (!op || strcmp(op, "stop") != 0);
+
+    const char* tour_name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tour_id"));
+    if (starting && (!tour_name || !tour_name[0])) {
+        LOG_WARN("guard_tour: no tour_id specified for start"); return;
+    }
+
+    /* If stopping with no name, stop all running tours */
+    if (!starting && (!tour_name || !tour_name[0])) {
+        for (int n = 0; n < 32; n++) {
+            char running_req[128];
+            snprintf(running_req, sizeof(running_req),
+                     "param.cgi?action=update&root.GuardTour.G%d.Running=no", n);
+            char* resp = ACAP_VAPIX_Get(running_req);
+            if (!resp) break;  /* no more slots */
+            free(resp);
+        }
+        return;
+    }
+
+    /* Find the tour index by name */
+    for (int n = 0; n < 32; n++) {
+        char name_req[128];
+        snprintf(name_req, sizeof(name_req),
+                 "param.cgi?action=list&group=root.GuardTour.G%d.Name", n);
+        char* resp = ACAP_VAPIX_Get(name_req);
+        if (!resp) break;  /* no more slots */
+
+        /* Response is "root.GuardTour.G<n>.Name=<value>\n" */
+        char* eq = strchr(resp, '=');
+        if (eq) {
+            char* nl = strchr(eq + 1, '\n');
+            if (nl) *nl = '\0';
+            char* name_val = eq + 1;
+            /* strip trailing \r if present */
+            size_t l = strlen(name_val);
+            if (l > 0 && name_val[l-1] == '\r') name_val[l-1] = '\0';
+
+            if (strcmp(name_val, tour_name) == 0) {
+                free(resp);
+                char run_req[128];
+                snprintf(run_req, sizeof(run_req),
+                         "param.cgi?action=update&root.GuardTour.G%d.Running=%s",
+                         n, starting ? "yes" : "no");
+                char* r2 = ACAP_VAPIX_Get(run_req);
+                if (r2) free(r2);
+                LOG("guard_tour: %s tour '%s' (G%d)", starting ? "started" : "stopped", tour_name, n);
+                return;
+            }
+        }
+        free(resp);
+    }
+    LOG_WARN("guard_tour: tour '%s' not found", tour_name ? tour_name : "");
+}
+
+/* set_device_param — update a camera parameter via param.cgi */
+static void action_set_device_param(cJSON* cfg) {
+    const char* param = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "parameter"));
+    const char* value = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
+    if (!param || !param[0] || !value) { LOG_WARN("set_device_param: missing parameter or value"); return; }
+
+    /* Accept "root.X" or just "X" — normalise to always include "root." */
+    char full_param[256];
+    if (strncmp(param, "root.", 5) == 0)
+        snprintf(full_param, sizeof(full_param), "%s", param);
+    else
+        snprintf(full_param, sizeof(full_param), "root.%s", param);
+
+    char req[512];
+    snprintf(req, sizeof(req), "param.cgi?action=update&%s=%s", full_param, value);
+    char* resp = ACAP_VAPIX_Get(req);
+    if (resp) free(resp);
+}
+
+/* snapshot_upload — capture a JPEG snapshot and POST/PUT it to a URL */
+static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
+    const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
+    if (!url_tmpl) { LOG_WARN("snapshot_upload: no url specified"); return; }
+
+    cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
+    int channel = ch_j ? (int)ch_j->valuedouble : 1;
+
+    char endpoint[64];
+    snprintf(endpoint, sizeof(endpoint), "jpg/image.cgi?camera=%d", channel);
+    size_t snap_len = 0;
+    char* snap_raw = ACAP_VAPIX_GetBinary(endpoint, &snap_len);
+    if (!snap_raw || snap_len == 0) {
+        LOG_WARN("snapshot_upload: failed to capture snapshot");
+        if (snap_raw) free(snap_raw);
+        return;
+    }
+
+    char* url = Actions_Expand_Template(url_tmpl, trigger_data);
+    const char* method = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "method"));
+    if (!method) method = "POST";
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { free(url); free(snap_raw); return; }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+    const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
+    const char* password = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));
+    if (username && *username) {
+        char userpwd[512];
+        snprintf(userpwd, sizeof(userpwd), "%s:%s", username, password ? password : "");
+        curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+        curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+        explicit_bzero(userpwd, sizeof(userpwd));
+    }
+
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: image/jpeg");
+    const char* hdrs_str = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "headers"));
+    if (hdrs_str) {
+        char* hcopy = strdup(hdrs_str);
+        char* line; char* saveptr;
+        line = strtok_r(hcopy, "\n", &saveptr);
+        while (line) {
+            while (*line == ' ' || *line == '\r') line++;
+            char* end = line + strlen(line) - 1;
+            while (end > line && (*end == ' ' || *end == '\r' || *end == '\n')) *end-- = '\0';
+            if (*line) hdrs = curl_slist_append(hdrs, line);
+            line = strtok_r(NULL, "\n", &saveptr);
+        }
+        free(hcopy);
+    }
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+
+    if (strcmp(method, "PUT") == 0)
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    else
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, snap_raw);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)snap_len);
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK)
+        LOG_WARN("snapshot_upload to %s failed: %s", url, curl_easy_strerror(res));
+    else
+        LOG("snapshot_upload: sent %zu bytes to %s", snap_len, url);
+
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    free(url);
+    free(snap_raw);
+}
+
+/* ir_cut_filter — force day/night mode or restore auto switching */
+static void action_ir_cut_filter(cJSON* cfg) {
+    const char* mode = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "mode"));
+    if (!mode) mode = "auto";
+    cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
+    int channel = ch_j ? (int)ch_j->valuedouble : 1;
+    int idx = channel - 1;  /* param index: channel 1 → I0, channel 2 → I1, … */
+
+    /* IrCutFilter values: yes = filter in (day), no = filter out (night), auto = automatic */
+    const char* val;
+    if (strcmp(mode, "day") == 0)       val = "yes";
+    else if (strcmp(mode, "night") == 0) val = "no";
+    else                                 val = "auto";
+
+    char req[128];
+    snprintf(req, sizeof(req),
+             "param.cgi?action=update&root.ImageSource.I%d.DayNight.IrCutFilter=%s", idx, val);
+    char* resp = ACAP_VAPIX_Get(req);
+    if (resp) free(resp);
+}
+
+/* privacy_mask — enable or disable a named privacy mask.
+ * Masks live under root.Image.I<ch-1>.Overlay.MaskWindows.M<n>.
+ * We scan by name to find the right slot, then set Enabled=yes/no. */
+static void action_privacy_mask(cJSON* cfg) {
+    const char* mask_name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "mask_id"));
+    if (!mask_name || !mask_name[0]) { LOG_WARN("privacy_mask: no mask_id specified"); return; }
+    cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
+    cJSON* en_j = cJSON_GetObjectItem(cfg, "enabled");
+    int idx     = ch_j ? (int)ch_j->valuedouble - 1 : 0;
+    int enabled = (!en_j || cJSON_IsTrue(en_j)) ? 1 : 0;
+
+    for (int n = 0; n < 32; n++) {
+        char name_req[128];
+        snprintf(name_req, sizeof(name_req),
+                 "param.cgi?action=list&group=root.Image.I%d.Overlay.MaskWindows.M%d.Name", idx, n);
+        char* resp = ACAP_VAPIX_Get(name_req);
+        if (!resp) break;
+
+        char* eq = strchr(resp, '=');
+        if (eq) {
+            char* nl = strchr(eq + 1, '\n');
+            if (nl) *nl = '\0';
+            char* name_val = eq + 1;
+            size_t l = strlen(name_val);
+            if (l > 0 && name_val[l-1] == '\r') name_val[l-1] = '\0';
+
+            if (strcmp(name_val, mask_name) == 0) {
+                free(resp);
+                char set_req[128];
+                snprintf(set_req, sizeof(set_req),
+                         "param.cgi?action=update&root.Image.I%d.Overlay.MaskWindows.M%d.Enabled=%s",
+                         idx, n, enabled ? "yes" : "no");
+                char* r2 = ACAP_VAPIX_Get(set_req);
+                if (r2) free(r2);
+                LOG("privacy_mask: %s mask '%s' (I%d M%d)", enabled ? "enabled" : "disabled", mask_name, idx, n);
+                return;
+            }
+        }
+        free(resp);
+    }
+    LOG_WARN("privacy_mask: mask '%s' not found on channel %d", mask_name, idx + 1);
+}
+
+/* wiper — trigger the camera clear view (wiper/speed dry) via clearviewcontrol.cgi */
+static void action_wiper(cJSON* cfg) {
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    cJSON* id_j  = cJSON_GetObjectItem(cfg, "id");
+    int id = id_j ? (int)id_j->valuedouble : 1;
+
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "apiVersion", "1.0");
+    cJSON_AddStringToObject(req, "method", (op && strcmp(op, "stop") == 0) ? "stop" : "start");
+    cJSON* p = cJSON_AddObjectToObject(req, "params");
+    cJSON_AddNumberToObject(p, "id", id);
+
+    /* Optional duration (seconds) for variable-duration wiper services */
+    cJSON* dur_j = cJSON_GetObjectItem(cfg, "duration");
+    if (dur_j && dur_j->valuedouble > 0)
+        cJSON_AddNumberToObject(p, "duration", dur_j->valuedouble);
+
+    char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
+    char* resp = ACAP_VAPIX_Post("clearviewcontrol.cgi", body);
+    free(body); if (resp) free(resp);
+}
+
+/* light_control — control an Axis illuminator (white/IR LED) */
+static void action_light_control(cJSON* cfg) {
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    if (!op) op = "on";
+    const char* light_id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "light_id"));
+    if (!light_id || !light_id[0]) light_id = "led0";
+
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddStringToObject(req, "apiVersion", "1.0");
+    cJSON* p = cJSON_AddObjectToObject(req, "params");
+    cJSON_AddStringToObject(p, "lightID", light_id);
+
+    if (strcmp(op, "off") == 0) {
+        cJSON_AddStringToObject(req, "method", "deactivateLight");
+    } else if (strcmp(op, "auto") == 0) {
+        cJSON_AddStringToObject(req, "method", "setAutomaticIntensityMode");
+        cJSON_AddBoolToObject(p, "enabled", 1);
+    } else {
+        /* "on" — activate light; optionally set manual intensity first */
+        cJSON* intensity_j = cJSON_GetObjectItem(cfg, "intensity");
+        if (intensity_j) {
+            cJSON_AddStringToObject(req, "method", "setManualIntensity");
+            cJSON_AddNumberToObject(p, "intensity", intensity_j->valuedouble);
+            char* body = cJSON_PrintUnformatted(req);
+            char* resp = ACAP_VAPIX_Post("lightcontrol.cgi", body);
+            free(body); if (resp) free(resp);
+            /* Now activate */
+            cJSON_SetValuestring(cJSON_GetObjectItem(req, "method"), "activateLight");
+            cJSON_DeleteItemFromObject(p, "intensity");
+        } else {
+            cJSON_AddStringToObject(req, "method", "activateLight");
+        }
+    }
+
+    char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
+    char* resp = ACAP_VAPIX_Post("lightcontrol.cgi", body);
+    free(body); if (resp) free(resp);
+}
+
+/* acap_control — start, stop, or restart another installed ACAP application */
+static void action_acap_control(cJSON* cfg) {
+    const char* package = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "package"));
+    if (!package || !package[0]) { LOG_WARN("acap_control: no package specified"); return; }
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    if (!op) op = "start";
+    char req[256];
+    snprintf(req, sizeof(req), "applications/control.cgi?package=%s&action=%s", package, op);
+    char* resp = ACAP_VAPIX_Get(req);
+    if (resp) free(resp);
+}
+
 /*-----------------------------------------------------
  * Async delay support
  *-----------------------------------------------------*/
@@ -773,6 +1065,14 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(action, trigger_data);
         else if (strcmp(type, "run_rule")          == 0) action_run_rule(action);
         else if (strcmp(type, "vapix_query")       == 0) action_vapix_query(action, trigger_data);
+        else if (strcmp(type, "guard_tour")        == 0) action_guard_tour(action);
+        else if (strcmp(type, "set_device_param")  == 0) action_set_device_param(action);
+        else if (strcmp(type, "snapshot_upload")   == 0) action_snapshot_upload(action, trigger_data);
+        else if (strcmp(type, "ir_cut_filter")     == 0) action_ir_cut_filter(action);
+        else if (strcmp(type, "privacy_mask")      == 0) action_privacy_mask(action);
+        else if (strcmp(type, "wiper")             == 0) action_wiper(action);
+        else if (strcmp(type, "light_control")     == 0) action_light_control(action);
+        else if (strcmp(type, "acap_control")      == 0) action_acap_control(action);
         else LOG_WARN("unknown action type '%s'", type);
     }
 }

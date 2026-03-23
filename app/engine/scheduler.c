@@ -18,10 +18,11 @@
 #define SCHED_ASTRONOMICAL  3
 
 /* Astronomical event types */
-#define ASTRO_SUNRISE  0
-#define ASTRO_SUNSET   1
-#define ASTRO_DAWN     2  /* civil dawn (-6°) */
-#define ASTRO_DUSK     3  /* civil dusk (-6°) */
+#define ASTRO_SUNRISE    0
+#define ASTRO_SUNSET     1
+#define ASTRO_DAWN       2  /* civil dawn (-6°) */
+#define ASTRO_DUSK       3  /* civil dusk (-6°) */
+#define ASTRO_SOLAR_NOON 4
 
 typedef struct {
     char    rule_id[37];
@@ -170,19 +171,6 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
                 - 0.002697 * cos(3.0*B) + 0.00148  * sin(3.0*B);
     /* decl is in radians */
 
-    /* Solar depression angle below horizon */
-    double elev_r;
-    if (event == ASTRO_SUNRISE || event == ASTRO_SUNSET)
-        elev_r = (-0.833) * M_PI / 180.0;  /* standard refraction correction */
-    else
-        elev_r = (-6.0) * M_PI / 180.0;    /* civil twilight */
-
-    /* Hour angle */
-    double cos_ha = (sin(elev_r) - sin(lat_r) * sin(decl)) /
-                    (cos(lat_r) * cos(decl));
-    if (cos_ha < -1.0 || cos_ha > 1.0) return -1; /* polar day/night */
-    double ha_deg = acos(cos_ha) * 180.0 / M_PI;
-
     /* Equation of time (minutes) */
     double eot = 229.18 * (0.000075 + 0.001868*cos(B) - 0.032077*sin(B)
                  - 0.014615*cos(2.0*B) - 0.04089*sin(2.0*B));
@@ -191,10 +179,27 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
     double solar_noon_utc_min = 720.0 - 4.0 * lon - eot;
 
     double event_utc_min;
-    if (event == ASTRO_SUNRISE || event == ASTRO_DAWN)
-        event_utc_min = solar_noon_utc_min - 4.0 * ha_deg;
-    else
-        event_utc_min = solar_noon_utc_min + 4.0 * ha_deg;
+    if (event == ASTRO_SOLAR_NOON) {
+        event_utc_min = solar_noon_utc_min;
+    } else {
+        /* Solar depression angle below horizon */
+        double elev_r;
+        if (event == ASTRO_SUNRISE || event == ASTRO_SUNSET)
+            elev_r = (-0.833) * M_PI / 180.0;  /* standard refraction correction */
+        else
+            elev_r = (-6.0) * M_PI / 180.0;    /* civil twilight */
+
+        /* Hour angle */
+        double cos_ha = (sin(elev_r) - sin(lat_r) * sin(decl)) /
+                        (cos(lat_r) * cos(decl));
+        if (cos_ha < -1.0 || cos_ha > 1.0) return -1; /* polar day/night */
+        double ha_deg = acos(cos_ha) * 180.0 / M_PI;
+
+        if (event == ASTRO_SUNRISE || event == ASTRO_DAWN)
+            event_utc_min = solar_noon_utc_min - 4.0 * ha_deg;
+        else
+            event_utc_min = solar_noon_utc_min + 4.0 * ha_deg;
+    }
 
     /* Convert UTC minutes to local seconds-of-day */
     struct tm* local_tm = localtime(&now);
@@ -287,11 +292,12 @@ int Scheduler_Register(const char* rule_id, int trigger_index, cJSON* config) {
         e->astro_lat = lat_val;
         e->astro_lon = lon_val;
         const char* ev = cJSON_GetStringValue(cJSON_GetObjectItem(config, "event"));
-        if (!ev || strcmp(ev, "sunrise") == 0) e->astro_event = ASTRO_SUNRISE;
-        else if (strcmp(ev, "sunset")  == 0)   e->astro_event = ASTRO_SUNSET;
-        else if (strcmp(ev, "dawn")    == 0)    e->astro_event = ASTRO_DAWN;
-        else if (strcmp(ev, "dusk")    == 0)    e->astro_event = ASTRO_DUSK;
-        else                                    e->astro_event = ASTRO_SUNRISE;
+        if (!ev || strcmp(ev, "sunrise") == 0)      e->astro_event = ASTRO_SUNRISE;
+        else if (strcmp(ev, "sunset")     == 0)    e->astro_event = ASTRO_SUNSET;
+        else if (strcmp(ev, "dawn")       == 0)    e->astro_event = ASTRO_DAWN;
+        else if (strcmp(ev, "dusk")       == 0)    e->astro_event = ASTRO_DUSK;
+        else if (strcmp(ev, "solar_noon") == 0)    e->astro_event = ASTRO_SOLAR_NOON;
+        else                                        e->astro_event = ASTRO_SUNRISE;
         cJSON* off_j = cJSON_GetObjectItem(config, "offset_minutes");
         e->astro_offset_sec = off_j ? (int)(off_j->valuedouble * 60.0) : 0;
         e->astro_sod  = -1;  /* not yet computed */

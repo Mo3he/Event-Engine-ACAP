@@ -31,6 +31,14 @@ extern "C" {
  *   set_variable      — store a variable value
  *   increment_counter — increment/decrement a counter
  *   run_rule          — trigger another rule by ID
+ *   guard_tour        — start/stop a PTZ guard tour
+ *   set_device_param  — update a camera parameter via param.cgi
+ *   snapshot_upload   — capture JPEG and POST/PUT to a URL
+ *   ir_cut_filter     — force day/night mode or restore auto switching
+ *   privacy_mask      — enable/disable a named privacy mask
+ *   wiper             — trigger the windshield wiper
+ *   light_control     — control an Axis illuminator (white/IR LED)
+ *   acap_control      — start/stop/restart another ACAP application
  */
 
 void  Actions_Init(void);

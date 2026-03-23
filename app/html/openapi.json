@@ -230,7 +230,7 @@
               },
               "event": {
                 "type": "string",
-                "enum": ["sunrise", "sunset", "dawn", "dusk"],
+                "enum": ["sunrise", "sunset", "dawn", "dusk", "solar_noon"],
                 "description": "Astronomical event. Used when schedule_type is 'astronomical'."
               },
               "latitude": {
@@ -478,9 +478,12 @@
             "type": "string",
             "enum": [
               "http_request", "mqtt_publish", "recording", "overlay_text", "ptz_preset",
+              "http_request", "mqtt_publish", "recording", "overlay_text", "ptz_preset",
               "io_output", "audio_clip", "siren_light", "vapix_query",
               "set_variable", "increment_counter", "fire_rule",
-              "fire_vapix_event", "send_syslog", "delay"
+              "fire_vapix_event", "send_syslog", "delay",
+              "guard_tour", "set_device_param", "snapshot_upload",
+              "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control"
             ]
           }
         }
@@ -754,6 +757,138 @@
               "type":    { "type": "string", "enum": ["delay"] },
               "seconds": { "type": "integer", "minimum": 1, "example": 5 }
             }
+          }
+        ]
+      },
+
+      "ActionGuardTour": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Start or stop a configured PTZ guard tour.",
+            "properties": {
+              "type":      { "type": "string", "enum": ["guard_tour"] },
+              "operation": { "type": "string", "enum": ["start", "stop"], "default": "start" },
+              "tour_id":   { "type": "string", "description": "Guard tour ID or name (required when operation is start)", "example": "Guard Tour 1" },
+              "channel":   { "type": "integer", "default": 1, "minimum": 1, "maximum": 8 }
+            }
+          }
+        ]
+      },
+
+      "ActionSetDeviceParam": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Update a camera parameter via param.cgi. The root. prefix is added automatically if omitted.",
+            "properties": {
+              "type":      { "type": "string", "enum": ["set_device_param"] },
+              "parameter": { "type": "string", "description": "Parameter path, e.g. ImageSource.I0.Sensor.Sharpness", "example": "ImageSource.I0.Sensor.Sharpness" },
+              "value":     { "type": "string", "description": "Value to set", "example": "50" }
+            },
+            "required": ["parameter", "value"]
+          }
+        ]
+      },
+
+      "ActionSnapshotUpload": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Capture a JPEG snapshot and POST or PUT it to a URL with Content-Type: image/jpeg.",
+            "properties": {
+              "type":     { "type": "string", "enum": ["snapshot_upload"] },
+              "url":      { "type": "string", "description": "Destination URL. Supports {{variable}} substitution.", "example": "https://example.com/upload" },
+              "method":   { "type": "string", "enum": ["POST", "PUT"], "default": "POST" },
+              "channel":  { "type": "integer", "default": 1, "minimum": 1, "maximum": 8 },
+              "username": { "type": "string" },
+              "password": { "type": "string" },
+              "headers":  { "type": "string", "description": "Extra request headers, one per line (Key: Value)" }
+            },
+            "required": ["url"]
+          }
+        ]
+      },
+
+      "ActionIrCutFilter": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Force the IR cut filter to day or night mode, or restore automatic day/night switching.",
+            "properties": {
+              "type":    { "type": "string", "enum": ["ir_cut_filter"] },
+              "mode":    { "type": "string", "enum": ["auto", "day", "night"], "default": "auto", "description": "auto = camera decides; day = filter in (blocks IR); night = filter out (allows IR)" },
+              "channel": { "type": "integer", "default": 1, "minimum": 1, "maximum": 8 }
+            }
+          }
+        ]
+      },
+
+      "ActionPrivacyMask": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Enable or disable a named privacy mask.",
+            "properties": {
+              "type":    { "type": "string", "enum": ["privacy_mask"] },
+              "mask_id": { "type": "string", "description": "Privacy mask ID or name as configured on the camera", "example": "Privacy Mask 1" },
+              "enabled": { "type": "boolean", "default": true },
+              "channel": { "type": "integer", "default": 1, "minimum": 1, "maximum": 8 }
+            },
+            "required": ["mask_id"]
+          }
+        ]
+      },
+
+      "ActionWiper": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Trigger the camera clear view (wiper or speed dry) via clearviewcontrol.cgi. Requires AXIS OS 7.10+ and Properties.ClearView.ClearView=yes.",
+            "properties": {
+              "type":      { "type": "string", "enum": ["wiper"] },
+              "operation": { "type": "string", "enum": ["start", "stop"], "default": "start" },
+              "id":        { "type": "integer", "default": 1, "minimum": 1, "description": "Clear view device ID from getServiceInfo" },
+              "duration":  { "type": "integer", "minimum": 1, "description": "Duration in seconds. Only applicable for variable-duration wiper services. Omit to use device default." }
+            }
+          }
+        ]
+      },
+
+      "ActionLightControl": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Control an Axis illuminator (white light or IR LED).",
+            "properties": {
+              "type":      { "type": "string", "enum": ["light_control"] },
+              "operation": { "type": "string", "enum": ["on", "off", "auto"], "default": "on", "description": "on = activateLight; off = deactivateLight; auto = setAutomaticIntensityMode. Note: the light must be enabled (hardware) before it can be activated." },
+              "light_id":  { "type": "string", "default": "led0", "description": "Light device ID as reported by lightcontrol.cgi", "example": "led0" },
+              "intensity": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Manual intensity (0–100). Only used when operation is on. Omit to keep current intensity." }
+            }
+          }
+        ]
+      },
+
+      "ActionAcapControl": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Start, stop, or restart another installed ACAP application on this camera.",
+            "properties": {
+              "type":      { "type": "string", "enum": ["acap_control"] },
+              "package":   { "type": "string", "description": "ACAP package name", "example": "com.axis.myapp" },
+              "operation": { "type": "string", "enum": ["start", "stop", "restart"], "default": "start" }
+            },
+            "required": ["package"]
           }
         ]
       },

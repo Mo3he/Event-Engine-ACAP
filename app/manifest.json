@@ -8,7 +8,7 @@
       "embeddedSdkVersion": "3.0",
       "vendorUrl": "https://github.com/Mo3he",
       "runMode": "respawn",
-      "version": "1.6.8"
+      "version": "1.6.9"
     },
     "configuration": {
       "settingPage": "index.html",
@@ -21,7 +21,7 @@
         {"name": "triggers", "access": "admin", "type": "fastCgi"},
         {"name": "actions",  "access": "admin", "type": "fastCgi"},
         {"name": "events",   "access": "admin", "type": "fastCgi"},
-        {"name": "fire",     "access": "admin", "type": "fastCgi"},
+        {"name": "fire",     "access": "viewer", "type": "fastCgi"},
         {"name": "variables","access": "admin", "type": "fastCgi"}
       ]
     }

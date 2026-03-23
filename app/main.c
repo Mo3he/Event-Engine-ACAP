@@ -273,7 +273,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
-    cJSON_AddStringToObject(obj, "engine_version", "1.6.8");
+    cJSON_AddStringToObject(obj, "engine_version", "1.6.9");
 
     cJSON* mqtt_st = MQTT_Status();
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);

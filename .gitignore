@@ -10,3 +10,6 @@ app/engine/*.o
 
 # Docker
 .dockerignore
+
+# Local Claude Code settings (may contain credentials)
+.claude/settings.local.json

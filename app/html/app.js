@@ -47,6 +47,10 @@ let vapixEventCatalog = null; /* null = not yet fetched */
 let ptzPresets = null;        /* null=loading, []=no PTZ, [{channel,presets:[name,...]},...] */
 let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
 let sirenProfiles = null;     /* null=loading, []=none or not supported, [{name,label},...] */
+let acapApps = null;          /* null=loading, []=none,   [{package,niceName},...] */
+let privacyMasks = null;      /* null=loading, []=none,   [{name},...] */
+let deviceParams = null;      /* null=loading, []=none,   ['root.X.Y.Z',...] */
+let guardTours = null;        /* null=loading, []=none,   [{id,name},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 let engineLat = 0;            /* engine settings latitude — used as default for astronomical triggers */
@@ -190,6 +194,136 @@ async function loadSirenProfiles() {
     if (!Array.isArray(profiles)) { sirenProfiles = []; return; }
     sirenProfiles = profiles.map(p => ({ name: p.name, label: p.name }));
   } catch(e) { sirenProfiles = []; }
+}
+
+async function loadAcapApps() {
+  try {
+    const resp = await fetch('/axis-cgi/applications/list.cgi');
+    if (!resp.ok) { acapApps = []; return; }
+    const text = await resp.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    const apps = [];
+    doc.querySelectorAll('application').forEach(el => {
+      const pkg      = el.getAttribute('Name');
+      const niceName = el.getAttribute('NiceName') || pkg;
+      if (pkg) apps.push({ package: pkg, niceName });
+    });
+    acapApps = apps.sort((a, b) => a.niceName.localeCompare(b.niceName));
+  } catch(e) { acapApps = []; }
+  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
+    renderActionList();
+}
+
+async function loadPrivacyMasks() {
+  try {
+    const resp = await fetch('/axis-cgi/privacymask.cgi?query=listpxjson');
+    if (!resp.ok) { privacyMasks = []; return; }
+    const data = await resp.json();
+    const list = data && data.listpx;
+    if (!Array.isArray(list)) { privacyMasks = []; return; }
+    privacyMasks = list.map(m => ({ name: m.name }));
+  } catch(e) { privacyMasks = []; }
+  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
+    renderActionList();
+}
+
+async function loadDeviceParams() {
+  try {
+    const resp = await fetch('/axis-cgi/param.cgi?action=list');
+    if (!resp.ok) { deviceParams = []; return; }
+    const text = await resp.text();
+    const params = [];
+    for (const line of text.split('\n')) {
+      const eq = line.indexOf('=');
+      if (eq > 0) params.push(line.slice(0, eq).trim());
+    }
+    deviceParams = params;
+  } catch(e) { deviceParams = []; }
+  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
+    renderActionList();
+}
+
+async function loadGuardTours() {
+  try {
+    const resp = await fetch('/axis-cgi/param.cgi?action=list&group=GuardTour');
+    if (!resp.ok) { guardTours = []; return; }
+    const text = await resp.text();
+    const byId = {};
+    for (const line of text.split('\n')) {
+      const m = line.match(/^root\.GuardTour\.G(\d+)\.Name=(.+)/);
+      if (!m) continue;
+      const id = parseInt(m[1]);
+      const name = m[2].trim().replace(/\r$/, '');
+      if (name) byId[id] = { id, name };
+    }
+    guardTours = Object.values(byId).sort((a, b) => a.id - b.id);
+  } catch(e) { guardTours = []; }
+  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
+    renderActionList();
+}
+
+/* Fetch current value + allowed values for a device parameter.
+ * Called onblur from the parameter input in the set_device_param action row. */
+async function fetchParamValues(paramInput) {
+  const row = paramInput.closest('.tca-row');
+  if (!row) return;
+  const raw = paramInput.value.trim();
+  if (!raw) return;
+  const param = raw.startsWith('root.') ? raw : 'root.' + raw;
+
+  const valueInput  = row.querySelector('[data-k="value"]');
+  const valListEl   = row.querySelector('.param-val-list');
+  const hintEl      = row.querySelector('.param-val-hint');
+  if (!valueInput || !hintEl) return;
+
+  hintEl.textContent = 'Looking up…';
+
+  /* 1 — current value */
+  let currentVal = '';
+  try {
+    const r = await fetch(`/axis-cgi/param.cgi?action=list&group=${encodeURIComponent(param)}`);
+    if (r.ok) {
+      const text = await r.text();
+      const m = text.match(/=(.+)/);
+      if (m) currentVal = m[1].trim().replace(/\r$/, '');
+    }
+  } catch(e) {}
+
+  /* 2 — definitions (type, allowed values, range, default) */
+  let allowedValues = [], paramType = '', defVal = '', minVal = '', maxVal = '';
+  try {
+    const r = await fetch(`/axis-cgi/param.cgi?action=listdefinitions&group=${encodeURIComponent(param)}&type=all`);
+    if (r.ok) {
+      const text = await r.text();
+      for (const line of text.split('\n')) {
+        const eq = line.indexOf('=');
+        if (eq < 0) continue;
+        const key = line.slice(0, eq).trim();
+        const val = line.slice(eq + 1).trim().replace(/\r$/, '');
+        if (key.endsWith('.values')) allowedValues = val.split(',').map(v => v.trim()).filter(Boolean);
+        else if (key.endsWith('.type')) paramType = val;
+        else if (key.endsWith('.def'))  defVal     = val;
+        else if (key.endsWith('.min'))  minVal     = val;
+        else if (key.endsWith('.max'))  maxVal     = val;
+      }
+    }
+  } catch(e) {}
+
+  /* Update the value input's datalist */
+  if (valListEl && allowedValues.length) {
+    valListEl.innerHTML = allowedValues.map(v => `<option value="${escHtml(v)}">`).join('');
+  }
+
+  /* Build hint line */
+  const parts = [];
+  if (currentVal) parts.push(`Current: <strong>${escHtml(currentVal)}</strong>`);
+  if (paramType)  parts.push(`Type: ${escHtml(paramType)}`);
+  if (allowedValues.length)    parts.push(`Values: ${allowedValues.map(v => `<code>${escHtml(v)}</code>`).join(', ')}`);
+  else if (minVal || maxVal)   parts.push(`Range: ${escHtml(minVal)}–${escHtml(maxVal)}`);
+  if (defVal) parts.push(`Default: ${escHtml(defVal)}`);
+
+  hintEl.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : 'No definition found.';
 }
 
 function parseVapixEventCatalog(xmlText) {
@@ -654,7 +788,7 @@ function triggerFields(t, rowIdx) {
                value="${escHtml(`${base}?token=${tok}`)}"
                style="font-size:11px;font-family:monospace;cursor:pointer;color:var(--accent)"
                onclick="this.select()" title="Click to select all">
-        <div class="form-hint">No authentication required. Optionally send a JSON body — values are available as <code>{{trigger.KEY}}</code> in action templates.</div>
+        <div class="form-hint">Camera credentials (viewer or above) are required to call this URL. The token additionally identifies which rule to fire. Optionally send a JSON body — values are available as <code>{{trigger.KEY}}</code> in action templates.</div>
       </div>
     </div>`;
   }
@@ -702,10 +836,11 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Event</label>
         <select data-k="event" id="astro-event-${rowIdx}" onchange="refreshAstroTriggerPreview(${rowIdx})">
-          <option value="sunrise" ${(t.event||'sunrise')==='sunrise' ? 'selected' : ''}>Sunrise</option>
-          <option value="sunset"  ${t.event==='sunset'  ? 'selected' : ''}>Sunset</option>
-          <option value="dawn"    ${t.event==='dawn'    ? 'selected' : ''}>Civil Dawn (−6°)</option>
-          <option value="dusk"    ${t.event==='dusk'    ? 'selected' : ''}>Civil Dusk (−6°)</option>
+          <option value="sunrise"    ${(t.event||'sunrise')==='sunrise'    ? 'selected' : ''}>Sunrise</option>
+          <option value="sunset"     ${t.event==='sunset'     ? 'selected' : ''}>Sunset</option>
+          <option value="solar_noon" ${t.event==='solar_noon' ? 'selected' : ''}>Solar Noon</option>
+          <option value="dawn"       ${t.event==='dawn'       ? 'selected' : ''}>Civil Dawn (−6°)</option>
+          <option value="dusk"       ${t.event==='dusk'       ? 'selected' : ''}>Civil Dusk (−6°)</option>
         </select>
       </div>
       <div class="form-group">
@@ -1003,27 +1138,51 @@ function removeConditionRow(i) { conditionRows.splice(i, 1); renderConditionList
 function changeConditionType(i, type) { conditionRows[i] = { type }; renderConditionList(); }
 
 /* ===== Action rows ===== */
-const ACTION_TYPES = [
-  { value: 'http_request',      label: 'HTTP Request' },
-  { value: 'recording',         label: 'Recording' },
-  { value: 'overlay_text',      label: 'Overlay Text' },
-  { value: 'ptz_preset',        label: 'PTZ Preset' },
-  { value: 'io_output',         label: 'I/O Output' },
-  { value: 'audio_clip',        label: 'Audio Clip' },
-  { value: 'siren_light',       label: 'Siren / Light' },
-  { value: 'send_syslog',       label: 'Send Syslog' },
-  { value: 'vapix_query',       label: 'VAPIX Event Query' },
-  { value: 'fire_vapix_event',  label: 'Fire VAPIX Event' },
-  { value: 'delay',             label: 'Delay' },
-  { value: 'set_variable',      label: 'Set Variable' },
-  { value: 'increment_counter', label: 'Increment Counter' },
-  { value: 'mqtt_publish',      label: 'MQTT Publish' },
-  { value: 'run_rule',          label: 'Run Rule' },
+const ACTION_GROUPS = [
+  { label: 'Notifications', types: [
+    { value: 'http_request',      label: 'HTTP Request' },
+    { value: 'mqtt_publish',      label: 'MQTT Publish' },
+    { value: 'snapshot_upload',   label: 'Snapshot Upload' },
+    { value: 'send_syslog',       label: 'Send Syslog' },
+  ]},
+  { label: 'Camera', types: [
+    { value: 'recording',         label: 'Recording' },
+    { value: 'overlay_text',      label: 'Overlay Text' },
+    { value: 'ptz_preset',        label: 'PTZ Preset' },
+    { value: 'guard_tour',        label: 'Guard Tour' },
+    { value: 'ir_cut_filter',     label: 'IR Cut Filter' },
+    { value: 'privacy_mask',      label: 'Privacy Mask' },
+    { value: 'wiper',             label: 'Wiper' },
+    { value: 'light_control',     label: 'Light Control' },
+  ]},
+  { label: 'Audio / Visual', types: [
+    { value: 'audio_clip',        label: 'Audio Clip' },
+    { value: 'siren_light',       label: 'Siren / Light' },
+  ]},
+  { label: 'I/O', types: [
+    { value: 'io_output',         label: 'I/O Output' },
+  ]},
+  { label: 'Logic', types: [
+    { value: 'delay',             label: 'Delay' },
+    { value: 'set_variable',      label: 'Set Variable' },
+    { value: 'increment_counter', label: 'Increment Counter' },
+    { value: 'run_rule',          label: 'Run Rule' },
+  ]},
+  { label: 'Advanced', types: [
+    { value: 'fire_vapix_event',  label: 'Fire VAPIX Event' },
+    { value: 'vapix_query',       label: 'VAPIX Event Query' },
+    { value: 'set_device_param',  label: 'Set Device Parameter' },
+    { value: 'acap_control',      label: 'ACAP Control' },
+  ]},
 ];
 
 function actionTypeOptions(selected) {
-  return ACTION_TYPES.map(t =>
-    `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+  return ACTION_GROUPS.map(g =>
+    `<optgroup label="${escHtml(g.label)}">${
+      g.types.map(t =>
+        `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+      ).join('')
+    }</optgroup>`
   ).join('');
 }
 
@@ -1619,6 +1778,225 @@ function actionFields(a) {
         </select>
       </div>
     </div>`;
+  if (type === 'guard_tour') {
+    const isStart = (a.operation || 'start') === 'start';
+    let tourControl = '';
+    if (isStart) {
+      if (guardTours === null) {
+        tourControl = `<input type="text" data-k="tour_id" value="${escHtml(a.tour_id || '')}" placeholder="Loading tours…" disabled>`;
+      } else if (!guardTours.length) {
+        tourControl = `<input type="text" data-k="tour_id" value="${escHtml(a.tour_id || '')}" placeholder="e.g. Guard Tour 1">`;
+      } else {
+        let opts = `<option value="">— select tour —</option>`;
+        for (const gt of guardTours) {
+          const sel = a.tour_id === gt.name ? 'selected' : '';
+          opts += `<option value="${escHtml(gt.name)}" ${sel}>${escHtml(gt.name)}</option>`;
+        }
+        tourControl = `<select data-k="tour_id">${opts}</select>`;
+      }
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="start" ${isStart  ? 'selected':''}>Start</option>
+          <option value="stop"  ${!isStart ? 'selected':''}>Stop</option>
+        </select>
+      </div>
+      ${isStart ? `
+      <div class="form-group">
+        <label>Guard Tour</label>${tourControl}
+      </div>` : ''}
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+      </div>
+    </div>`;
+  }
+  if (type === 'set_device_param') {
+    const paramListId = `param-list-${Math.random().toString(36).slice(2)}`;
+    const valListId   = `val-list-${Math.random().toString(36).slice(2)}`;
+    const paramDl = deviceParams && deviceParams.length
+      ? `<datalist id="${paramListId}">${deviceParams.map(p => `<option value="${escHtml(p)}">`).join('')}</datalist>`
+      : '';
+    const placeholder = deviceParams === null ? 'Loading params…' : 'e.g. root.ImageSource.I0.Sensor.Sharpness';
+    return `${paramDl}<datalist class="param-val-list" id="${valListId}"></datalist>
+    <div class="form-row">
+      <div class="form-group" style="width:100%">
+        <div style="background:rgba(255,160,0,0.12);border:1px solid rgba(255,160,0,0.5);border-radius:6px;padding:8px 12px;font-size:12px;">
+          <strong>For expert users only.</strong> Only change these settings if you know what you are doing — incorrect values can disrupt camera operation.
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Parameter</label>
+        <input type="text" data-k="parameter" value="${escHtml(a.parameter || '')}" placeholder="${placeholder}" list="${paramListId}" ${deviceParams === null ? 'disabled' : ''}
+               onblur="fetchParamValues(this)">
+        <div class="form-hint">The <code>root.</code> prefix is added automatically if omitted. Tab out of this field to look up allowed values.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(a.value || '')}" list="${valListId}">
+        <div class="form-hint param-val-hint">${a.parameter ? 'Tab the parameter field to look up values.' : ''}</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'snapshot_upload') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>URL</label>
+        <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="https://example.com/upload">
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Method</label>
+        <select data-k="method">
+          <option value="POST" ${(a.method||'POST')==='POST' ? 'selected':''}>POST</option>
+          <option value="PUT"  ${a.method==='PUT'           ? 'selected':''}>PUT</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 80px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Username</label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}">
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Password</label>
+        <input type="password" data-k="password" value="${escHtml(a.password || '')}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Extra Headers</label>
+        <textarea data-k="headers" rows="2" placeholder="X-Token: abc123">${escHtml(a.headers || '')}</textarea>
+      </div>
+    </div>`;
+  if (type === 'ir_cut_filter') return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 180px;">
+        <label>Mode</label>
+        <select data-k="mode">
+          <option value="day"   ${a.mode==='day'             ? 'selected':''}>On (day — filter in)</option>
+          <option value="night" ${a.mode==='night'           ? 'selected':''}>Off (night — filter out)</option>
+          <option value="auto"  ${(a.mode||'auto')==='auto'  ? 'selected':''}>Auto</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+      </div>
+    </div>`;
+  if (type === 'privacy_mask') {
+    let maskControl;
+    if (privacyMasks === null) {
+      maskControl = `<input type="text" data-k="mask_id" value="${escHtml(a.mask_id || '')}" placeholder="Loading masks…" disabled>`;
+    } else if (!privacyMasks.length) {
+      maskControl = `<input type="text" data-k="mask_id" value="${escHtml(a.mask_id || '')}" placeholder="e.g. Mask 1">`;
+    } else {
+      let opts = `<option value="">— select mask —</option>`;
+      for (const m of privacyMasks) {
+        const sel = a.mask_id === m.name ? 'selected' : '';
+        opts += `<option value="${escHtml(m.name)}" ${sel}>${escHtml(m.name)}</option>`;
+      }
+      maskControl = `<select data-k="mask_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Privacy Mask</label>${maskControl}
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Action</label>
+        <select data-k="enabled">
+          <option value="true"  ${(a.enabled !== false) ? 'selected':''}>Enable</option>
+          <option value="false" ${a.enabled === false   ? 'selected':''}>Disable</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+      </div>
+    </div>`;
+  }
+  if (type === 'wiper') return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Operation</label>
+        <select data-k="operation">
+          <option value="start" ${(a.operation||'start')==='start' ? 'selected':''}>Start</option>
+          <option value="stop"  ${a.operation==='stop'             ? 'selected':''}>Stop</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Device ID</label>
+        <input type="number" data-k="id" value="${a.id || 1}" min="1">
+        <div class="form-hint">Use <b>getServiceInfo</b> to find IDs.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Duration (s, optional)</label>
+        <input type="number" data-k="duration" value="${a.duration || ''}" min="1" placeholder="Default">
+        <div class="form-hint">Variable-duration wipers only.</div>
+      </div>
+    </div>`;
+  if (type === 'light_control') {
+    const op = a.operation || 'on';
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="on"   ${op==='on'   ? 'selected':''}>On</option>
+          <option value="off"  ${op==='off'  ? 'selected':''}>Off</option>
+          <option value="auto" ${op==='auto' ? 'selected':''}>Auto</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Light ID</label>
+        <input type="text" data-k="light_id" value="${escHtml(a.light_id || 'led0')}" placeholder="led0">
+      </div>
+      ${op === 'on' ? `
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Intensity (0–100, optional)</label>
+        <input type="number" data-k="intensity" value="${a.intensity ?? ''}" min="0" max="100" placeholder="Auto">
+        <div class="form-hint">Leave blank to use the camera's current intensity setting.</div>
+      </div>` : ''}
+    </div>`;
+  }
+  if (type === 'acap_control') {
+    let pkgControl;
+    if (acapApps === null) {
+      pkgControl = `<input type="text" data-k="package" value="${escHtml(a.package || '')}" placeholder="Loading apps…" disabled>`;
+    } else if (!acapApps.length) {
+      pkgControl = `<input type="text" data-k="package" value="${escHtml(a.package || '')}" placeholder="e.g. com.axis.myapp">`;
+    } else {
+      let opts = `<option value="">— select app —</option>`;
+      for (const app of acapApps) {
+        const sel = a.package === app.package ? 'selected' : '';
+        opts += `<option value="${escHtml(app.package)}" ${sel}>${escHtml(app.niceName)}</option>`;
+      }
+      pkgControl = `<select data-k="package">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Application</label>${pkgControl}
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Operation</label>
+        <select data-k="operation">
+          <option value="start"   ${(a.operation||'start')==='start'   ? 'selected':''}>Start</option>
+          <option value="stop"    ${a.operation==='stop'               ? 'selected':''}>Stop</option>
+          <option value="restart" ${a.operation==='restart'            ? 'selected':''}>Restart</option>
+        </select>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -1757,7 +2135,8 @@ function normalizeAction(a) {
                  'preset','port','state','clip_name','message','level','event_id',
                  'seconds','name','value','delta','rule_id','cron','interval_seconds',
                  'schedule_type','time','counter_name','op','token','edge',
-                 'topic','payload','qos','position','text_color'];
+                 'topic','payload','qos','position','text_color',
+                 'tour_id','parameter','mask_id','light_id','package','id','mode'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
@@ -1800,6 +2179,14 @@ function normalizeAction(a) {
     out.while_active = a.while_active === true;
   if (a.type === 'io_output' && !(parseInt(a.duration) > 0))
     out.while_active = a.while_active === true;
+  if (a.type === 'privacy_mask')
+    out.enabled = a.enabled === 'true' || a.enabled === true;
+  if (a.type === 'light_control' && (a.operation || 'on') === 'on' && a.intensity !== '' && a.intensity !== undefined)
+    out.intensity = parseInt(a.intensity);
+  if (a.type === 'snapshot_upload' || a.type === 'guard_tour' || a.type === 'ir_cut_filter' || a.type === 'privacy_mask')
+    if (out.channel !== undefined) out.channel = parseInt(out.channel) || 1;
+  if (a.type === 'wiper')
+    if (out.id !== undefined) out.id = parseInt(out.id) || 1;
   if (a.type === 'http_request') {
     out.attach_snapshot = a.attach_snapshot === true;
     /* Fallback action chain */
@@ -2024,24 +2411,28 @@ function calcSolarEvent(lat, lon, eventType, offsetMin) {
              - 0.002697*Math.cos(3*B) + 0.00148 *Math.sin(3*B);
 
   const lat_r = lat * Math.PI / 180;
-  const elev_r = (eventType === 'sunrise' || eventType === 'sunset')
-               ? -0.833 * Math.PI / 180   /* sunrise/sunset */
-               : -6.0   * Math.PI / 180;  /* civil dawn/dusk */
-
-  const cos_ha = (Math.sin(elev_r) - Math.sin(lat_r) * Math.sin(decl))
-               / (Math.cos(lat_r) * Math.cos(decl));
-  if (cos_ha < -1 || cos_ha > 1) return null; /* polar */
-
-  const ha_deg = Math.acos(cos_ha) * 180 / Math.PI;
 
   /* Equation of time (minutes) */
   const eot = 229.18 * (0.000075 + 0.001868*Math.cos(B) - 0.032077*Math.sin(B)
             - 0.014615*Math.cos(2*B) - 0.04089*Math.sin(2*B));
 
   const solar_noon_utc = 720 - 4*lon - eot; /* minutes UTC */
-  const event_utc = (eventType === 'sunrise' || eventType === 'dawn')
-                  ? solar_noon_utc - 4*ha_deg
-                  : solar_noon_utc + 4*ha_deg;
+
+  let event_utc;
+  if (eventType === 'solar_noon') {
+    event_utc = solar_noon_utc;
+  } else {
+    const elev_r = (eventType === 'sunrise' || eventType === 'sunset')
+                 ? -0.833 * Math.PI / 180   /* sunrise/sunset */
+                 : -6.0   * Math.PI / 180;  /* civil dawn/dusk */
+    const cos_ha = (Math.sin(elev_r) - Math.sin(lat_r) * Math.sin(decl))
+                 / (Math.cos(lat_r) * Math.cos(decl));
+    if (cos_ha < -1 || cos_ha > 1) return null; /* polar */
+    const ha_deg = Math.acos(cos_ha) * 180 / Math.PI;
+    event_utc = (eventType === 'sunrise' || eventType === 'dawn')
+              ? solar_noon_utc - 4*ha_deg
+              : solar_noon_utc + 4*ha_deg;
+  }
 
   /* JS timezone offset is minutes *west*; negate to get east offset */
   const tz_offset = -now.getTimezoneOffset();
@@ -2058,10 +2449,11 @@ function refreshSolarPreview(lat, lon, containerId) {
   if (!el) return;
   if (isNaN(lat) || isNaN(lon)) { el.textContent = ''; return; }
   const events = [
-    { key: 'dawn',    label: 'Civil dawn' },
-    { key: 'sunrise', label: 'Sunrise' },
-    { key: 'sunset',  label: 'Sunset' },
-    { key: 'dusk',    label: 'Civil dusk' },
+    { key: 'dawn',       label: 'Civil dawn' },
+    { key: 'sunrise',    label: 'Sunrise' },
+    { key: 'solar_noon', label: 'Solar noon' },
+    { key: 'sunset',     label: 'Sunset' },
+    { key: 'dusk',       label: 'Civil dusk' },
   ];
   const parts = events.map(e => {
     const t = calcSolarEvent(lat, lon, e.key, 0);
@@ -2292,6 +2684,10 @@ window.addEventListener('DOMContentLoaded', () => {
   loadPtzPresets();
   loadAudioClips();
   loadSirenProfiles();
+  loadAcapApps();
+  loadPrivacyMasks();
+  loadDeviceParams();
+  loadGuardTours();
   /* Load engine lat/lon early so astronomical trigger defaults are correct */
   API.get('settings').then(s => {
     const eng = (s && s.engine) || {};
