@@ -2489,8 +2489,10 @@ async function loadEngineSettings() {
     engineLon = eng.longitude !== undefined ? eng.longitude : 0;
     const lat = document.getElementById('engine-lat');
     const lon = document.getElementById('engine-lon');
+    const proxy = document.getElementById('engine-proxy');
     if (lat) lat.value = engineLat;
     if (lon) lon.value = engineLon;
+    if (proxy) proxy.value = eng.socks5_proxy || '';
     refreshSolarPreview(engineLat, engineLon, 'engine-solar-preview');
   } catch(e) { /* non-fatal */ }
 }
@@ -2499,8 +2501,10 @@ async function saveEngineSettings(event) {
   event.preventDefault();
   const lat = parseFloat(document.getElementById('engine-lat').value) || 0;
   const lon = parseFloat(document.getElementById('engine-lon').value) || 0;
+  const proxyEl = document.getElementById('engine-proxy');
+  const proxy = proxyEl ? proxyEl.value.trim() : '';
   try {
-    const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
+    const r = await API.post('settings', { engine: { latitude: lat, longitude: lon, socks5_proxy: proxy } });
     if (!r.ok) throw new Error(await r.text());
     engineLat = lat;
     engineLon = lon;

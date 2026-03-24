@@ -28,6 +28,7 @@ extern "C" {
  * skip_expensive: if 1, http_check and event_state are treated as pass (not evaluated) */
 int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data);
 int Conditions_Evaluate_Lightweight(cJSON* conditions_array, int logic);
+void Conditions_Set_Proxy(const char* proxy); /* set SOCKS5 proxy for http_check (e.g. "socks5h://localhost:1055") */
 
 #ifdef __cplusplus
 }

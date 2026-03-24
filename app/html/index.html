@@ -120,6 +120,11 @@
             </div>
           </div>
           <div id="engine-solar-preview"></div>
+          <div class="form-group">
+            <label>SOCKS5 Proxy <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+            <input type="text" id="engine-proxy" placeholder="e.g. localhost:1055">
+            <div class="form-hint">Route all outbound connections (HTTP actions, HTTP conditions, and MQTT) through a SOCKS5 proxy. Leave blank to connect directly. Compatible with <a href="https://github.com/Mo3he/Axis_Cam_Tailscale" target="_blank" rel="noopener" style="color:var(--accent);">Axis Tailscale ACAP</a> — set to <code>localhost:1055</code> to send all traffic over Tailscale.</div>
+          </div>
           <div style="display:flex;justify-content:flex-end;">
             <button type="submit" class="btn btn-primary">Save Engine Settings</button>
           </div>

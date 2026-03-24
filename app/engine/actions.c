@@ -15,6 +15,12 @@
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "actions: " fmt, ## args)
 
+static char g_socks5_proxy[256] = "";
+
+void Actions_Set_Proxy(const char* proxy) {
+    snprintf(g_socks5_proxy, sizeof(g_socks5_proxy), "%s", proxy ? proxy : "");
+}
+
 /* Forward declaration — rule_engine.c provides this */
 extern void RuleEngine_Dispatch_RuleFired(const char* rule_id);
 
@@ -301,6 +307,10 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
 
     /* HTTP Basic/Digest authentication */
     const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
@@ -819,6 +829,10 @@ static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
 
     const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
     const char* password = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));

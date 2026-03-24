@@ -46,6 +46,7 @@ void  Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_
 char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data); /* caller must free() */
 void  Actions_Stop_Active_Siren(const char* rule_id); /* stop while_active siren if running */
 void  Actions_ForEach_Active_Siren(int (*cb)(const char* rule_id, void* userdata), void* userdata);
+void  Actions_Set_Proxy(const char* proxy); /* set SOCKS5 proxy for outbound HTTP (e.g. "socks5h://localhost:1055") */
 
 #ifdef __cplusplus
 }

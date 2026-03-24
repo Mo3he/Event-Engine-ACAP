@@ -49,6 +49,8 @@ static MQTT_Message_Callback msg_cb   = NULL;
 static void*                 msg_udata = NULL;
 static int                   sockfd    = -1;
 static int                   connected = 0;
+static char                  proxy_host[256] = "";
+static int                   proxy_port      = 0;
 static uint16_t              packet_id = 1;
 static pthread_t             worker_thread;
 static int                   thread_running = 0;
@@ -119,7 +121,9 @@ static int decode_remaining_length(const uint8_t* buf, int buf_len, int* out_len
 /* =====================================================
  * TCP helpers
  * ===================================================== */
-static int tcp_connect(const char* host, int port) {
+static int recv_exact(int fd, uint8_t* buf, int n, int timeout_sec);  /* forward decl */
+
+static int tcp_connect_raw(const char* host, int port) {
     struct addrinfo hints, *res, *rp;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family   = AF_UNSPEC;
@@ -137,7 +141,6 @@ static int tcp_connect(const char* host, int port) {
         fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (fd < 0) continue;
 
-        /* Set connect timeout via SO_SNDTIMEO */
         struct timeval tv = { CONNECT_TIMEOUT_SEC, 0 };
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -150,6 +153,78 @@ static int tcp_connect(const char* host, int port) {
     }
     freeaddrinfo(res);
     return fd;
+}
+
+/* SOCKS5 CONNECT handshake — fd is already connected to the proxy.
+ * Asks the proxy to tunnel to target_host:target_port.
+ * Returns 0 on success, -1 on failure. */
+static int socks5_handshake(int fd, const char* target_host, int target_port) {
+    uint8_t buf[512];
+    size_t host_len = strlen(target_host);
+    if (host_len > 255) return -1;
+
+    /* Greeting: VER=5, NMETHODS=1, METHOD=0 (no auth) */
+    buf[0] = 0x05; buf[1] = 0x01; buf[2] = 0x00;
+    if (send(fd, buf, 3, MSG_NOSIGNAL) != 3) return -1;
+
+    /* Server choice */
+    if (recv_exact(fd, buf, 2, CONNECT_TIMEOUT_SEC) != 2) return -1;
+    if (buf[0] != 0x05 || buf[1] != 0x00) {
+        LOG_WARN("SOCKS5: server rejected no-auth (method 0x%02x)", buf[1]);
+        return -1;
+    }
+
+    /* CONNECT request: VER=5, CMD=1 (CONNECT), RSV=0, ATYP=3 (hostname) */
+    int idx = 0;
+    buf[idx++] = 0x05;
+    buf[idx++] = 0x01;
+    buf[idx++] = 0x00;
+    buf[idx++] = 0x03;                         /* ATYP: domain name */
+    buf[idx++] = (uint8_t)host_len;
+    memcpy(buf + idx, target_host, host_len); idx += (int)host_len;
+    buf[idx++] = (uint8_t)(target_port >> 8);
+    buf[idx++] = (uint8_t)(target_port & 0xFF);
+    if (send(fd, buf, idx, MSG_NOSIGNAL) != idx) return -1;
+
+    /* Response: VER, REP, RSV, ATYP, BNDADDR, BNDPORT */
+    if (recv_exact(fd, buf, 4, CONNECT_TIMEOUT_SEC) != 4) return -1;
+    if (buf[0] != 0x05 || buf[1] != 0x00) {
+        LOG_WARN("SOCKS5: CONNECT failed, REP=0x%02x", buf[1]);
+        return -1;
+    }
+    /* Drain bound address */
+    int drain = 0;
+    if      (buf[3] == 0x01) drain = 4 + 2;   /* IPv4 + port */
+    else if (buf[3] == 0x03) {
+        uint8_t alen;
+        if (recv_exact(fd, &alen, 1, CONNECT_TIMEOUT_SEC) != 1) return -1;
+        drain = alen + 2;
+    }
+    else if (buf[3] == 0x04) drain = 16 + 2;  /* IPv6 + port */
+    while (drain > 0) {
+        int chunk = drain > (int)sizeof(buf) ? (int)sizeof(buf) : drain;
+        if (recv_exact(fd, buf, chunk, CONNECT_TIMEOUT_SEC) != chunk) return -1;
+        drain -= chunk;
+    }
+    return 0;
+}
+
+static int tcp_connect(const char* host, int port) {
+    if (proxy_host[0]) {
+        int fd = tcp_connect_raw(proxy_host, proxy_port);
+        if (fd < 0) {
+            LOG_WARN("SOCKS5 proxy connect failed (%s:%d)", proxy_host, proxy_port);
+            return -1;
+        }
+        if (socks5_handshake(fd, host, port) != 0) {
+            LOG_WARN("SOCKS5 handshake to %s:%d failed", host, port);
+            close(fd);
+            return -1;
+        }
+        LOG("SOCKS5 tunnel to %s:%d via %s:%d", host, port, proxy_host, proxy_port);
+        return fd;
+    }
+    return tcp_connect_raw(host, port);
 }
 
 static int send_all(int fd, const uint8_t* data, int len) {
@@ -516,6 +591,17 @@ int MQTT_Reconfigure(MQTT_Config* config) {
         pthread_mutex_unlock(&send_lock);
     }
     return 1;
+}
+
+void MQTT_Set_Proxy(const char* ph, int pp) {
+    int changed = (strcmp(proxy_host, ph ? ph : "") != 0 || proxy_port != pp);
+    snprintf(proxy_host, sizeof(proxy_host), "%s", ph ? ph : "");
+    proxy_port = pp;
+    if (changed && connected) {
+        pthread_mutex_lock(&send_lock);
+        if (sockfd >= 0) { close(sockfd); sockfd = -1; connected = 0; }
+        pthread_mutex_unlock(&send_lock);
+    }
 }
 
 int MQTT_Publish(const char* topic, const char* payload, int retain, int qos) {

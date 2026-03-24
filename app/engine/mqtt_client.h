@@ -55,6 +55,10 @@ int  MQTT_Publish(const char* topic, const char* payload, int retain, int qos);
 int  MQTT_Subscribe(const char* topic_filter);
 void MQTT_Unsubscribe(const char* topic_filter);
 
+/* Set SOCKS5 proxy for the broker connection (e.g. "localhost:1055").
+ * Pass NULL or "" to disable. Triggers reconnect if currently connected. */
+void MQTT_Set_Proxy(const char* proxy_host, int proxy_port);
+
 /* Current connection state */
 int  MQTT_Is_Connected(void);
 

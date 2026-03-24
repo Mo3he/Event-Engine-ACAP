@@ -12,6 +12,12 @@
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "conditions: " fmt, ## args)
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "conditions: " fmt, ## args)
 
+static char g_socks5_proxy[256] = "";
+
+void Conditions_Set_Proxy(const char* proxy) {
+    snprintf(g_socks5_proxy, sizeof(g_socks5_proxy), "%s", proxy ? proxy : "");
+}
+
 /*-----------------------------------------------------
  * time_window
  * config: { "start": "HH:MM", "end": "HH:MM", "days": [0-6,...] }
@@ -128,6 +134,10 @@ static int cond_http_check(cJSON* cfg) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
 
     const char* method = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "method"));
     if (method && strcmp(method, "POST") == 0)

@@ -13,6 +13,7 @@
 #include "engine/variables.h"
 #include "engine/triggers.h"
 #include "engine/actions.h"
+#include "engine/conditions.h"
 #include "engine/mqtt_client.h"
 
 #define APP_PACKAGE "acap_event_engine"
@@ -98,9 +99,35 @@ static void mqtt_message_cb(const char* topic, const char* payload,
     Triggers_On_MQTT_Message(topic, payload, payload_len);
 }
 
+static void apply_proxy_config(cJSON* engine_cfg) {
+    const char* proxy = cJSON_GetStringValue(cJSON_GetObjectItem(engine_cfg, "socks5_proxy"));
+    if (!proxy) proxy = "";
+
+    Actions_Set_Proxy(proxy);
+    Conditions_Set_Proxy(proxy);
+
+    /* Parse "host:port" for MQTT (raw socket client needs host and port separately) */
+    char ph[256] = "";
+    int  pp = 1080;
+    if (proxy[0]) {
+        const char* colon = strrchr(proxy, ':');
+        if (colon) {
+            size_t hlen = (size_t)(colon - proxy);
+            if (hlen >= sizeof(ph)) hlen = sizeof(ph) - 1;
+            memcpy(ph, proxy, hlen); ph[hlen] = '\0';
+            pp = atoi(colon + 1);
+        } else {
+            snprintf(ph, sizeof(ph), "%s", proxy);
+        }
+    }
+    MQTT_Set_Proxy(ph[0] ? ph : NULL, pp);
+}
+
 static void Settings_Updated(const char* service, cJSON* data) {
     if (strcmp(service, "mqtt") == 0)
         apply_mqtt_config(data);
+    else if (strcmp(service, "engine") == 0)
+        apply_proxy_config(data);
 }
 
 /*=====================================================
@@ -404,6 +431,10 @@ int main(void) {
         LOG_WARN("ACAP_Init failed");
         return EXIT_FAILURE;
     }
+
+    /* Apply proxy config from engine settings */
+    cJSON* eng_cfg = cJSON_GetObjectItem(settings, "engine");
+    if (eng_cfg) apply_proxy_config(eng_cfg);
 
     /* Register event callback */
     ACAP_EVENTS_SetCallback(Event_Callback);
