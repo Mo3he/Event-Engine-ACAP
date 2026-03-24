@@ -30,6 +30,7 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 | **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
 | **Counter Threshold** | When a named counter crosses a configured value |
 | **Rule Chain** | Fires when another named rule executes |
+| **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}` and `{{trigger.object_class}}` |
 
 ## Conditions
 
@@ -40,6 +41,7 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 | **Counter Compare** | Compare a counter value against a threshold |
 | **Variable Compare** | Compare a named variable against a value |
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
+| **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count |
 
 ## Actions
 
@@ -97,6 +99,12 @@ Actions are grouped by category in the rule editor.
 | **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
 | **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only — incorrect values can disrupt camera operation** |
 | **ACAP Control** | Start, stop, or restart another installed ACAP application |
+
+### Analytics
+
+| Type | Description |
+|------|-------------|
+| **AOA Get Counts** | Fetch accumulated crossline counts from an Axis Object Analytics scenario and inject them as template variables: `{{aoa_total}}`, `{{aoa_human}}`, `{{aoa_car}}`, `{{aoa_truck}}`, `{{aoa_bus}}`, `{{aoa_bike}}`, `{{aoa_otherVehicle}}`, `{{aoa_timestamp}}`. Optional **Reset after fetch** to zero the counters after reading |
 
 ---
 
@@ -182,8 +190,8 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
 
 1. Go to `http://<camera-ip>/#settings/apps`
 2. Click **Add app** and upload the `.eap` for your camera's architecture:
-   - `Event_Engine_1_6_9_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
-   - `Event_Engine_1_6_9_armv7hf.eap` - Cortex-A9 (older cameras)
+   - `Event_Engine_1_7_0_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
+   - `Event_Engine_1_7_0_armv7hf.eap` - Cortex-A9 (older cameras)
 3. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
@@ -213,6 +221,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 | GET / POST / DELETE | `/variables` | Named variables and counters |
 | GET | `/events` | Event log (most recent rule firings) |
 | GET | `/engine` | Engine status, MQTT status, device info |
+| GET | `/aoa` | List configured Axis Object Analytics scenarios (id, name, type) |
 | GET / POST | `/settings` | Engine and MQTT configuration |
 
 Full spec: `app/html/openapi.json`

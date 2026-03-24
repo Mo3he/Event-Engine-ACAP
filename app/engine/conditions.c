@@ -230,6 +230,54 @@ static int cond_variable_compare(cJSON* cfg) {
 }
 
 /*-----------------------------------------------------
+ * aoa_occupancy
+ * config: { "scenario_id": 1, "object_class": "human"|"car"|...|"any",
+ *            "op": "gt"|"gte"|"lt"|"lte"|"eq", "value": 3 }
+ * Calls AOA getOccupancy and compares the count against a threshold.
+ *-----------------------------------------------------*/
+static int cond_aoa_occupancy(cJSON* cfg) {
+    cJSON* sid_j     = cJSON_GetObjectItem(cfg, "scenario_id");
+    const char* op   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "op"));
+    cJSON* thresh_j  = cJSON_GetObjectItem(cfg, "value");
+    if (!sid_j || !op || !thresh_j) return 0;
+
+    int    scenario_id = (int)sid_j->valuedouble;
+    double threshold   = thresh_j->valuedouble;
+
+    char body[256];
+    snprintf(body, sizeof(body),
+        "{\"method\":\"getOccupancy\",\"apiVersion\":\"1.0\","
+        "\"params\":{\"scenario\":%d}}", scenario_id);
+
+    char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
+    if (!raw) return 0;
+
+    cJSON* root = cJSON_Parse(raw);
+    free(raw);
+    if (!root) return 0;
+
+    cJSON* data = cJSON_GetObjectItem(root, "data");
+    const char* cls = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "object_class"));
+    cJSON* count_j = NULL;
+    if (cls && cls[0] && strcmp(cls, "any") != 0)
+        count_j = cJSON_GetObjectItem(data, cls);
+    else
+        count_j = cJSON_GetObjectItem(data, "total");
+
+    int result = 0;
+    if (count_j && cJSON_IsNumber(count_j)) {
+        double count = count_j->valuedouble;
+        if      (strcmp(op, "gt")  == 0) result = count >  threshold;
+        else if (strcmp(op, "gte") == 0) result = count >= threshold;
+        else if (strcmp(op, "lt")  == 0) result = count <  threshold;
+        else if (strcmp(op, "lte") == 0) result = count <= threshold;
+        else if (strcmp(op, "eq")  == 0) result = count == threshold;
+    }
+    cJSON_Delete(root);
+    return result;
+}
+
+/*-----------------------------------------------------
  * Public
  *-----------------------------------------------------*/
 
@@ -253,6 +301,7 @@ static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSO
         else if (strcmp(type, "variable_compare") == 0) pass = cond_variable_compare(cond);
         else if (strcmp(type, "event_state")      == 0) pass = skip_expensive ? 1 : cond_event_state(cond);
         else if (strcmp(type, "http_check")       == 0) pass = skip_expensive ? 1 : cond_http_check(cond);
+        else if (strcmp(type, "aoa_occupancy")    == 0) pass = skip_expensive ? 1 : cond_aoa_occupancy(cond);
         else { LOG_WARN("unknown condition type '%s'", type); continue; }
 
         if (logic == 0) { /* AND */

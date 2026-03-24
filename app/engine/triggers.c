@@ -41,6 +41,7 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 #define TRIG_COUNTER_THRESHOLD 4
 #define TRIG_RULE_FIRED        5
 #define TRIG_MQTT_MESSAGE      6
+#define TRIG_AOA_SCENARIO      7
 
 typedef struct {
     int    type;
@@ -88,6 +89,10 @@ typedef struct {
     /* mqtt_message */
     char   mqtt_topic_filter[256]; /* supports MQTT wildcards + / # */
     char   mqtt_payload_filter[256]; /* optional substring match; empty = any payload */
+
+    /* aoa_scenario */
+    int    aoa_scenario_id;          /* AOA scenario number (1-based) */
+    char   aoa_object_class[32];     /* optional: "human", "car", "bike", "truck", "bus", "" = any */
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
@@ -312,6 +317,37 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             snprintf(s->mqtt_payload_filter, sizeof(s->mqtt_payload_filter), "%s", pf ? pf : "");
             MQTT_Subscribe(s->mqtt_topic_filter);
 
+        } else if (strcmp(type, "aoa_scenario") == 0) {
+            s->type = TRIG_AOA_SCENARIO;
+            cJSON* sid_j = cJSON_GetObjectItem(trig, "scenario_id");
+            s->aoa_scenario_id = sid_j ? (int)sid_j->valuedouble : 1;
+            const char* oc = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "object_class"));
+            snprintf(s->aoa_object_class, sizeof(s->aoa_object_class), "%s", oc ? oc : "");
+
+            /* Build topic filter for Device1Scenario<N> */
+            char scen_name[32];
+            snprintf(scen_name, sizeof(scen_name), "Device1Scenario%d", s->aoa_scenario_id);
+            cJSON* tf = cJSON_CreateObject();
+            cJSON* t0 = cJSON_CreateObject(); cJSON_AddStringToObject(t0, "axis", "CameraApplicationPlatform");
+            cJSON* t1 = cJSON_CreateObject(); cJSON_AddStringToObject(t1, "axis", "ObjectAnalytics");
+            cJSON* t2 = cJSON_CreateObject(); cJSON_AddStringToObject(t2, "axis", scen_name);
+            cJSON_AddItemToObject(tf, "topic0", t0);
+            cJSON_AddItemToObject(tf, "topic1", t1);
+            cJSON_AddItemToObject(tf, "topic2", t2);
+            s->topic_filter = tf;
+
+            cJSON* decl = cJSON_CreateObject();
+            char dname[128];
+            snprintf(dname, sizeof(dname), "rule_%s_trigger_%d_aoa", rule_id, idx);
+            cJSON_AddStringToObject(decl, "name", dname);
+            cJSON_AddItemToObject(decl, "topic0", cJSON_Duplicate(t0, 1));
+            cJSON_AddItemToObject(decl, "topic1", cJSON_Duplicate(t1, 1));
+            cJSON_AddItemToObject(decl, "topic2", cJSON_Duplicate(t2, 1));
+            int sub_id = ACAP_EVENTS_Subscribe(decl, NULL);
+            cJSON_Delete(decl);
+            s->acap_subscription_id = sub_id;
+            if (!sub_id) LOG_WARN("AOA subscribe failed for rule %s scenario %d", rule_id, s->aoa_scenario_id);
+
         } else {
             LOG_WARN("unknown trigger type '%s' for rule %s", type, rule_id);
             idx++;
@@ -329,7 +365,7 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
 
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
-        if (s->type != TRIG_VAPIX_EVENT && s->type != TRIG_IO_INPUT) continue;
+        if (s->type != TRIG_VAPIX_EVENT && s->type != TRIG_IO_INPUT && s->type != TRIG_AOA_SCENARIO) continue;
         if (!event_topic_matches(s, event)) continue;
 
         /* Update cache for all matching subs (passive and active).
@@ -344,6 +380,31 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
 
         /* Passive subscriptions only cache — they never fire rules */
         if (s->passive) continue;
+
+        /* AOA scenario: require active=true, apply optional object-class filter */
+        if (s->type == TRIG_AOA_SCENARIO) {
+            cJSON* av = cJSON_GetObjectItem(event, "active");
+            if (!av || !cJSON_IsTrue(av)) {
+                Actions_Stop_Active_Siren(s->rule_id);
+                continue;
+            }
+            if (s->aoa_object_class[0]) {
+                const char* reason = cJSON_GetStringValue(cJSON_GetObjectItem(event, "reason"));
+                if (!reason || strcmp(reason, s->aoa_object_class) != 0) continue;
+            }
+            cJSON* tdata = cJSON_CreateObject();
+            cJSON_AddStringToObject(tdata, "type", "aoa_scenario");
+            cJSON_AddNumberToObject(tdata, "scenario_id", s->aoa_scenario_id);
+            cJSON* ci;
+            cJSON_ArrayForEach(ci, s->cached_data) {
+                if (!ci->string) continue;
+                if (!cJSON_GetObjectItem(tdata, ci->string))
+                    cJSON_AddItemToObject(tdata, ci->string, cJSON_Duplicate(ci, 1));
+            }
+            fire_fn(s->rule_id, s->trigger_index, tdata);
+            cJSON_Delete(tdata);
+            continue;
+        }
 
         /* Boolean value filter */
         if (s->filter_key[0] && s->filter_value >= 0) {
@@ -602,10 +663,10 @@ int Triggers_Any_Active(const char* rule_id) {
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
         if (s->passive || strcmp(s->rule_id, rule_id) != 0) continue;
-        if (strcmp(s->type, "vapix_event") == 0) {
+        if (s->type == TRIG_VAPIX_EVENT) {
             /* Threshold trigger is active if it fired and hasn't been reset yet */
             if (s->value_op[0] && (s->value_hysteresis || s->value_since > 0)) return 1;
-        } else if (strcmp(s->type, "counter_threshold") == 0) {
+        } else if (s->type == TRIG_COUNTER_THRESHOLD) {
             if (s->counter_hysteresis) return 1;
         }
         /* Other trigger types (schedule, webhook, mqtt, io_input, rule_fired) are
@@ -658,6 +719,12 @@ cJSON* Triggers_Catalog(void) {
     cJSON_AddStringToObject(t, "type", "mqtt_message");
     cJSON_AddStringToObject(t, "label", "MQTT Message");
     cJSON_AddStringToObject(t, "description", "Fires when a message arrives on a subscribed MQTT topic (supports + and # wildcards)");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "aoa_scenario");
+    cJSON_AddStringToObject(t, "label", "Object Analytics");
+    cJSON_AddStringToObject(t, "description", "Fires when an Axis Object Analytics scenario is triggered");
     cJSON_AddItemToArray(arr, t);
 
     return arr;

@@ -240,18 +240,29 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 
     const struct { const char* type; const char* label; const char* desc; } action_types[] = {
         {"http_request",      "HTTP Request",      "Make an HTTP GET/POST/PUT request to any URL"},
+        {"mqtt_publish",      "MQTT Publish",      "Publish a message to an MQTT topic"},
+        {"snapshot_upload",   "Snapshot Upload",   "Capture a JPEG and POST/PUT it to a URL"},
+        {"send_syslog",       "Send Syslog",       "Write a message to the system log"},
         {"recording",         "Recording",         "Start or stop local camera recording"},
         {"overlay_text",      "Overlay Text",      "Set dynamic text overlay on video stream"},
         {"ptz_preset",        "PTZ Preset",        "Move camera to a PTZ preset position"},
-        {"io_output",         "I/O Output",        "Activate or deactivate a digital output port"},
+        {"guard_tour",        "Guard Tour",        "Start or stop a PTZ guard tour"},
+        {"ir_cut_filter",     "IR Cut Filter",     "Force IR cut filter On, Off, or Auto"},
+        {"privacy_mask",      "Privacy Mask",      "Enable or disable a named privacy mask"},
+        {"wiper",             "Wiper",             "Trigger the windshield wiper"},
+        {"light_control",     "Light Control",     "Control an Axis illuminator"},
         {"audio_clip",        "Audio Clip",        "Play an audio clip on the camera speaker"},
-        {"send_syslog",       "Send Syslog",       "Write a message to the system log"},
-        {"fire_vapix_event",  "Fire VAPIX Event",  "Emit a declared VAPIX event"},
+        {"siren_light",       "Siren / Light",     "Start or stop a siren/LED profile"},
+        {"io_output",         "I/O Output",        "Activate or deactivate a digital output port"},
         {"delay",             "Delay",             "Wait N seconds before continuing action sequence"},
         {"set_variable",      "Set Variable",      "Store a named variable value"},
         {"increment_counter", "Increment Counter", "Increment, decrement, reset, or set a counter"},
-        {"mqtt_publish",      "MQTT Publish",      "Publish a message to an MQTT topic"},
         {"run_rule",          "Run Rule",          "Trigger another rule (rule chaining)"},
+        {"fire_vapix_event",  "Fire VAPIX Event",  "Emit a declared VAPIX event"},
+        {"vapix_query",       "VAPIX Event Query", "Fetch latest cached VAPIX event data as template variables"},
+        {"set_device_param",  "Set Device Parameter", "Update a camera parameter via param.cgi"},
+        {"acap_control",      "ACAP Control",      "Start, stop, or restart another ACAP application"},
+        {"aoa_get_counts",    "AOA Get Counts",    "Fetch accumulated crossline counts from an Object Analytics scenario"},
         {NULL, NULL, NULL}
     };
 
@@ -300,7 +311,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
-    cJSON_AddStringToObject(obj, "engine_version", "1.6.9");
+    cJSON_AddStringToObject(obj, "engine_version", "1.7.0");
 
     cJSON* mqtt_st = MQTT_Status();
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);
@@ -361,6 +372,49 @@ static void HTTP_Fire(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 
     if (!ok) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
     ACAP_HTTP_Respond_Text(resp, "OK");
+}
+
+/*=====================================================
+ * GET /local/acap_event_engine/aoa
+ * Returns list of configured AOA scenarios (id, name, type)
+ * by proxying getConfiguration to objectanalytics/control.cgi
+ *=====================================================*/
+static void HTTP_AOA(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    (void)req;
+    const char* body = "{\"apiVersion\":\"1.0\",\"method\":\"getConfiguration\"}";
+    char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
+    if (!raw) {
+        ACAP_HTTP_Respond_Error(resp, 502, "AOA not available");
+        return;
+    }
+    cJSON* root = cJSON_Parse(raw);
+    free(raw);
+    if (!root) {
+        ACAP_HTTP_Respond_Error(resp, 502, "Invalid AOA response");
+        return;
+    }
+
+    cJSON* arr = cJSON_CreateArray();
+    cJSON* data = cJSON_GetObjectItem(root, "data");
+    /* Scenarios are at data.scenarios in the AOA API */
+    cJSON* scenarios = data ? cJSON_GetObjectItem(data, "scenarios") : NULL;
+    if (scenarios && cJSON_IsArray(scenarios)) {
+        cJSON* s;
+        cJSON_ArrayForEach(s, scenarios) {
+            cJSON* id_j   = cJSON_GetObjectItem(s, "id");
+            cJSON* name_j = cJSON_GetObjectItem(s, "name");
+            cJSON* type_j = cJSON_GetObjectItem(s, "type");
+            if (!id_j) continue;
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "id",   id_j->valuedouble);
+            cJSON_AddStringToObject(item, "name", name_j ? name_j->valuestring : "");
+            cJSON_AddStringToObject(item, "type", type_j ? type_j->valuestring : "");
+            cJSON_AddItemToArray(arr, item);
+        }
+    }
+    cJSON_Delete(root);
+    ACAP_HTTP_Respond_JSON(resp, arr);
+    cJSON_Delete(arr);
 }
 
 /*=====================================================
@@ -494,6 +548,7 @@ int main(void) {
     ACAP_HTTP_Node("events",    HTTP_Events);
     ACAP_HTTP_Node("fire",      HTTP_Fire);
     ACAP_HTTP_Node("variables", HTTP_Variables);
+    ACAP_HTTP_Node("aoa",       HTTP_AOA);
 
     /* 1-second engine tick */
     g_timeout_add_seconds(1, Engine_Tick, NULL);

@@ -51,6 +51,7 @@ let acapApps = null;          /* null=loading, []=none,   [{package,niceName},..
 let privacyMasks = null;      /* null=loading, []=none,   [{name},...] */
 let deviceParams = null;      /* null=loading, []=none,   ['root.X.Y.Z',...] */
 let guardTours = null;        /* null=loading, []=none,   [{id,name},...] */
+let aoaScenarios = null;      /* null=loading, []=none or not available, [{id,name,type},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 let engineLat = 0;            /* engine settings latitude — used as default for astronomical triggers */
@@ -96,18 +97,19 @@ const RULE_TYPE_LABELS = {
   trigger: {
     vapix_event: 'Camera Event', schedule: 'Schedule', mqtt_message: 'MQTT',
     http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
-    rule_fired: 'Rule Fired'
+    rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario'
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
-    variable_compare: 'Variable', http_check: 'HTTP Check'
+    variable_compare: 'Variable', http_check: 'HTTP Check', aoa_occupancy: 'AOA Occupancy'
   },
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
     overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output',
     audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
     set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',
-    delay: 'Delay', fire_vapix_event: 'VAPIX Event', send_syslog: 'Syslog'
+    delay: 'Delay', fire_vapix_event: 'VAPIX Event', send_syslog: 'Syslog',
+    aoa_get_counts: 'AOA Counts'
   }
 };
 function ruleTypeLabel(group, type) {
@@ -261,6 +263,20 @@ async function loadGuardTours() {
   } catch(e) { guardTours = []; }
   if (!document.getElementById('modal-overlay').classList.contains('hidden'))
     renderActionList();
+}
+
+async function loadAoaScenarios() {
+  try {
+    const resp = await fetch(`${BASE}/aoa`);
+    if (!resp.ok) { aoaScenarios = []; return; }
+    const data = await resp.json();
+    aoaScenarios = Array.isArray(data) ? data : [];
+  } catch(e) { aoaScenarios = []; }
+  if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
+    renderTriggerList();
+    renderActionList();
+    renderConditionList();
+  }
 }
 
 /* Fetch current value + allowed values for a device parameter.
@@ -648,6 +664,7 @@ const TRIGGER_TYPES = [
   { value: 'io_input',          label: 'I/O Input' },
   { value: 'counter_threshold', label: 'Counter Threshold' },
   { value: 'rule_fired',        label: 'Rule Fired' },
+  { value: 'aoa_scenario',      label: 'AOA Scenario' },
 ];
 
 function triggerTypeOptions(selected) {
@@ -931,6 +948,41 @@ function triggerFields(t, rowIdx) {
         <div class="form-hint">Rule fires only if the payload contains this substring. Leave empty to match any payload.</div>
       </div>
     </div>`;
+  if (type === 'aoa_scenario') {
+    let scenarioControl;
+    if (aoaScenarios === null) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${t.scenario_id || 1}" min="1" placeholder="Loading…">`;
+    } else if (!aoaScenarios.length) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${t.scenario_id || 1}" min="1"><div class="form-hint">No scenarios found — enter the scenario number manually (1-based).</div>`;
+    } else {
+      const opts = aoaScenarios.map(s => {
+        const sel = (t.scenario_id !== undefined ? parseInt(t.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+        return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+      }).join('');
+      scenarioControl = `<select data-k="scenario_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Scenario</label>
+        ${scenarioControl}
+        <div class="form-hint">Object Analytics scenario to monitor. Fires when the scenario generates an event.</div>
+      </div>
+      <div class="form-group">
+        <label>Object Class <span style="font-weight:normal;opacity:.7">(optional filter)</span></label>
+        <select data-k="object_class">
+          <option value="any"          ${(!t.object_class||t.object_class==='any')     ?'selected':''}>Any</option>
+          <option value="human"        ${t.object_class==='human'       ?'selected':''}>Human</option>
+          <option value="car"          ${t.object_class==='car'         ?'selected':''}>Car</option>
+          <option value="truck"        ${t.object_class==='truck'       ?'selected':''}>Truck</option>
+          <option value="bus"          ${t.object_class==='bus'         ?'selected':''}>Bus</option>
+          <option value="bike"         ${t.object_class==='bike'        ?'selected':''}>Bike</option>
+          <option value="otherVehicle" ${t.object_class==='otherVehicle'?'selected':''}>Other Vehicle</option>
+        </select>
+        <div class="form-hint">Only fire when this object class is detected. Leave as "Any" for all classes.</div>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -1002,6 +1054,7 @@ const CONDITION_TYPES = [
   { value: 'variable_compare', label: 'Variable Compare' },
   { value: 'io_state',         label: 'I/O State' },
   { value: 'http_check',       label: 'HTTP Check' },
+  { value: 'aoa_occupancy',    label: 'AOA Occupancy' },
 ];
 
 function conditionTypeOptions(selected) {
@@ -1113,6 +1166,54 @@ function conditionFields(c) {
         <div class="form-hint">Value at the JSON path must equal this (string comparison)</div>
       </div>
     </div>`;
+  if (type === 'aoa_occupancy') {
+    let scenarioControl;
+    if (aoaScenarios === null) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1" placeholder="Loading…">`;
+    } else if (!aoaScenarios.length) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1">`;
+    } else {
+      const opts = aoaScenarios.map(s => {
+        const sel = (c.scenario_id !== undefined ? parseInt(c.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+        return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+      }).join('');
+      scenarioControl = `<select data-k="scenario_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Scenario</label>
+        ${scenarioControl}
+      </div>
+      <div class="form-group">
+        <label>Object Class</label>
+        <select data-k="object_class">
+          <option value="any"          ${(!c.object_class||c.object_class==='any')     ?'selected':''}>Any (total)</option>
+          <option value="human"        ${c.object_class==='human'       ?'selected':''}>Human</option>
+          <option value="car"          ${c.object_class==='car'         ?'selected':''}>Car</option>
+          <option value="truck"        ${c.object_class==='truck'       ?'selected':''}>Truck</option>
+          <option value="bus"          ${c.object_class==='bus'         ?'selected':''}>Bus</option>
+          <option value="bike"         ${c.object_class==='bike'        ?'selected':''}>Bike</option>
+          <option value="otherVehicle" ${c.object_class==='otherVehicle'?'selected':''}>Other Vehicle</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="gt"  ${(c.op||'gt')==='gt'  ? 'selected' : ''}>&gt;</option>
+          <option value="gte" ${c.op==='gte' ? 'selected' : ''}>&ge;</option>
+          <option value="lt"  ${c.op==='lt'  ? 'selected' : ''}>&lt;</option>
+          <option value="lte" ${c.op==='lte' ? 'selected' : ''}>&le;</option>
+          <option value="eq"  ${c.op==='eq'  ? 'selected' : ''}>=</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Count</label>
+        <input type="number" data-k="value" value="${c.value !== undefined ? c.value : 0}" min="0">
+        <div class="form-hint">Current occupancy count must satisfy the condition to pass. This polls AOA on each rule evaluation.</div>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -1174,6 +1275,9 @@ const ACTION_GROUPS = [
     { value: 'set_device_param',  label: 'Set Device Parameter' },
     { value: 'acap_control',      label: 'ACAP Control' },
   ]},
+  { label: 'Analytics', types: [
+    { value: 'aoa_get_counts',    label: 'AOA Get Counts' },
+  ]},
 ];
 
 function actionTypeOptions(selected) {
@@ -1204,6 +1308,8 @@ function getTriggerTokens() {
       tokens.push('{{trigger.counter_name}}', '{{trigger.counter_value}}');
     } else if (t.type === 'io_input') {
       tokens.push('{{trigger.port}}', '{{trigger.state}}');
+    } else if (t.type === 'aoa_scenario') {
+      tokens.push('{{trigger.scenario_id}}', '{{trigger.object_class}}');
     }
   }
   return [...new Set(tokens)];
@@ -1997,6 +2103,38 @@ function actionFields(a) {
       </div>
     </div>`;
   }
+  if (type === 'aoa_get_counts') {
+    let scenarioControl;
+    if (aoaScenarios === null) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${a.scenario_id || 1}" min="1" placeholder="Loading…">`;
+    } else if (!aoaScenarios.length) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${a.scenario_id || 1}" min="1">`;
+    } else {
+      const opts = aoaScenarios.map(s => {
+        const sel = (a.scenario_id !== undefined ? parseInt(a.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+        return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+      }).join('');
+      scenarioControl = `<select data-k="scenario_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Scenario</label>
+        ${scenarioControl}
+        <div class="form-hint">Fetches accumulated crossline counts and injects them as <code>{{aoa_total}}</code>, <code>{{aoa_human}}</code>, <code>{{aoa_car}}</code>, etc.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
+          <span style="font-size:13px;">Reset after fetch</span>
+          <label class="toggle">
+            <input type="checkbox" data-k="reset_after" ${a.reset_after ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </label>
+        <div class="form-hint">Resets the accumulated counts after reading them.</div>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -2102,6 +2240,9 @@ function normalizeTrigger(t) {
   } else if (t.type === 'mqtt_message') {
     out.topic_filter = t.topic_filter || '#';
     if (t.payload_filter) out.payload_filter = t.payload_filter;
+  } else if (t.type === 'aoa_scenario') {
+    out.scenario_id = parseInt(t.scenario_id) || 1;
+    if (t.object_class && t.object_class !== 'any') out.object_class = t.object_class;
   } else if (t.type === 'counter_threshold') {
     out.counter_name = t.counter_name; out.op = t.op || 'gt'; out.value = parseFloat(t.value) || 0;
   } else if (t.type === 'rule_fired') {
@@ -2125,6 +2266,11 @@ function normalizeCondition(c) {
     out.url = c.url; out.expected_status = parseInt(c.expected_status) || 200;
     if (c.expected_body) out.expected_body = c.expected_body;
     if (c.json_path) { out.json_path = c.json_path; out.json_expected = c.json_expected || ''; }
+  } else if (c.type === 'aoa_occupancy') {
+    out.scenario_id = parseInt(c.scenario_id) || 1;
+    out.object_class = c.object_class || 'any';
+    out.op = c.op || 'gt';
+    out.value = parseFloat(c.value) || 0;
   }
   return out;
 }
@@ -2187,6 +2333,10 @@ function normalizeAction(a) {
     if (out.channel !== undefined) out.channel = parseInt(out.channel) || 1;
   if (a.type === 'wiper')
     if (out.id !== undefined) out.id = parseInt(out.id) || 1;
+  if (a.type === 'aoa_get_counts') {
+    out.scenario_id = parseInt(a.scenario_id) || 1;
+    out.reset_after = a.reset_after === true;
+  }
   if (a.type === 'http_request') {
     out.attach_snapshot = a.attach_snapshot === true;
     /* Fallback action chain */
@@ -2692,6 +2842,7 @@ window.addEventListener('DOMContentLoaded', () => {
   loadPrivacyMasks();
   loadDeviceParams();
   loadGuardTours();
+  loadAoaScenarios();
   /* Load engine lat/lon early so astronomical trigger defaults are correct */
   API.get('settings').then(s => {
     const eng = (s && s.engine) || {};

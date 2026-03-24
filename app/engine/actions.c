@@ -1005,6 +1005,66 @@ static void action_light_control(cJSON* cfg) {
     free(body); if (resp) free(resp);
 }
 
+/* aoa_get_counts — fetch accumulated crossline counts from an AOA scenario and inject
+ * them into trigger_data so subsequent actions can use {{aoa_total}}, {{aoa_human}}, etc. */
+static void action_aoa_get_counts(cJSON* cfg, cJSON* trigger_data) {
+    cJSON* sid_j = cJSON_GetObjectItem(cfg, "scenario_id");
+    if (!sid_j) { LOG_WARN("aoa_get_counts: no scenario_id"); return; }
+    int scenario_id = (int)sid_j->valuedouble;
+
+    char body[256];
+    snprintf(body, sizeof(body),
+        "{\"method\":\"getAccumulatedCounts\",\"apiVersion\":\"1.0\","
+        "\"params\":{\"scenario\":%d}}", scenario_id);
+
+    char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
+    if (!raw) { LOG_WARN("aoa_get_counts: VAPIX call failed for scenario %d", scenario_id); return; }
+
+    cJSON* root = cJSON_Parse(raw);
+    free(raw);
+    if (!root) { LOG_WARN("aoa_get_counts: invalid JSON response"); return; }
+
+    cJSON* data = cJSON_GetObjectItem(root, "data");
+    if (data) {
+        /* getAccumulatedCounts returns: total, totalHuman, totalCar, totalTruck,
+         * totalBus, totalBike, totalOtherVehicle.
+         * Map each to aoa_total, aoa_human, ... for template use. */
+        static const struct { const char* api; const char* token; } map[] = {
+            {"total",             "aoa_total"},
+            {"totalHuman",        "aoa_human"},
+            {"totalCar",          "aoa_car"},
+            {"totalTruck",        "aoa_truck"},
+            {"totalBus",          "aoa_bus"},
+            {"totalBike",         "aoa_bike"},
+            {"totalOtherVehicle", "aoa_otherVehicle"},
+            {NULL, NULL}
+        };
+        for (int i = 0; map[i].api; i++) {
+            cJSON* v = cJSON_GetObjectItem(data, map[i].api);
+            if (v && cJSON_IsNumber(v)) {
+                cJSON_DeleteItemFromObject(trigger_data, map[i].token);
+                cJSON_AddNumberToObject(trigger_data, map[i].token, v->valuedouble);
+            }
+        }
+        const char* ts = cJSON_GetStringValue(cJSON_GetObjectItem(data, "timestamp"));
+        if (ts) {
+            cJSON_DeleteItemFromObject(trigger_data, "aoa_timestamp");
+            cJSON_AddStringToObject(trigger_data, "aoa_timestamp", ts);
+        }
+    }
+    cJSON_Delete(root);
+
+    cJSON* reset_j = cJSON_GetObjectItem(cfg, "reset_after");
+    if (reset_j && cJSON_IsTrue(reset_j)) {
+        char rbody[256];
+        snprintf(rbody, sizeof(rbody),
+            "{\"method\":\"resetAccumulatedCounts\",\"apiVersion\":\"1.0\","
+            "\"params\":{\"scenario\":%d}}", scenario_id);
+        char* rresp = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", rbody);
+        if (rresp) free(rresp);
+    }
+}
+
 /* acap_control — start, stop, or restart another installed ACAP application */
 static void action_acap_control(cJSON* cfg) {
     const char* package = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "package"));
@@ -1087,6 +1147,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "wiper")             == 0) action_wiper(action);
         else if (strcmp(type, "light_control")     == 0) action_light_control(action);
         else if (strcmp(type, "acap_control")      == 0) action_acap_control(action);
+        else if (strcmp(type, "aoa_get_counts")    == 0) action_aoa_get_counts(action, trigger_data);
         else LOG_WARN("unknown action type '%s'", type);
     }
 }
