@@ -38,6 +38,9 @@ typedef struct {
     time_t  period_start;
     /* -1=unknown, 0=conditions were closed, 1=conditions were open */
     int     cond_window_state;
+    /* set when a real trigger fired but was blocked by a time_window condition;
+     * cleared when the rule actually fires or when a new rule load resets state */
+    int     trigger_pending;
 } Rule;
 
 static Rule            rules[MAX_RULES];
@@ -117,6 +120,7 @@ static void rule_from_json(Rule* r, cJSON* obj) {
     r->period_exec_count = 0;
     r->period_start      = 0;
     r->cond_window_state = -1;
+    r->trigger_pending   = 0;
 }
 
 static void rule_free_json(Rule* r) {
@@ -126,6 +130,16 @@ static void rule_free_json(Rule* r) {
     r->triggers_json   = NULL;
     r->conditions_json = NULL;
     r->actions_json    = NULL;
+}
+
+static int rule_has_time_window(Rule* r) {
+    if (!r->conditions_json) return 0;
+    cJSON* c;
+    cJSON_ArrayForEach(c, r->conditions_json) {
+        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(c, "type"));
+        if (type && strcmp(type, "time_window") == 0) return 1;
+    }
+    return 0;
 }
 
 /*-----------------------------------------------------
@@ -183,14 +197,21 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     }
 
     /* Condition evaluation */
+    const char* ttype = trigger_data ? cJSON_GetStringValue(cJSON_GetObjectItem(trigger_data, "type")) : NULL;
+    int is_refire = ttype && strcmp(ttype, "time_window_open") == 0;
     int cond_pass = Conditions_Evaluate(r->conditions_json, r->condition_logic, trigger_data);
     if (!cond_pass) {
+        /* If a real trigger fired while the time window is closed, remember it so
+         * we can re-attempt when the window reopens. */
+        if (!is_refire && rule_has_time_window(r) && r->cond_window_state == 0)
+            r->trigger_pending = 1;
         EventLog_Append(r->id, r->name, 0, "condition", trigger_data);
         pthread_mutex_unlock(&store_lock);
         return;
     }
 
     /* Execute */
+    r->trigger_pending = 0;
     r->last_fired = time(NULL);
     r->execution_count++;
     if (r->max_exec_period[0]) r->period_exec_count++;
@@ -488,16 +509,6 @@ void RuleEngine_Dispatch_RuleFired(const char* rule_id) {
     Triggers_On_Rule_Fired(rule_id);
 }
 
-static int rule_has_time_window(Rule* r) {
-    if (!r->conditions_json) return 0;
-    cJSON* c;
-    cJSON_ArrayForEach(c, r->conditions_json) {
-        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(c, "type"));
-        if (type && strcmp(type, "time_window") == 0) return 1;
-    }
-    return 0;
-}
-
 static int siren_condition_check(const char* rule_id, void* userdata) {
     (void)userdata;
     pthread_mutex_lock(&store_lock);
@@ -538,7 +549,8 @@ void RuleEngine_Tick(void) {
         int prev = r->cond_window_state;
         r->cond_window_state = now_open;
 
-        if (prev == 0 && now_open == 1)
+        if (prev == 0 && now_open == 1 && r->trigger_pending &&
+                Triggers_Any_Active(r->id))
             snprintf(refire_ids[refire_count++], 37, "%s", r->id);
     }
     pthread_mutex_unlock(&store_lock);

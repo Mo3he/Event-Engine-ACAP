@@ -61,6 +61,10 @@ void Triggers_Subscribe_Passive(const char* rule_id, int action_idx, cJSON* acti
  * Returns a borrowed reference (do not free); NULL if not yet received. */
 cJSON* Triggers_Get_Cached(cJSON* topic_cfg);
 
+/* Returns 1 if any stateful trigger for rule_id is currently active
+ * (e.g. a VAPIX threshold that has been crossed and not yet reset). */
+int Triggers_Any_Active(const char* rule_id);
+
 /* Returns catalog of subscribable trigger types for /triggers API */
 cJSON* Triggers_Catalog(void);
 

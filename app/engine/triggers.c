@@ -598,6 +598,22 @@ cJSON* Triggers_Get_Cached(cJSON* topic_cfg) {
     return NULL;
 }
 
+int Triggers_Any_Active(const char* rule_id) {
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->passive || strcmp(s->rule_id, rule_id) != 0) continue;
+        if (strcmp(s->type, "vapix_event") == 0) {
+            /* Threshold trigger is active if it fired and hasn't been reset yet */
+            if (s->value_op[0] && (s->value_hysteresis || s->value_since > 0)) return 1;
+        } else if (strcmp(s->type, "counter_threshold") == 0) {
+            if (s->counter_hysteresis) return 1;
+        }
+        /* Other trigger types (schedule, webhook, mqtt, io_input, rule_fired) are
+         * momentary — no persistent active state to check. */
+    }
+    return 0;
+}
+
 cJSON* Triggers_Catalog(void) {
     cJSON* arr = cJSON_CreateArray();
 
