@@ -904,9 +904,11 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     char* subject = subj_tmpl ? Actions_Expand_Template(subj_tmpl, trigger_data) : strdup("Event Engine Alert");
     char* body    = body_tmpl ? Actions_Expand_Template(body_tmpl, trigger_data) : strdup("");
 
-    /* Build RFC 5322 message as a single string */
-    char msg[4096];
-    snprintf(msg, sizeof(msg),
+    /* Build RFC 5322 message dynamically */
+    size_t msg_len = strlen(from) + strlen(to) + strlen(subject) + strlen(body) + 128;
+    char* msg = malloc(msg_len);
+    if (!msg) { free(subject); free(body); return; }
+    snprintf(msg, msg_len,
         "From: %s\r\n"
         "To: %s\r\n"
         "Subject: %s\r\n"
@@ -920,7 +922,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     UploadBuf upload = { msg, 0, strlen(msg) };
 
     CURL* curl = curl_easy_init();
-    if (!curl) return;
+    if (!curl) { free(msg); return; }
 
     curl_easy_setopt(curl, CURLOPT_URL, smtp_url);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from);
@@ -973,6 +975,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     if (res != CURLE_OK) LOG_WARN("email failed: %s", curl_easy_strerror(res));
     curl_slist_free_all(recipients);
     curl_easy_cleanup(curl);
+    free(msg);
 }
 
 /* telegram — Telegram Bot API sendMessage */

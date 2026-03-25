@@ -126,6 +126,22 @@ static void apply_proxy_config(cJSON* engine_cfg) {
 
 #define SMTP_PASS_FILE "localdata/smtp_password.txt"
 
+static void load_smtp_password(void) {
+    cJSON* obj = ACAP_FILE_Read(SMTP_PASS_FILE);
+    if (!obj) return;
+    const char* pw = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "pw"));
+    if (pw && pw[0]) {
+        /* Inject into in-memory smtp config so actions.c can read it */
+        cJSON* smtp_cfg = ACAP_Get_Config("smtp");
+        if (smtp_cfg) {
+            cJSON* pw_item = cJSON_GetObjectItem(smtp_cfg, "password");
+            if (pw_item) cJSON_SetValuestring(pw_item, pw);
+            else         cJSON_AddStringToObject(smtp_cfg, "password", pw);
+        }
+    }
+    cJSON_Delete(obj);
+}
+
 static void apply_smtp_config(cJSON* smtp_json) {
     if (!smtp_json) return;
     const char* pass = cJSON_GetStringValue(cJSON_GetObjectItem(smtp_json, "password"));
@@ -138,6 +154,8 @@ static void apply_smtp_config(cJSON* smtp_json) {
         cJSON* pw_item = cJSON_GetObjectItem(smtp_json, "password");
         if (pw_item) cJSON_SetValuestring(pw_item, "");
     }
+    /* Reload so in-memory config has the password for action_email() */
+    load_smtp_password();
 }
 
 static void Settings_Updated(const char* service, cJSON* data) {
@@ -556,6 +574,9 @@ int main(void) {
         }
         MQTT_Init(&mc, mqtt_message_cb, NULL);
     }
+
+    /* SMTP — load saved password into in-memory config */
+    load_smtp_password();
 
     RuleEngine_Init();
 

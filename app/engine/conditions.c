@@ -314,6 +314,7 @@ static int cond_aoa_occupancy(cJSON* cfg) {
     if (!root) return 0;
 
     cJSON* data = cJSON_GetObjectItem(root, "data");
+    if (!data) { cJSON_Delete(root); return 0; }
     const char* cls = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "object_class"));
     cJSON* count_j = NULL;
     if (cls && cls[0] && strcmp(cls, "any") != 0)

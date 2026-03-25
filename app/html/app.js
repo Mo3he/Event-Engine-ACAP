@@ -2570,7 +2570,7 @@ function normalizeAction(a) {
                  'webhook_url','title','theme_color','version','database','org','bucket',
                  'measurement','tags','fields','bot_token','chat_id','parse_mode',
                  'smtp_server','from','to','subject','deliver_via','line',
-                 'event_key','data_key','expected'];
+                 'event_key','data_key','expected','interval'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
