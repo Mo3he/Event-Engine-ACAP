@@ -549,6 +549,12 @@ void RuleEngine_Tick(void) {
         int prev = r->cond_window_state;
         r->cond_window_state = now_open;
 
+        /* Window just closed — remember if a trigger is still active so we can
+         * re-fire when the window reopens (even if no new trigger event arrives
+         * while the window is closed). */
+        if (prev == 1 && now_open == 0 && Triggers_Any_Active(r->id))
+            r->trigger_pending = 1;
+
         if (prev == 0 && now_open == 1 && r->trigger_pending &&
                 Triggers_Any_Active(r->id))
             snprintf(refire_ids[refire_count++], 37, "%s", r->id);
