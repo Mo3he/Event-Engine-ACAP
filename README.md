@@ -42,6 +42,8 @@ Rules are built in a clean web UI and take effect immediately - no reboot requir
 | **Variable Compare** | Compare a named variable against a value |
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
 | **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count |
+| **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Engine Settings. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
+| **VAPIX Event State** | Check the current state of any VAPIX event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?) |
 
 ## Actions
 
@@ -53,7 +55,12 @@ Actions are grouped by category in the rule editor.
 |------|-------------|
 | **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error) - log, MQTT publish, or secondary HTTP request |
 | **MQTT Publish** | Publish a message to a topic with configurable QoS and retain flag |
+| **Slack** | Send a message to a Slack channel via incoming webhook. Optional channel and username override |
+| **Teams** | Send an Adaptive Card to Microsoft Teams via Power Automate / Workflows webhook. Optional title and theme colour |
+| **Telegram** | Send a message via Telegram Bot API with Markdown or HTML formatting and link preview toggle |
+| **Email (SMTP)** | Send an email with template-aware subject and body. SMTP server, credentials, and from address are configured once in the Settings tab — each action only needs the recipient, subject, and body |
 | **Snapshot Upload** | Capture a JPEG from the camera and POST or PUT it to a URL with optional Basic Auth |
+| **FTP Upload** | Capture a JPEG and upload it to an FTP or SFTP server. Template-aware path (e.g. `ftp://server/{{camera.serial}}/{{date}}_{{time}}.jpg`). Directories are created automatically |
 | **Send Syslog** | Write a message to the system log |
 
 ### Camera
@@ -86,6 +93,7 @@ Actions are grouped by category in the rule editor.
 
 | Type | Description |
 |------|-------------|
+| **Notification Digest** | Buffer events and send a batched summary at a configurable interval (minimum 30 seconds). Delivers via Slack, Teams, Telegram, Email, or MQTT. Each event adds one line using a template; all lines are combined into a single message on flush |
 | **Delay** | Pause the action sequence for N seconds before continuing |
 | **Set Variable** | Create or update a named persistent variable |
 | **Increment Counter** | Add or subtract a value from a named counter |
@@ -99,6 +107,12 @@ Actions are grouped by category in the rule editor.
 | **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
 | **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only — incorrect values can disrupt camera operation** |
 | **ACAP Control** | Start, stop, or restart another installed ACAP application |
+
+### Data
+
+| Type | Description |
+|------|-------------|
+| **InfluxDB Write** | Write a data point to InfluxDB v1 or v2 using line protocol. Template-aware measurement, tags, and fields. v1 authenticates with username/password, v2 with API token |
 
 ### Analytics
 
@@ -173,7 +187,7 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 - **Rules** - create, edit, duplicate, enable/disable, and delete rules
 - **Event Log** - per-rule firing history with timestamps and result codes
 - **Variables** - view and manage named variables and counters
-- **Settings** - engine settings (location for sunrise/sunset), MQTT broker configuration, device info, and backup/restore
+- **Settings** - engine settings (location for sunrise/sunset), SMTP configuration, MQTT broker configuration, device info, and backup/restore
 
 ---
 
@@ -190,8 +204,8 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
 
 1. Go to `http://<camera-ip>/#settings/apps`
 2. Click **Add app** and upload the `.eap` for your camera's architecture:
-   - `Event_Engine_1_7_0_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
-   - `Event_Engine_1_7_0_armv7hf.eap` - Cortex-A9 (older cameras)
+   - `Event_Engine_1_7_2_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
+   - `Event_Engine_1_7_2_armv7hf.eap` - Cortex-A9 (older cameras)
 3. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).

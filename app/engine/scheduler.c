@@ -214,6 +214,15 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
     return (int)event_local_sec;
 }
 
+int Scheduler_Is_Daytime(double lat, double lon) {
+    time_t now = time(NULL);
+    int sunrise = compute_solar_event(lat, lon, ASTRO_SUNRISE, now);
+    int sunset  = compute_solar_event(lat, lon, ASTRO_SUNSET, now);
+    if (sunrise < 0 || sunset < 0) return -1; /* polar */
+    int sod = ACAP_DEVICE_Seconds_Since_Midnight();
+    return (sod >= sunrise && sod < sunset) ? 1 : 0;
+}
+
 /*-----------------------------------------------------
  * Public API
  *-----------------------------------------------------*/

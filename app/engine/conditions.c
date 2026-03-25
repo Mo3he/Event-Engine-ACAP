@@ -7,6 +7,7 @@
 
 #include "conditions.h"
 #include "variables.h"
+#include "scheduler.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "conditions: " fmt, ## args)
@@ -61,28 +62,84 @@ static int cond_time_window(cJSON* cfg) {
 }
 
 /*-----------------------------------------------------
- * event_state
- * config: { "topic0": {...}, "topic1": {...}, "key": "active", "value": true/false/"string" }
- * Polls current VAPIX event state via VAPIX list endpoint.
+ * day_night
+ * config: { "state": "day"|"night", "lat": 51.5, "lon": -0.12 }
+ * Uses the sunrise/sunset engine from scheduler.c.
+ * If no lat/lon provided, reads from engine settings.
  *-----------------------------------------------------*/
-static int cond_event_state(cJSON* cfg) {
-    /* Use VAPIX to query current event state */
-    const char* key = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "key"));
-    cJSON* expected = cJSON_GetObjectItem(cfg, "value");
-    if (!key || !expected) return 0;
+static int cond_day_night(cJSON* cfg) {
+    const char* want = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
+    if (!want) want = "day";
 
-    /* Build a VAPIX eventhandler query to get current state.
-     * This is a best-effort poll; stateful events return their current value. */
+    double lat = 0.0, lon = 0.0;
+    cJSON* lat_j = cJSON_GetObjectItem(cfg, "lat");
+    cJSON* lon_j = cJSON_GetObjectItem(cfg, "lon");
+    if (lat_j) lat = lat_j->valuedouble;
+    if (lon_j) lon = lon_j->valuedouble;
+
+    /* Fallback to engine settings if not specified per-condition */
+    if (!lat_j && !lon_j) {
+        cJSON* eng = ACAP_Get_Config("engine");
+        if (eng) {
+            cJSON* sl = cJSON_GetObjectItem(eng, "latitude");
+            cJSON* so = cJSON_GetObjectItem(eng, "longitude");
+            if (sl) lat = sl->valuedouble;
+            if (so) lon = so->valuedouble;
+        }
+    }
+
+    int is_day = Scheduler_Is_Daytime(lat, lon);
+    if (is_day < 0) return 0; /* polar — can't determine */
+    return (strcmp(want, "day") == 0) ? is_day : !is_day;
+}
+
+/*-----------------------------------------------------
+ * vapix_event_state
+ * config: { "event_key": "tns1:Device/tnsaxis:IO/VirtualInput",
+ *            "data_key": "active", "expected": "1" }
+ * Checks the current state of a VAPIX event by querying
+ * the event instance list.
+ *-----------------------------------------------------*/
+static int cond_vapix_event_state(cJSON* cfg) {
+    const char* event_key = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "event_key"));
+    const char* data_key  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "data_key"));
+    const char* expected  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "expected"));
+    if (!event_key || !data_key || !expected) return 0;
+
     const char* body =
-        "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\","
-        "\"params\":{\"topicFilter\":\"onvif:\"}}";
+        "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\"}";
     char* resp = ACAP_VAPIX_Post("eventhandler.cgi", body);
     if (!resp) return 0;
-    /* Simplified: we can't easily parse the full event instance tree here.
-     * Return 0 for now — this condition type is most useful with user-supplied
-     * topic filters. A full implementation would parse the XML/JSON response. */
+
+    cJSON* root = cJSON_Parse(resp);
     free(resp);
-    return 0;
+    if (!root) return 0;
+
+    int result = 0;
+    /* Response: { "data": { "instances": [ { "topic": "...", "data": { "key": "value" } } ] } } */
+    cJSON* data = cJSON_GetObjectItem(root, "data");
+    cJSON* instances = data ? cJSON_GetObjectItem(data, "instances") : NULL;
+    if (instances && cJSON_IsArray(instances)) {
+        cJSON* inst;
+        cJSON_ArrayForEach(inst, instances) {
+            const char* topic = cJSON_GetStringValue(cJSON_GetObjectItem(inst, "topic"));
+            if (!topic || !strstr(topic, event_key)) continue;
+            cJSON* d = cJSON_GetObjectItem(inst, "data");
+            if (!d) continue;
+            cJSON* val = cJSON_GetObjectItem(d, data_key);
+            if (!val) continue;
+            char val_str[128] = "";
+            if (cJSON_IsString(val))
+                snprintf(val_str, sizeof(val_str), "%s", val->valuestring);
+            else if (cJSON_IsNumber(val))
+                snprintf(val_str, sizeof(val_str), "%g", val->valuedouble);
+            else if (cJSON_IsBool(val))
+                snprintf(val_str, sizeof(val_str), "%s", cJSON_IsTrue(val) ? "1" : "0");
+            if (strcmp(val_str, expected) == 0) { result = 1; break; }
+        }
+    }
+    cJSON_Delete(root);
+    return result;
 }
 
 /*-----------------------------------------------------
@@ -299,7 +356,8 @@ static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSO
         else if (strcmp(type, "counter")          == 0) pass = cond_counter(cond);
         else if (strcmp(type, "io_state")         == 0) pass = cond_io_state(cond);
         else if (strcmp(type, "variable_compare") == 0) pass = cond_variable_compare(cond);
-        else if (strcmp(type, "event_state")      == 0) pass = skip_expensive ? 1 : cond_event_state(cond);
+        else if (strcmp(type, "day_night")         == 0) pass = cond_day_night(cond);
+        else if (strcmp(type, "vapix_event_state")== 0) pass = skip_expensive ? 1 : cond_vapix_event_state(cond);
         else if (strcmp(type, "http_check")       == 0) pass = skip_expensive ? 1 : cond_http_check(cond);
         else if (strcmp(type, "aoa_occupancy")    == 0) pass = skip_expensive ? 1 : cond_aoa_occupancy(cond);
         else { LOG_WARN("unknown condition type '%s'", type); continue; }

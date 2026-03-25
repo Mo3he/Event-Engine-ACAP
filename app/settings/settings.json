@@ -6,6 +6,13 @@
     "longitude": 0.0,
     "socks5_proxy": ""
   },
+  "smtp": {
+    "server": "",
+    "username": "",
+    "password": "",
+    "from": "",
+    "use_tls": true
+  },
   "mqtt": {
     "enabled": false,
     "host": "",

@@ -666,6 +666,413 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     free(payload);
 }
 
+/* slack_webhook */
+static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
+    const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "webhook_url"));
+    if (!url || !url[0]) { LOG_WARN("slack_webhook: no webhook_url"); return; }
+
+    const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
+    if (!msg_tmpl) msg_tmpl = "";
+    char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
+
+    cJSON* body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "text", msg);
+    const char* channel = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "channel"));
+    if (channel && channel[0]) cJSON_AddStringToObject(body, "channel", channel);
+    const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
+    if (username && username[0]) cJSON_AddStringToObject(body, "username", username);
+
+    char* json_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    free(msg);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { free(json_str); return; }
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) LOG_WARN("slack_webhook failed: %s", curl_easy_strerror(res));
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    free(json_str);
+}
+
+/* teams_webhook — Adaptive Card via Power Automate / Workflows connector */
+static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
+    const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "webhook_url"));
+    if (!url || !url[0]) { LOG_WARN("teams_webhook: no webhook_url"); return; }
+
+    const char* title_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "title"));
+    const char* msg_tmpl   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
+    if (!msg_tmpl) msg_tmpl = "";
+
+    char* title = title_tmpl ? Actions_Expand_Template(title_tmpl, trigger_data) : NULL;
+    char* msg   = Actions_Expand_Template(msg_tmpl, trigger_data);
+
+    /* Build Adaptive Card body array */
+    cJSON* card_body = cJSON_CreateArray();
+    if (title && title[0]) {
+        cJSON* tb = cJSON_CreateObject();
+        cJSON_AddStringToObject(tb, "type", "TextBlock");
+        cJSON_AddStringToObject(tb, "text", title);
+        cJSON_AddStringToObject(tb, "weight", "bolder");
+        cJSON_AddStringToObject(tb, "size", "medium");
+        cJSON_AddItemToArray(card_body, tb);
+    }
+    {
+        cJSON* tb = cJSON_CreateObject();
+        cJSON_AddStringToObject(tb, "type", "TextBlock");
+        cJSON_AddStringToObject(tb, "text", msg);
+        cJSON_AddBoolToObject(tb, "wrap", 1);
+        cJSON_AddItemToArray(card_body, tb);
+    }
+
+    cJSON* card = cJSON_CreateObject();
+    cJSON_AddStringToObject(card, "$schema", "http://adaptivecards.io/schemas/adaptive-card.json");
+    cJSON_AddStringToObject(card, "type", "AdaptiveCard");
+    cJSON_AddStringToObject(card, "version", "1.4");
+    cJSON_AddItemToObject(card, "body", card_body);
+
+    cJSON* attachment = cJSON_CreateObject();
+    cJSON_AddStringToObject(attachment, "contentType", "application/vnd.microsoft.card.adaptive");
+    cJSON_AddItemToObject(attachment, "content", card);
+
+    cJSON* attachments = cJSON_CreateArray();
+    cJSON_AddItemToArray(attachments, attachment);
+
+    cJSON* envelope = cJSON_CreateObject();
+    cJSON_AddStringToObject(envelope, "type", "message");
+    cJSON_AddItemToObject(envelope, "attachments", attachments);
+
+    char* json_str = cJSON_PrintUnformatted(envelope);
+    cJSON_Delete(envelope);
+    free(title);
+    free(msg);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { free(json_str); return; }
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) LOG_WARN("teams_webhook failed: %s", curl_easy_strerror(res));
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    free(json_str);
+}
+
+/* influxdb_write — write a data point to InfluxDB v1 or v2 */
+static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
+    const char* base_url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
+    if (!base_url || !base_url[0]) { LOG_WARN("influxdb_write: no url"); return; }
+
+    const char* version = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "version"));
+    if (!version) version = "v2";
+    int is_v1 = strcmp(version, "v1") == 0;
+
+    const char* meas_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "measurement"));
+    if (!meas_tmpl || !meas_tmpl[0]) { LOG_WARN("influxdb_write: no measurement"); return; }
+    const char* fields_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "fields"));
+    if (!fields_tmpl || !fields_tmpl[0]) { LOG_WARN("influxdb_write: no fields"); return; }
+
+    char* measurement = Actions_Expand_Template(meas_tmpl, trigger_data);
+    char* fields      = Actions_Expand_Template(fields_tmpl, trigger_data);
+    const char* tags_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tags"));
+    char* tags = tags_tmpl ? Actions_Expand_Template(tags_tmpl, trigger_data) : NULL;
+
+    /* Build line protocol: measurement[,tags] fields */
+    char line[2048];
+    if (tags && tags[0])
+        snprintf(line, sizeof(line), "%s,%s %s", measurement, tags, fields);
+    else
+        snprintf(line, sizeof(line), "%s %s", measurement, fields);
+
+    free(measurement);
+    free(fields);
+    free(tags);
+
+    /* Build write URL */
+    char write_url[1024];
+    if (is_v1) {
+        const char* db = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "database"));
+        snprintf(write_url, sizeof(write_url), "%s/write?db=%s", base_url, db ? db : "");
+    } else {
+        const char* org    = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "org"));
+        const char* bucket = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "bucket"));
+        snprintf(write_url, sizeof(write_url), "%s/api/v2/write?org=%s&bucket=%s",
+                 base_url, org ? org : "", bucket ? bucket : "");
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return;
+
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: text/plain");
+    /* v2 token auth */
+    const char* token = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "token"));
+    if (!is_v1 && token && token[0]) {
+        char auth_hdr[512];
+        snprintf(auth_hdr, sizeof(auth_hdr), "Authorization: Token %s", token);
+        hdrs = curl_slist_append(hdrs, auth_hdr);
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, write_url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, line);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+
+    /* v1 basic auth */
+    if (is_v1) {
+        const char* user = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
+        if (user && user[0]) {
+            char userpwd[512];
+            snprintf(userpwd, sizeof(userpwd), "%s:%s", user, token ? token : "");
+            curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+        }
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK)
+        LOG_WARN("influxdb_write failed: %s", curl_easy_strerror(res));
+    else {
+        long http_code = 0;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code != 204 && http_code != 200)
+            LOG_WARN("influxdb_write: unexpected HTTP %ld", http_code);
+    }
+
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+}
+
+/* Shared upload buffer for SMTP and FTP read callbacks */
+typedef struct { const char* data; size_t pos; size_t len; } UploadBuf;
+
+static size_t curl_read_buf(char* ptr, size_t sz, size_t n, void* ud) {
+    UploadBuf* u = (UploadBuf*)ud;
+    size_t avail = u->len - u->pos;
+    size_t want = sz * n;
+    size_t copy = avail < want ? avail : want;
+    memcpy(ptr, u->data + u->pos, copy);
+    u->pos += copy;
+    return copy;
+}
+
+/* email — SMTP via libcurl.  Server/credentials come from global SMTP
+ * settings (settings.json "smtp" section); per-action config only has
+ * to, subject, and body. */
+static void action_email(cJSON* cfg, cJSON* trigger_data) {
+    /* Read SMTP config from global settings */
+    cJSON* smtp_cfg = ACAP_Get_Config("smtp");
+    const char* smtp_url = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "server")) : NULL;
+    const char* from     = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "from"))   : NULL;
+    if (!smtp_url || !smtp_url[0]) { LOG_WARN("email: SMTP server not configured in settings"); return; }
+    if (!from || !from[0]) { LOG_WARN("email: 'from' address not configured in SMTP settings"); return; }
+
+    const char* to = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "to"));
+    if (!to || !to[0]) { LOG_WARN("email: no 'to' address"); return; }
+
+    const char* subj_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "subject"));
+    const char* body_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "body"));
+    char* subject = subj_tmpl ? Actions_Expand_Template(subj_tmpl, trigger_data) : strdup("Event Engine Alert");
+    char* body    = body_tmpl ? Actions_Expand_Template(body_tmpl, trigger_data) : strdup("");
+
+    /* Build RFC 5322 message as a single string */
+    char msg[4096];
+    snprintf(msg, sizeof(msg),
+        "From: %s\r\n"
+        "To: %s\r\n"
+        "Subject: %s\r\n"
+        "Content-Type: text/plain; charset=UTF-8\r\n"
+        "\r\n"
+        "%s\r\n", from, to, subject, body);
+    free(subject);
+    free(body);
+
+    /* libcurl SMTP upload via CURLOPT_READFUNCTION on a buffer */
+    UploadBuf upload = { msg, 0, strlen(msg) };
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return;
+
+    curl_easy_setopt(curl, CURLOPT_URL, smtp_url);
+    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from);
+
+    /* Parse comma-separated "to" into recipients */
+    struct curl_slist* recipients = NULL;
+    char to_copy[1024];
+    snprintf(to_copy, sizeof(to_copy), "%s", to);
+    char* saveptr = NULL;
+    char* addr = strtok_r(to_copy, ",;", &saveptr);
+    while (addr) {
+        while (*addr == ' ') addr++;
+        if (*addr) recipients = curl_slist_append(recipients, addr);
+        addr = strtok_r(NULL, ",;", &saveptr);
+    }
+    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+
+    /* Read callback for SMTP upload */
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, curl_read_buf);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &upload);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+
+    const char* user = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "username")) : NULL;
+    /* Password is stored separately (stripped from settings on save) */
+    char smtp_pw[256] = "";
+    {
+        cJSON* pw_file = ACAP_FILE_Read("localdata/smtp_password.txt");
+        if (pw_file) {
+            const char* pw = cJSON_GetStringValue(cJSON_GetObjectItem(pw_file, "pw"));
+            if (pw) snprintf(smtp_pw, sizeof(smtp_pw), "%s", pw);
+            cJSON_Delete(pw_file);
+        }
+    }
+    if (user && user[0]) {
+        curl_easy_setopt(curl, CURLOPT_USERNAME, user);
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, smtp_pw);
+    }
+
+    cJSON* use_tls_j = smtp_cfg ? cJSON_GetObjectItem(smtp_cfg, "use_tls") : NULL;
+    if (!use_tls_j || cJSON_IsTrue(use_tls_j))
+        curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) LOG_WARN("email failed: %s", curl_easy_strerror(res));
+    curl_slist_free_all(recipients);
+    curl_easy_cleanup(curl);
+}
+
+/* telegram — Telegram Bot API sendMessage */
+static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
+    const char* bot_token = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "bot_token"));
+    const char* chat_id   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "chat_id"));
+    if (!bot_token || !chat_id) { LOG_WARN("telegram: missing bot_token/chat_id"); return; }
+
+    const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
+    if (!msg_tmpl) msg_tmpl = "";
+    char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
+
+    char url[512];
+    snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendMessage", bot_token);
+
+    cJSON* body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "chat_id", chat_id);
+    cJSON_AddStringToObject(body, "text", msg);
+    const char* parse_mode = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "parse_mode"));
+    if (parse_mode && parse_mode[0])
+        cJSON_AddStringToObject(body, "parse_mode", parse_mode);
+    cJSON* disable_preview = cJSON_GetObjectItem(cfg, "disable_preview");
+    if (disable_preview && cJSON_IsTrue(disable_preview))
+        cJSON_AddBoolToObject(body, "disable_web_page_preview", 1);
+
+    char* json_str = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    free(msg);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { free(json_str); return; }
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) LOG_WARN("telegram failed: %s", curl_easy_strerror(res));
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    free(json_str);
+}
+
+/* ftp_upload — Upload a snapshot to FTP/SFTP via libcurl */
+static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
+    const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
+    if (!url_tmpl) { LOG_WARN("ftp_upload: no url"); return; }
+
+    char* url = Actions_Expand_Template(url_tmpl, trigger_data);
+
+    /* Fetch JPEG snapshot */
+    size_t snap_len = 0;
+    char* snap = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+    if (!snap || snap_len == 0) {
+        LOG_WARN("ftp_upload: failed to capture snapshot");
+        free(url); free(snap);
+        return;
+    }
+
+    UploadBuf upload = { snap, 0, snap_len };
+
+    CURL* curl = curl_easy_init();
+    if (!curl) { free(url); free(snap); return; }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, curl_read_buf);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &upload);
+    curl_easy_setopt(curl, CURLOPT_INFILESIZE_LARGE, (curl_off_t)snap_len);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_FTP_CREATE_MISSING_DIRS, 1L);
+
+    const char* user = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
+    const char* pass = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));
+    if (user && user[0]) {
+        char userpwd[512];
+        snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass ? pass : "");
+        curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    }
+
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res != CURLE_OK) LOG_WARN("ftp_upload to %s failed: %s", url, curl_easy_strerror(res));
+    curl_easy_cleanup(curl);
+    free(url);
+    free(snap);
+}
+
 /* siren_light — control Axis Siren and Light via VAPIX */
 static void action_siren_light(const char* rule_id, cJSON* cfg) {
     const char* signal_action = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "signal_action"));
@@ -1097,6 +1504,124 @@ static gboolean delay_resume(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
+/*-----------------------------------------------------
+ * Notification Digest — buffer messages and flush
+ * periodically instead of sending one per event.
+ *-----------------------------------------------------*/
+#define MAX_DIGEST_BUFFERS 32
+#define MAX_DIGEST_LINES   200
+
+typedef struct {
+    char   rule_id[37];
+    char   deliver_via[16]; /* "slack", "teams", "email", "mqtt" */
+    cJSON* config;          /* retained delivery config (webhook_url, etc.) */
+    char*  lines[MAX_DIGEST_LINES];
+    int    line_count;
+    int    interval;        /* flush interval in seconds */
+    time_t last_flush;
+} DigestBuf;
+
+static DigestBuf digest_bufs[MAX_DIGEST_BUFFERS];
+static int       digest_buf_count = 0;
+
+static DigestBuf* digest_find_or_create(const char* rule_id, cJSON* cfg) {
+    for (int i = 0; i < digest_buf_count; i++)
+        if (strcmp(digest_bufs[i].rule_id, rule_id) == 0) return &digest_bufs[i];
+    if (digest_buf_count >= MAX_DIGEST_BUFFERS) return NULL;
+
+    DigestBuf* d = &digest_bufs[digest_buf_count++];
+    memset(d, 0, sizeof(*d));
+    snprintf(d->rule_id, sizeof(d->rule_id), "%s", rule_id);
+    const char* via = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "deliver_via"));
+    snprintf(d->deliver_via, sizeof(d->deliver_via), "%s", via ? via : "slack");
+    d->config = cJSON_Duplicate(cfg, 1);
+    cJSON* iv = cJSON_GetObjectItem(cfg, "interval");
+    d->interval = iv ? (int)iv->valuedouble : 300;
+    if (d->interval < 30) d->interval = 30;
+    d->last_flush = time(NULL);
+    return d;
+}
+
+static void digest_flush(DigestBuf* d) {
+    if (d->line_count == 0) return;
+
+    /* Build combined message */
+    size_t total_len = 0;
+    for (int i = 0; i < d->line_count; i++)
+        total_len += strlen(d->lines[i]) + 1;
+    char* combined = malloc(total_len + 64);
+    if (!combined) return;
+    combined[0] = '\0';
+
+    char header[64];
+    snprintf(header, sizeof(header), "[%d events]\n", d->line_count);
+    strcat(combined, header);
+
+    for (int i = 0; i < d->line_count; i++) {
+        strcat(combined, d->lines[i]);
+        strcat(combined, "\n");
+        free(d->lines[i]);
+        d->lines[i] = NULL;
+    }
+    d->line_count = 0;
+    d->last_flush = time(NULL);
+
+    /* Deliver via configured method */
+    cJSON* payload = cJSON_Duplicate(d->config, 1);
+    cJSON_DeleteItemFromObject(payload, "type");
+    cJSON_AddStringToObject(payload, "type", d->deliver_via);
+
+    /* Inject the combined message */
+    cJSON_DeleteItemFromObject(payload, "message");
+    cJSON_AddStringToObject(payload, "message", combined);
+    /* For email: inject into body instead */
+    cJSON_DeleteItemFromObject(payload, "body");
+    cJSON_AddStringToObject(payload, "body", combined);
+    /* For MQTT: inject into payload */
+    cJSON_DeleteItemFromObject(payload, "payload");
+    cJSON_AddStringToObject(payload, "payload", combined);
+
+    /* Dispatch via the appropriate action handler */
+    cJSON* empty_td = cJSON_CreateObject();
+    if (strcmp(d->deliver_via, "slack") == 0)
+        action_slack_webhook(payload, empty_td);
+    else if (strcmp(d->deliver_via, "teams") == 0)
+        action_teams_webhook(payload, empty_td);
+    else if (strcmp(d->deliver_via, "email") == 0)
+        action_email(payload, empty_td);
+    else if (strcmp(d->deliver_via, "mqtt") == 0)
+        action_mqtt_publish(payload, empty_td);
+    else if (strcmp(d->deliver_via, "telegram") == 0)
+        action_telegram(payload, empty_td);
+    cJSON_Delete(payload);
+    cJSON_Delete(empty_td);
+    free(combined);
+}
+
+static void action_digest(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
+    DigestBuf* d = digest_find_or_create(rule_id, cfg);
+    if (!d) { LOG_WARN("digest: too many buffers"); return; }
+
+    const char* line_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "line"));
+    if (!line_tmpl) line_tmpl = "{{timestamp}} — {{trigger_json}}";
+    char* line = Actions_Expand_Template(line_tmpl, trigger_data);
+
+    if (d->line_count < MAX_DIGEST_LINES)
+        d->lines[d->line_count++] = line;
+    else
+        free(line); /* buffer full, drop */
+}
+
+/* Called from Actions_Tick (via main loop 1s timer) */
+void Actions_Digest_Tick(void) {
+    time_t now = time(NULL);
+    for (int i = 0; i < digest_buf_count; i++) {
+        DigestBuf* d = &digest_bufs[i];
+        if (d->line_count > 0 && (now - d->last_flush) >= d->interval)
+            digest_flush(d);
+    }
+}
+
 static void execute_from(const char* rule_id, cJSON* actions_array,
                          int start_index, cJSON* trigger_data) {
     int total = cJSON_GetArraySize(actions_array);
@@ -1137,6 +1662,13 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);
         else if (strcmp(type, "increment_counter") == 0) action_increment_counter(action);
         else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(action, trigger_data);
+        else if (strcmp(type, "slack_webhook")    == 0) action_slack_webhook(action, trigger_data);
+        else if (strcmp(type, "teams_webhook")    == 0) action_teams_webhook(action, trigger_data);
+        else if (strcmp(type, "influxdb_write")   == 0) action_influxdb_write(action, trigger_data);
+        else if (strcmp(type, "email")            == 0) action_email(action, trigger_data);
+        else if (strcmp(type, "telegram")         == 0) action_telegram(action, trigger_data);
+        else if (strcmp(type, "ftp_upload")       == 0) action_ftp_upload(action, trigger_data);
+        else if (strcmp(type, "digest")           == 0) action_digest(rule_id, action, trigger_data);
         else if (strcmp(type, "run_rule")          == 0) action_run_rule(action);
         else if (strcmp(type, "vapix_query")       == 0) action_vapix_query(action, trigger_data);
         else if (strcmp(type, "guard_tour")        == 0) action_guard_tour(action);

@@ -34,6 +34,10 @@ void Scheduler_Unregister_Rule(const char* rule_id);
 /* Called every 1 second from main loop */
 void Scheduler_Tick(void);
 
+/* Returns 1 if the current time is between sunrise and sunset for the given
+ * latitude/longitude, 0 if it is nighttime, or -1 on error (polar day/night). */
+int Scheduler_Is_Daytime(double lat, double lon);
+
 #ifdef __cplusplus
 }
 #endif

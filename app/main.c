@@ -37,6 +37,7 @@ static void Event_Callback(cJSON* event, void* user_data) {
 static gboolean Engine_Tick(gpointer user_data) {
     (void)user_data;
     RuleEngine_Tick();
+    Actions_Digest_Tick();
     return G_SOURCE_CONTINUE;
 }
 
@@ -123,11 +124,29 @@ static void apply_proxy_config(cJSON* engine_cfg) {
     MQTT_Set_Proxy(ph[0] ? ph : NULL, pp);
 }
 
+#define SMTP_PASS_FILE "localdata/smtp_password.txt"
+
+static void apply_smtp_config(cJSON* smtp_json) {
+    if (!smtp_json) return;
+    const char* pass = cJSON_GetStringValue(cJSON_GetObjectItem(smtp_json, "password"));
+    if (pass && pass[0]) {
+        cJSON* obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "pw", pass);
+        ACAP_FILE_Write(SMTP_PASS_FILE, obj);
+        cJSON_Delete(obj);
+        /* Strip from in-memory settings so GET never returns it */
+        cJSON* pw_item = cJSON_GetObjectItem(smtp_json, "password");
+        if (pw_item) cJSON_SetValuestring(pw_item, "");
+    }
+}
+
 static void Settings_Updated(const char* service, cJSON* data) {
     if (strcmp(service, "mqtt") == 0)
         apply_mqtt_config(data);
     else if (strcmp(service, "engine") == 0)
         apply_proxy_config(data);
+    else if (strcmp(service, "smtp") == 0)
+        apply_smtp_config(data);
 }
 
 /*=====================================================
@@ -241,7 +260,12 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     const struct { const char* type; const char* label; const char* desc; } action_types[] = {
         {"http_request",      "HTTP Request",      "Make an HTTP GET/POST/PUT request to any URL"},
         {"mqtt_publish",      "MQTT Publish",      "Publish a message to an MQTT topic"},
+        {"slack_webhook",     "Slack",             "Send a message to a Slack channel via incoming webhook"},
+        {"teams_webhook",     "Teams",             "Send an Adaptive Card to Microsoft Teams via webhook"},
+        {"telegram",          "Telegram",          "Send a message via Telegram Bot API"},
+        {"email",             "Email (SMTP)",      "Send an email via SMTP with optional TLS"},
         {"snapshot_upload",   "Snapshot Upload",   "Capture a JPEG and POST/PUT it to a URL"},
+        {"ftp_upload",        "FTP Upload",        "Capture a JPEG and upload it to an FTP/SFTP server"},
         {"send_syslog",       "Send Syslog",       "Write a message to the system log"},
         {"recording",         "Recording",         "Start or stop local camera recording"},
         {"overlay_text",      "Overlay Text",      "Set dynamic text overlay on video stream"},
@@ -254,6 +278,7 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         {"audio_clip",        "Audio Clip",        "Play an audio clip on the camera speaker"},
         {"siren_light",       "Siren / Light",     "Start or stop a siren/LED profile"},
         {"io_output",         "I/O Output",        "Activate or deactivate a digital output port"},
+        {"digest",            "Notification Digest","Buffer events and send a batched summary at an interval"},
         {"delay",             "Delay",             "Wait N seconds before continuing action sequence"},
         {"set_variable",      "Set Variable",      "Store a named variable value"},
         {"increment_counter", "Increment Counter", "Increment, decrement, reset, or set a counter"},
@@ -262,6 +287,7 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         {"vapix_query",       "VAPIX Event Query", "Fetch latest cached VAPIX event data as template variables"},
         {"set_device_param",  "Set Device Parameter", "Update a camera parameter via param.cgi"},
         {"acap_control",      "ACAP Control",      "Start, stop, or restart another ACAP application"},
+        {"influxdb_write",    "InfluxDB Write",    "Write a data point to InfluxDB (v1 or v2) in line protocol"},
         {"aoa_get_counts",    "AOA Get Counts",    "Fetch accumulated crossline counts from an Object Analytics scenario"},
         {NULL, NULL, NULL}
     };
@@ -311,7 +337,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
-    cJSON_AddStringToObject(obj, "engine_version", "1.7.0");
+    cJSON_AddStringToObject(obj, "engine_version", "1.7.2");
 
     cJSON* mqtt_st = MQTT_Status();
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);

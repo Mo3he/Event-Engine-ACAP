@@ -79,7 +79,7 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'log')       loadEvents();
     if (btn.dataset.tab === 'variables') loadVariables();
-    if (btn.dataset.tab === 'settings')  { loadStatus(); loadMqttSettings(); loadEngineSettings(); }
+    if (btn.dataset.tab === 'settings')  { loadStatus(); loadSmtpSettings(); loadMqttSettings(); loadEngineSettings(); }
   });
 });
 
@@ -101,7 +101,8 @@ const RULE_TYPE_LABELS = {
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
-    variable_compare: 'Variable', http_check: 'HTTP Check', aoa_occupancy: 'AOA Occupancy'
+    variable_compare: 'Variable', http_check: 'HTTP Check', aoa_occupancy: 'AOA Occupancy',
+    day_night: 'Day/Night', vapix_event_state: 'Event State'
   },
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
@@ -109,7 +110,9 @@ const RULE_TYPE_LABELS = {
     audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
     set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',
     delay: 'Delay', fire_vapix_event: 'VAPIX Event', send_syslog: 'Syslog',
-    aoa_get_counts: 'AOA Counts'
+    aoa_get_counts: 'AOA Counts', slack_webhook: 'Slack', teams_webhook: 'Teams',
+    influxdb_write: 'InfluxDB', telegram: 'Telegram', email: 'Email',
+    ftp_upload: 'FTP Upload', digest: 'Digest'
   }
 };
 function ruleTypeLabel(group, type) {
@@ -1055,6 +1058,8 @@ const CONDITION_TYPES = [
   { value: 'io_state',         label: 'I/O State' },
   { value: 'http_check',       label: 'HTTP Check' },
   { value: 'aoa_occupancy',    label: 'AOA Occupancy' },
+  { value: 'day_night',        label: 'Day / Night' },
+  { value: 'vapix_event_state',label: 'VAPIX Event State' },
 ];
 
 function conditionTypeOptions(selected) {
@@ -1214,6 +1219,54 @@ function conditionFields(c) {
       </div>
     </div>`;
   }
+  if (type === 'day_night') {
+    const lat = c.lat !== undefined && c.lat !== '' ? parseFloat(c.lat) : engineLat;
+    const lon = c.lon !== undefined && c.lon !== '' ? parseFloat(c.lon) : engineLon;
+    const rise = calcSolarEvent(lat, lon, 'sunrise', 0);
+    const set  = calcSolarEvent(lat, lon, 'sunset', 0);
+    const solarHint = rise && set
+      ? `Today: sunrise ${rise}, sunset ${set}`
+      : (lat === 0 && lon === 0 ? 'Set latitude/longitude in Engine Settings' : 'No sunrise/sunset today (polar)');
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Pass when it is</label>
+        <select data-k="state">
+          <option value="day"   ${(c.state||'day')==='day'   ? 'selected' : ''}>Daytime (after sunrise)</option>
+          <option value="night" ${c.state==='night' ? 'selected' : ''}>Nighttime (after sunset)</option>
+        </select>
+        <div class="form-hint">${solarHint}</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
+        <input type="number" step="any" data-k="lat" value="${c.lat !== undefined ? c.lat : ''}" placeholder="From settings (${engineLat})">
+      </div>
+      <div class="form-group">
+        <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
+        <input type="number" step="any" data-k="lon" value="${c.lon !== undefined ? c.lon : ''}" placeholder="From settings (${engineLon})">
+      </div>
+    </div>`;
+  }
+  if (type === 'vapix_event_state') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event Topic (partial match)</label>
+        <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput">
+        <div class="form-hint">Substring matched against the event topic path</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Data Key</label>
+        <input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">
+      </div>
+      <div class="form-group">
+        <label>Expected Value</label>
+        <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1">
+      </div>
+    </div>`;
   return '';
 }
 
@@ -1244,7 +1297,15 @@ const ACTION_GROUPS = [
     { value: 'http_request',      label: 'HTTP Request' },
     { value: 'mqtt_publish',      label: 'MQTT Publish' },
     { value: 'snapshot_upload',   label: 'Snapshot Upload' },
+    { value: 'slack_webhook',     label: 'Slack' },
+    { value: 'teams_webhook',     label: 'Microsoft Teams' },
+    { value: 'telegram',          label: 'Telegram' },
+    { value: 'email',             label: 'Email (SMTP)' },
     { value: 'send_syslog',       label: 'Send Syslog' },
+    { value: 'ftp_upload',        label: 'FTP Upload' },
+  ]},
+  { label: 'Data', types: [
+    { value: 'influxdb_write',    label: 'InfluxDB Write' },
   ]},
   { label: 'Camera', types: [
     { value: 'recording',         label: 'Recording' },
@@ -1264,6 +1325,7 @@ const ACTION_GROUPS = [
     { value: 'io_output',         label: 'I/O Output' },
   ]},
   { label: 'Logic', types: [
+    { value: 'digest',            label: 'Notification Digest' },
     { value: 'delay',             label: 'Delay' },
     { value: 'set_variable',      label: 'Set Variable' },
     { value: 'increment_counter', label: 'Increment Counter' },
@@ -1874,6 +1936,220 @@ function actionFields(a) {
         </select>
       </div>
     </div>`;
+  if (type === 'slack_webhook') return `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://hooks.slack.com/services/...">
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Message</label>
+      <textarea data-k="message" placeholder="Motion detected on {{camera.name}} at {{timestamp}}">${escHtml(a.message || '')}</textarea>
+      ${hint}
+    </div></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Channel <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
+        <input type="text" data-k="channel" value="${escHtml(a.channel || '')}" placeholder="#alerts">
+      </div>
+      <div class="form-group">
+        <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}" placeholder="Camera Bot">
+      </div>
+    </div>`;
+  if (type === 'teams_webhook') return `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://...webhook.office.com/...">
+      <div class="form-hint">Use a Power Automate / Workflows incoming webhook connector</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Title <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+      <input type="text" data-k="title" value="${escHtml(a.title || '')}" placeholder="Alert from {{camera.name}}">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Message</label>
+      <textarea data-k="message" placeholder="Motion detected at {{timestamp}}">${escHtml(a.message || '')}</textarea>
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Theme Colour <span style="color:var(--text-muted);font-weight:400;">(optional hex)</span></label>
+      <input type="text" data-k="theme_color" value="${escHtml(a.theme_color || '')}" placeholder="FF0000" style="max-width:140px;">
+    </div></div>`;
+  if (type === 'influxdb_write') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>InfluxDB URL</label>
+        <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="http://influxdb:8086">
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Version</label>
+        <select data-k="version">
+          <option value="v2" ${(a.version||'v2')==='v2' ? 'selected' : ''}>v2</option>
+          <option value="v1" ${a.version==='v1' ? 'selected' : ''}>v1</option>
+        </select>
+      </div>
+    </div>
+    ${(a.version||'v2') === 'v1' ? `
+    <div class="form-row">
+      <div class="form-group"><label>Database</label>
+        <input type="text" data-k="database" value="${escHtml(a.database || '')}">
+      </div>
+      <div class="form-group"><label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}">
+      </div>
+      <div class="form-group"><label>Password <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="password" data-k="token" value="${escHtml(a.token || '')}" autocomplete="new-password">
+      </div>
+    </div>` : `
+    <div class="form-row">
+      <div class="form-group"><label>Organization</label>
+        <input type="text" data-k="org" value="${escHtml(a.org || '')}">
+      </div>
+      <div class="form-group"><label>Bucket</label>
+        <input type="text" data-k="bucket" value="${escHtml(a.bucket || '')}">
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>API Token</label>
+      <input type="password" data-k="token" value="${escHtml(a.token || '')}" autocomplete="new-password">
+    </div></div>`}
+    <div class="form-row"><div class="form-group">
+      <label>Measurement</label>
+      <input type="text" data-k="measurement" value="${escHtml(a.measurement || '')}" placeholder="camera_events">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Tags <span style="color:var(--text-muted);font-weight:400;">(optional, comma-separated key=value)</span></label>
+      <input type="text" data-k="tags" value="${escHtml(a.tags || '')}" placeholder="camera={{camera.serial}},location=entrance">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Fields <span style="color:var(--text-muted);font-weight:400;">(comma-separated key=value)</span></label>
+      <input type="text" data-k="fields" value="${escHtml(a.fields || '')}" placeholder="co2={{trigger.CO2}},temperature={{trigger.Temperature}}">
+      ${hint}
+      <div class="form-hint">Numeric values sent as-is. Wrap strings in double quotes: <code>name="{{trigger.name}}"</code></div>
+    </div></div>`;
+  if (type === 'telegram') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Bot Token</label>
+        <input type="password" data-k="bot_token" value="${escHtml(a.bot_token || '')}" placeholder="123456:ABC-DEF..." autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Chat ID</label>
+        <input type="text" data-k="chat_id" value="${escHtml(a.chat_id || '')}" placeholder="-1001234567890">
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>Message</label>
+      <textarea data-k="message" placeholder="Motion detected on {{camera.name}} at {{timestamp}}">${escHtml(a.message || '')}</textarea>
+      ${hint}
+    </div></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Parse Mode</label>
+        <select data-k="parse_mode">
+          <option value=""         ${!a.parse_mode ? 'selected' : ''}>Plain text</option>
+          <option value="Markdown" ${a.parse_mode==='Markdown' ? 'selected' : ''}>Markdown</option>
+          <option value="HTML"     ${a.parse_mode==='HTML'     ? 'selected' : ''}>HTML</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Disable Link Preview</label>
+        <input type="checkbox" data-k="disable_preview" ${a.disable_preview ? 'checked' : ''}>
+      </div>
+    </div>`;
+  if (type === 'email') return `
+    <div class="form-row"><div class="form-group">
+      <label>To</label>
+      <input type="text" data-k="to" value="${escHtml(a.to || '')}" placeholder="alerts@example.com">
+      <div class="form-hint">Comma-separated for multiple recipients. SMTP server is configured in the Settings tab.</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Subject</label>
+      <input type="text" data-k="subject" value="${escHtml(a.subject || '')}" placeholder="Alert from {{camera.name}}">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Body</label>
+      <textarea data-k="body" placeholder="Motion detected at {{timestamp}}&#10;Camera: {{camera.serial}}">${escHtml(a.body || '')}</textarea>
+      ${hint}
+    </div></div>`;
+  if (type === 'ftp_upload') return `
+    <div class="form-row"><div class="form-group">
+      <label>FTP URL</label>
+      <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="ftp://server/cameras/{{camera.serial}}/{{date}}_{{time}}.jpg">
+      ${hint}
+      <div class="form-hint">Supports FTP and SFTP. Directories are created automatically. Use <code>sftp://</code> for SFTP.</div>
+    </div></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" data-k="password" value="${escHtml(a.password || '')}" autocomplete="new-password">
+      </div>
+    </div>`;
+  if (type === 'digest') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Deliver via</label>
+        <select data-k="deliver_via" onchange="rerenderAction(this)">
+          <option value="slack"    ${(a.deliver_via||'slack')==='slack'    ? 'selected' : ''}>Slack</option>
+          <option value="teams"    ${a.deliver_via==='teams'    ? 'selected' : ''}>Teams</option>
+          <option value="telegram" ${a.deliver_via==='telegram' ? 'selected' : ''}>Telegram</option>
+          <option value="email"    ${a.deliver_via==='email'    ? 'selected' : ''}>Email</option>
+          <option value="mqtt"     ${a.deliver_via==='mqtt'     ? 'selected' : ''}>MQTT</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Flush every</label>
+        <input type="number" data-k="interval" value="${a.interval || 300}" min="30" step="30"> <span style="color:var(--text-muted);">sec</span>
+      </div>
+    </div>
+    ${(a.deliver_via||'slack') === 'slack' ? `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://hooks.slack.com/services/...">
+    </div></div>` : ''}
+    ${a.deliver_via === 'teams' ? `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://...webhook.office.com/...">
+    </div></div>` : ''}
+    ${a.deliver_via === 'telegram' ? `
+    <div class="form-row">
+      <div class="form-group"><label>Bot Token</label>
+        <input type="password" data-k="bot_token" value="${escHtml(a.bot_token || '')}" autocomplete="new-password">
+      </div>
+      <div class="form-group"><label>Chat ID</label>
+        <input type="text" data-k="chat_id" value="${escHtml(a.chat_id || '')}">
+      </div>
+    </div>` : ''}
+    ${a.deliver_via === 'email' ? `
+    <div class="form-row">
+      <div class="form-group"><label>To</label><input type="text" data-k="to" value="${escHtml(a.to || '')}" placeholder="alerts@example.com">
+        <div class="form-hint">SMTP server configured in the Settings tab</div>
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>Subject</label>
+      <input type="text" data-k="subject" value="${escHtml(a.subject || '')}" placeholder="Digest from {{camera.name}}">
+    </div></div>` : ''}
+    ${a.deliver_via === 'mqtt' ? `
+    <div class="form-row"><div class="form-group">
+      <label>Topic</label>
+      <input type="text" data-k="topic" value="${escHtml(a.topic || '')}" placeholder="cameras/{{camera.serial}}/digest">
+    </div></div>` : ''}
+    <div class="form-row"><div class="form-group">
+      <label>Line Template <span style="color:var(--text-muted);font-weight:400;">(per event)</span></label>
+      <input type="text" data-k="line" value="${escHtml(a.line || '')}" placeholder="{{timestamp}} — {{trigger_json}}">
+      ${hint}
+      <div class="form-hint">Each event adds one line. All lines are combined and sent as a single message at the flush interval.</div>
+    </div></div>`;
   if (type === 'run_rule') return `
     <div class="form-row">
       <div class="form-group">
@@ -2271,6 +2547,14 @@ function normalizeCondition(c) {
     out.object_class = c.object_class || 'any';
     out.op = c.op || 'gt';
     out.value = parseFloat(c.value) || 0;
+  } else if (c.type === 'day_night') {
+    out.state = c.state || 'day';
+    if (c.lat !== undefined && c.lat !== '') out.lat = parseFloat(c.lat);
+    if (c.lon !== undefined && c.lon !== '') out.lon = parseFloat(c.lon);
+  } else if (c.type === 'vapix_event_state') {
+    out.event_key = c.event_key || '';
+    out.data_key  = c.data_key || '';
+    out.expected  = c.expected || '';
   }
   return out;
 }
@@ -2282,12 +2566,16 @@ function normalizeAction(a) {
                  'seconds','name','value','delta','rule_id','cron','interval_seconds',
                  'schedule_type','time','counter_name','op','token','edge',
                  'topic','payload','qos','position','text_color',
-                 'tour_id','parameter','mask_id','light_id','package','id','mode'];
+                 'tour_id','parameter','mask_id','light_id','package','id','mode',
+                 'webhook_url','title','theme_color','version','database','org','bucket',
+                 'measurement','tags','fields','bot_token','chat_id','parse_mode',
+                 'smtp_server','from','to','subject','deliver_via','line',
+                 'event_key','data_key','expected'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
   if (out.port     !== undefined) out.port     = parseInt(out.port)     || 1;
-  if (out.channel  !== undefined) out.channel  = parseInt(out.channel)  || 1;
+  if (out.channel  !== undefined && a.type !== 'slack_webhook') out.channel = parseInt(out.channel) || 1;
   if (out.delta    !== undefined) out.delta    = parseFloat(out.delta)  || 1;
   if (out.value    !== undefined && a.type === 'increment_counter')
     out.delta = parseFloat(out.value) || 0;
@@ -2336,6 +2624,19 @@ function normalizeAction(a) {
   if (a.type === 'aoa_get_counts') {
     out.scenario_id = parseInt(a.scenario_id) || 1;
     out.reset_after = a.reset_after === true;
+  }
+  if (a.type === 'influxdb_write') {
+    out.version = a.version || 'v2';
+  }
+  if (a.type === 'email') {
+    out.use_tls = a.use_tls !== 'false' && a.use_tls !== false;
+  }
+  if (a.type === 'telegram') {
+    out.disable_preview = a.disable_preview === true;
+  }
+  if (a.type === 'digest') {
+    out.interval = parseInt(a.interval) || 300;
+    out.deliver_via = a.deliver_via || 'slack';
   }
   if (a.type === 'http_request') {
     out.attach_snapshot = a.attach_snapshot === true;
@@ -2660,6 +2961,40 @@ async function saveEngineSettings(event) {
     engineLon = lon;
     toast('Engine settings saved');
     refreshSolarPreview(lat, lon, 'engine-solar-preview');
+  } catch(e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
+}
+
+async function loadSmtpSettings() {
+  try {
+    const settings = await API.get('settings');
+    const smtp = (settings && settings.smtp) || {};
+    const el = (id) => document.getElementById(id);
+    if (el('smtp-server')) el('smtp-server').value = smtp.server || '';
+    if (el('smtp-user'))   el('smtp-user').value   = smtp.username || '';
+    if (el('smtp-pass'))   el('smtp-pass').value   = '';  /* never show stored pw */
+    if (el('smtp-from'))   el('smtp-from').value   = smtp.from || '';
+    if (el('smtp-tls'))    el('smtp-tls').value    = smtp.use_tls === false ? 'false' : 'true';
+  } catch(e) { /* non-fatal */ }
+}
+
+async function saveSmtpSettings(event) {
+  event.preventDefault();
+  const el = (id) => document.getElementById(id);
+  const data = {
+    server:   el('smtp-server') ? el('smtp-server').value.trim() : '',
+    username: el('smtp-user')   ? el('smtp-user').value.trim()   : '',
+    from:     el('smtp-from')   ? el('smtp-from').value.trim()   : '',
+    use_tls:  el('smtp-tls')    ? el('smtp-tls').value === 'true': true,
+  };
+  const pw = el('smtp-pass') ? el('smtp-pass').value : '';
+  if (pw) data.password = pw;
+  try {
+    const r = await API.post('settings', { smtp: data });
+    if (!r.ok) throw new Error(await r.text());
+    toast('SMTP settings saved');
+    if (el('smtp-pass')) el('smtp-pass').value = '';
   } catch(e) {
     toast('Failed to save: ' + e.message, 'error');
   }
