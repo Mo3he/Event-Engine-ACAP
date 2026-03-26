@@ -295,11 +295,12 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         }
 
         int ok = Actions_Test(type, config);
+        const char* action_err = Actions_Get_Last_Error();
         cJSON_Delete(body);
 
         cJSON* result = cJSON_CreateObject();
-        cJSON_AddBoolToObject(result, "success", ok == 0);
-        if (ok != 0) cJSON_AddStringToObject(result, "error", "Action failed — check syslog for details");
+        cJSON_AddBoolToObject(result, "success", ok == 0 && !action_err);
+        if (action_err) cJSON_AddStringToObject(result, "error", action_err);
         ACAP_HTTP_Respond_JSON(resp, result);
         cJSON_Delete(result);
         return;
@@ -359,6 +360,18 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
  * GET /local/acap_event_engine/events
  *=====================================================*/
 static void HTTP_Events(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    const char* method = get_method(req);
+
+    if (strcmp(method, "DELETE") == 0) {
+        EventLog_Clear();
+        EventLog_Persist();
+        cJSON* ok = cJSON_CreateObject();
+        cJSON_AddBoolToObject(ok, "success", 1);
+        ACAP_HTTP_Respond_JSON(resp, ok);
+        cJSON_Delete(ok);
+        return;
+    }
+
     int limit = 50;
     char* limit_str = ACAP_HTTP_Request_Param(req, "limit");
     if (limit_str) { limit = atoi(limit_str); free(limit_str); }

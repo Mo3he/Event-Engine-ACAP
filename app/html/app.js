@@ -29,6 +29,7 @@ const API = {
   testAction:    (type, config) => API.post('actions', { type, config }),
 
   getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + rule : ''}`),
+  clearEvents:   ()      => API.delete('events'),
   getStatus:     ()      => API.get('engine'),
   getVariables:  ()      => API.get('variables'),
   setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
@@ -118,7 +119,10 @@ const RULE_TYPE_LABELS = {
     delay: 'Delay', fire_vapix_event: 'VAPIX Event', send_syslog: 'Syslog',
     aoa_get_counts: 'AOA Counts', slack_webhook: 'Slack', teams_webhook: 'Teams',
     influxdb_write: 'InfluxDB', telegram: 'Telegram', email: 'Email',
-    ftp_upload: 'FTP Upload', digest: 'Digest'
+    ftp_upload: 'FTP Upload', digest: 'Digest', snapshot_upload: 'Snapshot',
+    guard_tour: 'Guard Tour', ir_cut_filter: 'IR Cut', light_control: 'Light',
+    privacy_mask: 'Privacy Mask', wiper: 'Wiper', set_device_param: 'Device Param',
+    acap_control: 'ACAP Control'
   }
 };
 function ruleTypeLabel(group, type) {
@@ -1075,21 +1079,33 @@ function setLogic(which, val, btn) {
 }
 
 /* ===== Trigger rows ===== */
-const TRIGGER_TYPES = [
-  { value: 'vapix_event',       label: 'VAPIX Event' },
-  { value: 'http_webhook',      label: 'HTTP Webhook' },
-  { value: 'schedule',          label: 'Schedule' },
-  { value: 'mqtt_message',      label: 'MQTT Message' },
-  { value: 'io_input',          label: 'I/O Input' },
-  { value: 'counter_threshold', label: 'Counter Threshold' },
-  { value: 'rule_fired',        label: 'Rule Fired' },
-  { value: 'aoa_scenario',      label: 'AOA Scenario' },
-  { value: 'manual',            label: 'Manual (button / API)' },
+const TRIGGER_GROUPS = [
+  { label: 'Camera / Device', types: [
+    { value: 'vapix_event',       label: 'VAPIX Event' },
+    { value: 'io_input',          label: 'I/O Input' },
+    { value: 'aoa_scenario',      label: 'AOA Scenario' },
+  ]},
+  { label: 'Time', types: [
+    { value: 'schedule',          label: 'Schedule' },
+  ]},
+  { label: 'External', types: [
+    { value: 'mqtt_message',      label: 'MQTT Message' },
+    { value: 'http_webhook',      label: 'HTTP Webhook' },
+  ]},
+  { label: 'Logic', types: [
+    { value: 'counter_threshold', label: 'Counter Threshold' },
+    { value: 'rule_fired',        label: 'Rule Fired' },
+    { value: 'manual',            label: 'Manual (button / API)' },
+  ]},
 ];
 
 function triggerTypeOptions(selected) {
-  return TRIGGER_TYPES.map(t =>
-    `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+  return TRIGGER_GROUPS.map(g =>
+    `<optgroup label="${escHtml(g.label)}">${
+      g.types.map(t =>
+        `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+      ).join('')
+    }</optgroup>`
   ).join('');
 }
 
@@ -1474,20 +1490,32 @@ function collectTriggerRow(i) {
 }
 
 /* ===== Condition rows ===== */
-const CONDITION_TYPES = [
-  { value: 'time_window',      label: 'Time Window' },
-  { value: 'counter',          label: 'Counter Compare' },
-  { value: 'variable_compare', label: 'Variable Compare' },
-  { value: 'io_state',         label: 'I/O State' },
-  { value: 'http_check',       label: 'HTTP Check' },
-  { value: 'aoa_occupancy',    label: 'AOA Occupancy' },
-  { value: 'day_night',        label: 'Day / Night' },
-  { value: 'vapix_event_state',label: 'VAPIX Event State' },
+const CONDITION_GROUPS = [
+  { label: 'Time', types: [
+    { value: 'time_window',       label: 'Time Window' },
+    { value: 'day_night',         label: 'Day / Night' },
+  ]},
+  { label: 'Device State', types: [
+    { value: 'vapix_event_state', label: 'VAPIX Event State' },
+    { value: 'io_state',          label: 'I/O State' },
+  ]},
+  { label: 'Data', types: [
+    { value: 'counter',           label: 'Counter Compare' },
+    { value: 'variable_compare',  label: 'Variable Compare' },
+    { value: 'aoa_occupancy',     label: 'AOA Occupancy' },
+  ]},
+  { label: 'External', types: [
+    { value: 'http_check',        label: 'HTTP Check' },
+  ]},
 ];
 
 function conditionTypeOptions(selected) {
-  return CONDITION_TYPES.map(t =>
-    `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+  return CONDITION_GROUPS.map(g =>
+    `<optgroup label="${escHtml(g.label)}">${
+      g.types.map(t =>
+        `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+      ).join('')
+    }</optgroup>`
   ).join('');
 }
 
@@ -1777,29 +1805,25 @@ function changeConditionType(i, type) { conditionRows[i] = { type }; renderCondi
 const ACTION_GROUPS = [
   { label: 'Notifications', types: [
     { value: 'http_request',      label: 'HTTP Request' },
-    { value: 'mqtt_publish',      label: 'MQTT Publish' },
-    { value: 'snapshot_upload',   label: 'Snapshot Upload' },
     { value: 'slack_webhook',     label: 'Slack' },
     { value: 'teams_webhook',     label: 'Microsoft Teams' },
     { value: 'telegram',          label: 'Telegram' },
     { value: 'email',             label: 'Email (SMTP)' },
-    { value: 'send_syslog',       label: 'Send Syslog' },
+    { value: 'mqtt_publish',      label: 'MQTT Publish' },
     { value: 'ftp_upload',        label: 'FTP Upload' },
-  ]},
-  { label: 'Data', types: [
+    { value: 'snapshot_upload',   label: 'Snapshot Upload' },
     { value: 'influxdb_write',    label: 'InfluxDB Write' },
+    { value: 'send_syslog',       label: 'Send Syslog' },
   ]},
   { label: 'Camera', types: [
     { value: 'recording',         label: 'Recording' },
-    { value: 'overlay_text',      label: 'Overlay Text' },
     { value: 'ptz_preset',        label: 'PTZ Preset' },
     { value: 'guard_tour',        label: 'Guard Tour' },
+    { value: 'overlay_text',      label: 'Overlay Text' },
     { value: 'ir_cut_filter',     label: 'IR Cut Filter' },
     { value: 'privacy_mask',      label: 'Privacy Mask' },
     { value: 'wiper',             label: 'Wiper' },
     { value: 'light_control',     label: 'Light Control' },
-  ]},
-  { label: 'Audio / Visual', types: [
     { value: 'audio_clip',        label: 'Audio Clip' },
     { value: 'siren_light',       label: 'Siren / Light' },
   ]},
@@ -1807,19 +1831,17 @@ const ACTION_GROUPS = [
     { value: 'io_output',         label: 'I/O Output' },
   ]},
   { label: 'Logic', types: [
-    { value: 'digest',            label: 'Notification Digest' },
     { value: 'delay',             label: 'Delay' },
     { value: 'set_variable',      label: 'Set Variable' },
     { value: 'increment_counter', label: 'Increment Counter' },
     { value: 'run_rule',          label: 'Run Rule' },
+    { value: 'digest',            label: 'Notification Digest' },
   ]},
   { label: 'Advanced', types: [
     { value: 'fire_vapix_event',  label: 'Fire VAPIX Event' },
     { value: 'vapix_query',       label: 'VAPIX Event Query' },
     { value: 'set_device_param',  label: 'Set Device Parameter' },
     { value: 'acap_control',      label: 'ACAP Control' },
-  ]},
-  { label: 'Analytics', types: [
     { value: 'aoa_get_counts',    label: 'AOA Get Counts' },
   ]},
 ];
@@ -3236,6 +3258,17 @@ async function loadEvents() {
   }
 }
 
+async function clearEventLog() {
+  if (!confirm('Clear all event log entries?')) return;
+  try {
+    await API.clearEvents();
+    renderEventLog([]);
+    toast('Event log cleared', 'success');
+  } catch(e) {
+    toast('Failed to clear log', 'error');
+  }
+}
+
 function renderEventLog(events) {
   const tbody = document.getElementById('event-log-body');
   if (!events.length) {
@@ -3251,18 +3284,26 @@ function renderEventLog(events) {
       : `<span class="badge event-badge-blocked">${escHtml(e.block_reason || 'Blocked')}</span>`;
     const detailObj = e.trigger_data || null;
     const detailStr = detailObj ? JSON.stringify(detailObj, null, 2) : '';
-    const shortDetail = detailStr ? JSON.stringify(detailObj).slice(0, 80) + (JSON.stringify(detailObj).length > 80 ? '…' : '') : '';
+    const hasError = e.actions_failed > 0 && e.action_error;
     const expandId = `log-detail-${idx}`;
-    const hasDetail = !!detailStr;
+    const hasDetail = !!(detailStr || hasError);
+    // Short summary shown inline
+    let shortDetail = '';
+    if (hasError) shortDetail = e.action_error;
+    else if (detailStr) shortDetail = JSON.stringify(detailObj).slice(0, 80) + (JSON.stringify(detailObj).length > 80 ? '…' : '');
+    // Expanded content
+    let expandedHtml = '';
+    if (hasError) expandedHtml += `<div style="color:var(--error,#f87171);margin-bottom:${detailStr ? '8px' : '0'};font-size:12px;">&#9888; ${escHtml(e.action_error)}</div>`;
+    if (detailStr) expandedHtml += `<pre style="font-size:11px;color:var(--text-muted);margin:0;white-space:pre-wrap;word-break:break-all;">${escHtml(detailStr)}</pre>`;
     return `<tr style="${hasDetail ? 'cursor:pointer;' : ''}" onclick="${hasDetail ? `toggleLogDetail('${expandId}')` : ''}">
       <td style="white-space:nowrap;color:var(--text-muted)">${time}</td>
       <td>${escHtml(e.rule_name || e.rule_id)}</td>
       <td>${badge}</td>
-      <td><code style="font-size:11px;color:var(--text-muted)">${escHtml(shortDetail)}</code>${hasDetail ? ' <span style="opacity:.4;font-size:10px;">&#9660;</span>' : ''}</td>
+      <td><code style="font-size:11px;color:${hasError ? 'var(--error,#f87171)' : 'var(--text-muted)'}">${escHtml(shortDetail)}</code>${hasDetail ? ' <span style="opacity:.4;font-size:10px;">&#9660;</span>' : ''}</td>
     </tr>
     ${hasDetail ? `<tr id="${expandId}" style="display:none;">
       <td colspan="4" style="padding:8px 16px 12px;background:var(--surface);border-top:none;">
-        <pre style="font-size:11px;color:var(--text-muted);margin:0;white-space:pre-wrap;word-break:break-all;">${escHtml(detailStr)}</pre>
+        ${expandedHtml}
       </td>
     </tr>` : ''}`;
   }).join('');
@@ -3333,7 +3374,6 @@ async function loadStatus() {
       { label: 'Rules Total',    value: s.rules_total },
       { label: 'Rules Enabled',  value: s.rules_enabled },
       { label: 'Events Today',   value: s.events_today },
-      { label: 'Uptime',         value: formatUptime(s.uptime) },
     ].map(({ label, value }) => `
       <div class="stat-card">
         <div class="stat-value">${value}</div>
@@ -3435,14 +3475,6 @@ function renderDeviceCapabilities() {
     </table>`;
 }
 
-function formatUptime(s) {
-  const d = Math.floor(s / 86400);
-  const h = Math.floor((s % 86400) / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h ${m}m`;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
 
 /* ===================================================
  * MQTT tab

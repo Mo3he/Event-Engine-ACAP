@@ -162,6 +162,20 @@ int EventLog_Count_Today(void) {
     return cnt;
 }
 
+void EventLog_Clear(void) {
+    pthread_mutex_lock(&lock);
+    for (int i = 0; i < EVENT_LOG_SIZE; i++) {
+        if (entries[i].trigger_snapshot) {
+            cJSON_Delete(entries[i].trigger_snapshot);
+            entries[i].trigger_snapshot = NULL;
+        }
+    }
+    memset(entries, 0, sizeof(entries));
+    head = 0; count = 0;
+    persist_dirty++;
+    pthread_mutex_unlock(&lock);
+}
+
 void EventLog_Persist(void) {
     pthread_mutex_lock(&lock);
     if (!persist_dirty) { pthread_mutex_unlock(&lock); return; }

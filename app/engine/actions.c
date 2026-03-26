@@ -10,10 +10,34 @@
 #include "triggers.h"
 #include "variables.h"
 #include "mqtt_client.h"
+#include "event_log.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "actions: " fmt, ## args)
+
+/* LOG_ERR: logs to syslog, writes to event log for the current rule, and
+ * captures into g_action_error so the test endpoint can return it to the UI. */
+static char        g_action_error[512]   = "";
+static const char* g_current_rule_id     = NULL;
+
+static void action_error_setf(const char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(g_action_error, sizeof(g_action_error), fmt, ap);
+    va_end(ap);
+    if (g_current_rule_id)
+        EventLog_Set_Action_Error(g_current_rule_id, g_action_error);
+}
+
+#define LOG_ACTION_ERR(fmt, args...) do { \
+    syslog(LOG_WARNING, "actions: " fmt, ## args); \
+    action_error_setf(fmt, ## args); \
+} while(0)
+
+const char* Actions_Get_Last_Error(void) {
+    return g_action_error[0] ? g_action_error : NULL;
+}
 
 static char g_socks5_proxy[256] = "";
 
@@ -267,7 +291,7 @@ static size_t curl_discard(void* p, size_t sz, size_t n, void* ud) {
 
 static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
-    if (!url_tmpl) return;
+    if (!url_tmpl || !url_tmpl[0]) { LOG_ACTION_ERR("http_request: no url"); return; }
 
     /* Optional snapshot attachment: fetch JPEG and inject as {{snapshot_base64}} */
     cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
@@ -363,7 +387,7 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     if (res == CURLE_OK)
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     else
-        LOG_WARN("http_request to %s failed: %s", url, curl_easy_strerror(res));
+        LOG_ACTION_ERR("http_request to %s failed: %s", url, curl_easy_strerror(res));
 
     if (hdrs) curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
@@ -660,7 +684,7 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     if (qos < 0 || qos > 1) qos = 0;
 
     if (!MQTT_Publish(topic, payload, retain, qos))
-        LOG_WARN("mqtt_publish failed (not connected?)");
+        LOG_ACTION_ERR("mqtt_publish failed (not connected?)");
 
     free(topic);
     free(payload);
@@ -669,7 +693,7 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
 /* slack_webhook */
 static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
     const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "webhook_url"));
-    if (!url || !url[0]) { LOG_WARN("slack_webhook: no webhook_url"); return; }
+    if (!url || !url[0]) { LOG_ACTION_ERR("slack_webhook: no webhook_url"); return; }
 
     const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
     if (!msg_tmpl) msg_tmpl = "";
@@ -702,7 +726,7 @@ static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
     }
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_WARN("slack_webhook failed: %s", curl_easy_strerror(res));
+    if (res != CURLE_OK) LOG_ACTION_ERR("slack_webhook failed: %s", curl_easy_strerror(res));
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     free(json_str);
@@ -711,7 +735,7 @@ static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
 /* teams_webhook — Adaptive Card via Power Automate / Workflows connector */
 static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "webhook_url"));
-    if (!url || !url[0]) { LOG_WARN("teams_webhook: no webhook_url"); return; }
+    if (!url || !url[0]) { LOG_ACTION_ERR("teams_webhook: no webhook_url"); return; }
 
     const char* title_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "title"));
     const char* msg_tmpl   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
@@ -776,7 +800,7 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     }
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_WARN("teams_webhook failed: %s", curl_easy_strerror(res));
+    if (res != CURLE_OK) LOG_ACTION_ERR("teams_webhook failed: %s", curl_easy_strerror(res));
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     free(json_str);
@@ -785,16 +809,16 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
 /* influxdb_write — write a data point to InfluxDB v1 or v2 */
 static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
     const char* base_url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
-    if (!base_url || !base_url[0]) { LOG_WARN("influxdb_write: no url"); return; }
+    if (!base_url || !base_url[0]) { LOG_ACTION_ERR("influxdb_write: no url"); return; }
 
     const char* version = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "version"));
     if (!version) version = "v2";
     int is_v1 = strcmp(version, "v1") == 0;
 
     const char* meas_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "measurement"));
-    if (!meas_tmpl || !meas_tmpl[0]) { LOG_WARN("influxdb_write: no measurement"); return; }
+    if (!meas_tmpl || !meas_tmpl[0]) { LOG_ACTION_ERR("influxdb_write: no measurement"); return; }
     const char* fields_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "fields"));
-    if (!fields_tmpl || !fields_tmpl[0]) { LOG_WARN("influxdb_write: no fields"); return; }
+    if (!fields_tmpl || !fields_tmpl[0]) { LOG_ACTION_ERR("influxdb_write: no fields"); return; }
 
     char* measurement = Actions_Expand_Template(meas_tmpl, trigger_data);
     char* fields      = Actions_Expand_Template(fields_tmpl, trigger_data);
@@ -860,12 +884,12 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK)
-        LOG_WARN("influxdb_write failed: %s", curl_easy_strerror(res));
+        LOG_ACTION_ERR("influxdb_write failed: %s", curl_easy_strerror(res));
     else {
         long http_code = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code != 204 && http_code != 200)
-            LOG_WARN("influxdb_write: unexpected HTTP %ld", http_code);
+            LOG_ACTION_ERR("influxdb_write: unexpected HTTP %ld", http_code);
     }
 
     curl_slist_free_all(hdrs);
@@ -893,11 +917,11 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     cJSON* smtp_cfg = ACAP_Get_Config("smtp");
     const char* smtp_url = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "server")) : NULL;
     const char* from     = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "from"))   : NULL;
-    if (!smtp_url || !smtp_url[0]) { LOG_WARN("email: SMTP server not configured in settings"); return; }
-    if (!from || !from[0]) { LOG_WARN("email: 'from' address not configured in SMTP settings"); return; }
+    if (!smtp_url || !smtp_url[0]) { LOG_ACTION_ERR("email: SMTP server not configured in settings"); return; }
+    if (!from || !from[0]) { LOG_ACTION_ERR("email: 'from' address not configured in SMTP settings"); return; }
 
     const char* to = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "to"));
-    if (!to || !to[0]) { LOG_WARN("email: no 'to' address"); return; }
+    if (!to || !to[0]) { LOG_ACTION_ERR("email: no 'to' address"); return; }
 
     const char* subj_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "subject"));
     const char* body_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "body"));
@@ -972,7 +996,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     }
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_WARN("email failed: %s", curl_easy_strerror(res));
+    if (res != CURLE_OK) LOG_ACTION_ERR("email failed: %s", curl_easy_strerror(res));
     curl_slist_free_all(recipients);
     curl_easy_cleanup(curl);
     free(msg);
@@ -982,7 +1006,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
 static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
     const char* bot_token = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "bot_token"));
     const char* chat_id   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "chat_id"));
-    if (!bot_token || !chat_id) { LOG_WARN("telegram: missing bot_token/chat_id"); return; }
+    if (!bot_token || !chat_id) { LOG_ACTION_ERR("telegram: missing bot_token/chat_id"); return; }
 
     const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
     if (!msg_tmpl) msg_tmpl = "";
@@ -1021,7 +1045,7 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
     }
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_WARN("telegram failed: %s", curl_easy_strerror(res));
+    if (res != CURLE_OK) LOG_ACTION_ERR("telegram failed: %s", curl_easy_strerror(res));
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     free(json_str);
@@ -1627,6 +1651,7 @@ void Actions_Digest_Tick(void) {
 
 static void execute_from(const char* rule_id, cJSON* actions_array,
                          int start_index, cJSON* trigger_data) {
+    g_current_rule_id = rule_id;
     int total = cJSON_GetArraySize(actions_array);
     for (int i = start_index; i < total; i++) {
         cJSON* action = cJSON_GetArrayItem(actions_array, i);
@@ -1712,11 +1737,19 @@ int Actions_Test(const char* type, cJSON* config) {
     cJSON* arr = cJSON_CreateArray();
     cJSON_AddItemToArray(arr, action);
 
-    /* Execute with empty trigger data */
+    /* Execute with empty trigger data; capture any errors via LOG_ACTION_ERR */
+    g_action_error[0] = '\0';
     cJSON* td = cJSON_CreateObject();
     cJSON_AddStringToObject(td, "type", "test");
     execute_from(NULL, arr, 0, td);
+
+    int failed = g_action_error[0] ? 1 : 0;
+    char rname[128];
+    snprintf(rname, sizeof(rname), "Test: %s", type);
+    EventLog_Append("_test_", rname, 1, NULL, td, 1, failed);
+    if (failed) EventLog_Set_Action_Error("_test_", g_action_error);
+
     cJSON_Delete(td);
     cJSON_Delete(arr);
-    return 0;
+    return failed ? -1 : 0;
 }

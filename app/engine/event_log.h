@@ -34,6 +34,8 @@ cJSON* EventLog_Get_For_Rule(const char* rule_id, int limit);
 /* Today's fire count */
 int    EventLog_Count_Today(void);
 
+void   EventLog_Clear(void);
+
 void   EventLog_Load(void);
 void   EventLog_Persist(void);
 
