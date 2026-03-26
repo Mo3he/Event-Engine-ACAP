@@ -208,9 +208,10 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
 
 1. Go to `http://<camera-ip>/#settings/apps`
 2. Click **Add app** and upload the `.eap` for your camera's architecture:
-   - `Event_Engine_1_7_2_aarch64.eap` - Cortex-A53 and newer (most cameras from ~2017 onwards)
-   - `Event_Engine_1_7_2_armv7hf.eap` - Cortex-A9 (older cameras)
-3. Start the app
+   
+   - `aarch64` — newer Axis cameras (ARTPEC-8, most cameras from 2020+)
+   - `armv7hf` — older Axis cameras (ARTPEC-6/7)
+4. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
 
