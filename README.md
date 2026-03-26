@@ -16,7 +16,7 @@ Event Engine replaces and extends the built-in Axis event system with a flexible
 - **Conditions** - optional checks that must pass before actions run
 - **Actions** - what happens when the rule fires (one or more, run in sequence)
 
-Rules are built in a clean web UI and take effect immediately - no reboot required.
+Rules are built in a clean web UI and take effect immediately.
 
 <img width="397" height="591" alt="Screenshot 2026-03-21 at 06 14 23" src="https://github.com/user-attachments/assets/eacb1931-904c-409a-a9c2-2649cf5255d1" />
 <img width="406" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/ce711052-7bc4-41ad-9599-721cefb50ab2" />
@@ -135,7 +135,7 @@ Each rule has two optional execution controls:
 
 ### Arm / Disarm Pattern
 
-Use the **Variable Compare** condition with a variable named `system.armed` (value `"true"` or `"false"`) to make rules only fire when the system is armed. Example rules shipped in the default template:
+Use the **Variable Compare** condition with a variable named `system.armed` (value `"true"` or `"false"`) to make rules only fire when the system is armed. Example rules shipped in the templates:
 
 1. **Arm System via MQTT** - subscribe to `cameras/<serial>/arm`, set `system.armed = "true"`
 2. **Disarm System via MQTT** - same topic, set `system.armed = "false"`
