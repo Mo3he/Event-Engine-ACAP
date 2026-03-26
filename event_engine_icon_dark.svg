@@ -6,24 +6,26 @@
       <stop offset="100%" stop-color="#2a2a2a"/>
     </linearGradient>
   </defs>
-
   <rect x="0" y="0" width="300" height="300" rx="72" fill="url(#bg)"/>
-
   <g clip-path="url(#ic)">
-    <circle cx="52" cy="108" r="11" fill="#378ADD"/>
-    <circle cx="52" cy="150" r="11" fill="#378ADD" opacity="0.6"/>
-    <circle cx="52" cy="192" r="11" fill="#378ADD" opacity="0.3"/>
-    <line x1="63" y1="108" x2="129" y2="108" stroke="#378ADD" stroke-width="1.4" opacity="0.4"/>
-    <line x1="63" y1="150" x2="129" y2="150" stroke="#378ADD" stroke-width="1.4" opacity="0.28"/>
-    <line x1="63" y1="192" x2="129" y2="192" stroke="#378ADD" stroke-width="1.4" opacity="0.15"/>
-    <circle cx="140" cy="108" r="11" fill="#F5A623"/>
-    <circle cx="140" cy="150" r="11" fill="#F5A623" opacity="0.6"/>
-    <circle cx="140" cy="192" r="11" fill="#F5A623" opacity="0.3"/>
-    <line x1="151" y1="108" x2="217" y2="108" stroke="#00D4A0" stroke-width="1.4" opacity="0.4"/>
-    <line x1="151" y1="150" x2="217" y2="150" stroke="#00D4A0" stroke-width="1.4" opacity="0.28"/>
-    <line x1="151" y1="192" x2="217" y2="192" stroke="#00D4A0" stroke-width="1.4" opacity="0.15"/>
-    <circle cx="228" cy="108" r="11" fill="#00D4A0"/>
-    <circle cx="228" cy="150" r="11" fill="#00D4A0" opacity="0.6"/>
-    <circle cx="228" cy="192" r="11" fill="#00D4A0" opacity="0.3"/>
+    <!-- 3 columns: x=62, x=150, x=238 — centred across 300px with equal gaps -->
+    <!-- TRIGGERS — blue -->
+    <circle cx="62" cy="108" r="11" fill="#378ADD"/>
+    <circle cx="62" cy="150" r="11" fill="#378ADD" opacity="0.6"/>
+    <circle cx="62" cy="192" r="11" fill="#378ADD" opacity="0.3"/>
+    <line x1="73" y1="108" x2="139" y2="108" stroke="#378ADD" stroke-width="1.4" opacity="0.4"/>
+    <line x1="73" y1="150" x2="139" y2="150" stroke="#378ADD" stroke-width="1.4" opacity="0.28"/>
+    <line x1="73" y1="192" x2="139" y2="192" stroke="#378ADD" stroke-width="1.4" opacity="0.15"/>
+    <!-- CONDITIONS — amber -->
+    <circle cx="150" cy="108" r="11" fill="#F5A623"/>
+    <circle cx="150" cy="150" r="11" fill="#F5A623" opacity="0.6"/>
+    <circle cx="150" cy="192" r="11" fill="#F5A623" opacity="0.3"/>
+    <line x1="161" y1="108" x2="227" y2="108" stroke="#00D4A0" stroke-width="1.4" opacity="0.4"/>
+    <line x1="161" y1="150" x2="227" y2="150" stroke="#00D4A0" stroke-width="1.4" opacity="0.28"/>
+    <line x1="161" y1="192" x2="227" y2="192" stroke="#00D4A0" stroke-width="1.4" opacity="0.15"/>
+    <!-- ACTIONS — teal -->
+    <circle cx="238" cy="108" r="11" fill="#00D4A0"/>
+    <circle cx="238" cy="150" r="11" fill="#00D4A0" opacity="0.6"/>
+    <circle cx="238" cy="192" r="11" fill="#00D4A0" opacity="0.3"/>
   </g>
 </svg>
