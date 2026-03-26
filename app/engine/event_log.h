@@ -22,7 +22,10 @@ void   EventLog_Cleanup(void);
 
 void   EventLog_Append(const char* rule_id, const char* rule_name,
                        int fired, const char* block_reason,
-                       cJSON* trigger_data);
+                       cJSON* trigger_data,
+                       int actions_run, int actions_failed);
+
+void   EventLog_Set_Action_Error(const char* rule_id, const char* error_msg);
 
 /* Returns new cJSON array — caller must cJSON_Delete */
 cJSON* EventLog_Get_Recent(int limit);
@@ -30,6 +33,9 @@ cJSON* EventLog_Get_For_Rule(const char* rule_id, int limit);
 
 /* Today's fire count */
 int    EventLog_Count_Today(void);
+
+void   EventLog_Load(void);
+void   EventLog_Persist(void);
 
 #ifdef __cplusplus
 }

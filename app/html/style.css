@@ -134,6 +134,8 @@ header .subtitle {
 .btn-ghost     { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
 .btn-ghost:hover { color: var(--text); border-color: var(--text-muted); }
 .btn-success   { background: var(--accent-success); color: #000; }
+.btn-template  { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.btn-template:hover { background: var(--accent); color: #fff; }
 .btn-sm { padding: 4px 10px; font-size: 12px; }
 .btn-icon { padding: 6px; }
 
@@ -500,4 +502,43 @@ header .subtitle {
   .status-grid { grid-template-columns: repeat(2, 1fr); }
   .form-row { flex-direction: column; }
   header h1 { font-size: 14px; }
+
+  /* Modal full-screen on mobile */
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+  .modal {
+    max-width: 100%;
+    border-radius: var(--radius) var(--radius) 0 0;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+  .modal-body {
+    padding: 14px;
+  }
+
+  /* Larger touch targets */
+  .btn { min-height: 44px; padding: 10px 16px; }
+  .btn-sm { min-height: 36px; }
+  .btn-icon { min-width: 36px; min-height: 36px; }
+  .tab-btn { padding: 14px 14px; }
+  .toggle { width: 44px; height: 24px; }
+  .toggle-slider::before { width: 18px; height: 18px; }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+  /* Stack rule card actions */
+  .rule-card { flex-wrap: wrap; }
+  .rule-actions { width: 100%; justify-content: flex-end; margin-top: 6px; }
+
+  /* Wider rule list search */
+  #rule-search { width: 100% !important; }
+
+  /* Event table — hide details on tiny screens, keep key cols */
+  .event-table th:last-child,
+  .event-table td:last-child { display: none; }
+
+  /* Reduce container padding */
+  .tab-content { padding: 12px; }
+  .container { padding: 0; }
 }

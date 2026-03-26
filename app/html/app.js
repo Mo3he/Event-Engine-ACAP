@@ -26,6 +26,7 @@ const API = {
   deleteRule:    id      => API.delete(`rules?id=${id}`),
   setEnabled:    (id, v) => API.post(`rules?id=${id}`, { enabled: v }),
   fireRule:      id      => API.post('fire', { id }),
+  testAction:    (type, config) => API.post('actions', { type, config }),
 
   getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + rule : ''}`),
   getStatus:     ()      => API.get('engine'),
@@ -63,9 +64,14 @@ let engineLon = 0;            /* engine settings longitude */
 function toast(msg, type = 'info') {
   const el = document.createElement('div');
   el.className = `toast ${type}`;
-  el.textContent = msg;
+  if (type === 'error') {
+    /* Errors stay until dismissed */
+    el.innerHTML = `<span>${escHtml(msg)}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:inherit;cursor:pointer;margin-left:10px;font-size:15px;opacity:.8;line-height:1;">&times;</button>`;
+  } else {
+    el.textContent = msg;
+    setTimeout(() => el.remove(), 5000);
+  }
   document.getElementById('toast-container').appendChild(el);
-  setTimeout(() => el.remove(), 3500);
 }
 
 /* ===================================================
@@ -79,7 +85,7 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'log')       loadEvents();
     if (btn.dataset.tab === 'variables') loadVariables();
-    if (btn.dataset.tab === 'settings')  { loadStatus(); loadSmtpSettings(); loadMqttSettings(); loadEngineSettings(); }
+    if (btn.dataset.tab === 'settings')  { loadStatus(); loadSmtpSettings(); loadProxySettings(); loadMqttSettings(); loadEngineSettings(); }
   });
 });
 
@@ -97,7 +103,7 @@ const RULE_TYPE_LABELS = {
   trigger: {
     vapix_event: 'Camera Event', schedule: 'Schedule', mqtt_message: 'MQTT',
     http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
-    rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario'
+    rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario', manual: 'Manual'
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
@@ -150,7 +156,7 @@ async function loadVapixEventCatalog() {
 async function loadPtzPresets() {
   try {
     const resp = await fetch('/axis-cgi/com/ptz.cgi?query=presetposall');
-    if (!resp.ok) { ptzPresets = []; return; }
+    if (!resp.ok) { ptzPresets = []; renderDeviceCapabilities(); return; }
     const text = await resp.text();
     const channels = [];
     let cur = null;
@@ -164,6 +170,7 @@ async function loadPtzPresets() {
     }
     ptzPresets = channels.filter(c => c.presets.length);
   } catch(e) { ptzPresets = []; }
+  renderDeviceCapabilities();
 }
 
 async function loadAudioClips() {
@@ -184,6 +191,7 @@ async function loadAudioClips() {
       .filter(c => c.type === 'audio' && c.name)
       .sort((a, b) => parseInt(a.id) - parseInt(b.id));
   } catch(e) { audioClips = []; }
+  renderDeviceCapabilities();
 }
 
 async function loadSirenProfiles() {
@@ -199,6 +207,7 @@ async function loadSirenProfiles() {
     if (!Array.isArray(profiles)) { sirenProfiles = []; return; }
     sirenProfiles = profiles.map(p => ({ name: p.name, label: p.name }));
   } catch(e) { sirenProfiles = []; }
+  renderDeviceCapabilities();
 }
 
 async function loadAcapApps() {
@@ -216,6 +225,7 @@ async function loadAcapApps() {
     });
     acapApps = apps.sort((a, b) => a.niceName.localeCompare(b.niceName));
   } catch(e) { acapApps = []; }
+  renderDeviceCapabilities();
   if (!document.getElementById('modal-overlay').classList.contains('hidden'))
     renderActionList();
 }
@@ -229,6 +239,7 @@ async function loadPrivacyMasks() {
     if (!Array.isArray(list)) { privacyMasks = []; return; }
     privacyMasks = list.map(m => ({ name: m.name }));
   } catch(e) { privacyMasks = []; }
+  renderDeviceCapabilities();
   if (!document.getElementById('modal-overlay').classList.contains('hidden'))
     renderActionList();
 }
@@ -264,6 +275,7 @@ async function loadGuardTours() {
     }
     guardTours = Object.values(byId).sort((a, b) => a.id - b.id);
   } catch(e) { guardTours = []; }
+  renderDeviceCapabilities();
   if (!document.getElementById('modal-overlay').classList.contains('hidden'))
     renderActionList();
 }
@@ -275,6 +287,7 @@ async function loadAoaScenarios() {
     const data = await resp.json();
     aoaScenarios = Array.isArray(data) ? data : [];
   } catch(e) { aoaScenarios = []; }
+  renderDeviceCapabilities();
   if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
     renderTriggerList();
     renderActionList();
@@ -455,6 +468,389 @@ function updateWebhookUrl(inp) {
 }
 
 /* ===================================================
+ * Rule Templates
+ * =================================================== */
+const RULE_TEMPLATES = [
+  {
+    name: 'Camera Event → HTTP Webhook',
+    icon: '🌐',
+    desc: 'POST to a URL whenever a VAPIX camera event fires',
+    rule: {
+      name: 'Camera Event → HTTP Webhook',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'http_request', method: 'POST',
+                  url: 'https://example.com/webhook',
+                  headers: 'Content-Type: application/json',
+                  body: '{"camera":"{{camera.serial}}","time":"{{timestamp}}","data":{{trigger_json}}}' }],
+    }
+  },
+  {
+    name: 'Daily Schedule → Syslog',
+    icon: '🕗',
+    desc: 'Log a message every weekday at 08:00',
+    rule: {
+      name: 'Daily Schedule → Syslog',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'daily_time', time: '08:00', days: [1,2,3,4,5] }],
+      conditions: [],
+      actions: [{ type: 'send_syslog', message: 'Daily check at {{timestamp}} on {{camera.model}}', level: 'info' }],
+    }
+  },
+  {
+    name: 'Camera Event → Email Alert',
+    icon: '✉️',
+    desc: 'Send an email when a camera event fires (configure SMTP in Settings first)',
+    rule: {
+      name: 'Camera Event → Email Alert',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'email', to: 'alerts@example.com',
+                  subject: 'Alert from {{camera.model}}',
+                  body: 'An event occurred at {{timestamp}}.\nCamera: {{camera.serial}} ({{camera.ip}})' }],
+    }
+  },
+  {
+    name: 'Camera Event → Slack',
+    icon: '💬',
+    desc: 'Post a Slack message when a camera event fires',
+    rule: {
+      name: 'Camera Event → Slack',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'slack_webhook', webhook_url: '',
+                  message: 'Alert from {{camera.model}} at {{timestamp}}' }],
+    }
+  },
+  {
+    name: 'MQTT Message → Set Variable',
+    icon: '📡',
+    desc: 'Store the payload of an incoming MQTT message as a variable',
+    rule: {
+      name: 'MQTT Message → Set Variable',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'mqtt_message', topic_filter: 'home/+/status' }],
+      conditions: [],
+      actions: [{ type: 'set_variable', name: 'last_mqtt_payload', value: '{{trigger.payload}}' }],
+    }
+  },
+  {
+    name: 'I/O Input → I/O Output',
+    icon: '⚡',
+    desc: 'Activate an output port for 5 s when an input port goes high',
+    rule: {
+      name: 'I/O Input → I/O Output',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'io_input', port: 1, edge: 'rising', hold_secs: 0 }],
+      conditions: [],
+      actions: [{ type: 'io_output', port: 1, state: 'active', duration: 5 }],
+    }
+  },
+  {
+    name: 'Hourly Snapshot → FTP Upload',
+    icon: '📷',
+    desc: 'Upload a camera snapshot to an FTP server every hour',
+    rule: {
+      name: 'Hourly Snapshot → FTP Upload',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'cron', cron: '0 * * * *' }],
+      conditions: [],
+      actions: [{ type: 'ftp_upload',
+                  url: 'ftp://server/cameras/{{camera.serial}}/{{date}}_{{time}}.jpg',
+                  username: '', password: '' }],
+    }
+  },
+  {
+    name: 'Manual → PTZ + Overlay',
+    icon: '🎯',
+    desc: 'Move to a PTZ preset and show a text overlay — triggered by the Fire button or API',
+    rule: {
+      name: 'Manual → PTZ + Overlay',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'manual' }],
+      conditions: [],
+      actions: [
+        { type: 'ptz_preset', preset: 'HomePosition', channel: 1 },
+        { type: 'overlay_text', text: 'Home at {{time}}', channel: 1, duration: 5, position: 'topLeft', text_color: 'white' }
+      ],
+    }
+  },
+  {
+    name: 'Camera Event → Telegram',
+    icon: '✈️',
+    desc: 'Send a Telegram message when a camera event fires',
+    rule: {
+      name: 'Camera Event → Telegram',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'telegram', bot_token: '', chat_id: '',
+                  message: '📷 Alert from *{{camera.model}}*\nTime: {{timestamp}}\nCamera: {{camera.serial}}',
+                  parse_mode: 'Markdown' }],
+    }
+  },
+  {
+    name: 'Camera Event → Microsoft Teams',
+    icon: '🏢',
+    desc: 'Post an adaptive card to a Teams channel via Power Automate webhook',
+    rule: {
+      name: 'Camera Event → Microsoft Teams',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'teams_webhook', webhook_url: '',
+                  title: 'Alert from {{camera.model}}',
+                  message: 'An event was detected at {{timestamp}} on camera {{camera.serial}} ({{camera.ip}}).' }],
+    }
+  },
+  {
+    name: 'Motion → Recording (Business Hours)',
+    icon: '📹',
+    desc: 'Start a 30 s recording when motion is detected, but only during weekday business hours',
+    rule: {
+      name: 'Motion → Recording (Business Hours)',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{
+        type: 'vapix_event',
+        topic0: { tnsaxis: 'VideoAnalytics' },
+        topic1: { tnsaxis: 'MotionDetection' },
+        filter_key: 'active', filter_value: true
+      }],
+      conditions: [{ type: 'time_window', start: '08:00', end: '18:00', days: [1,2,3,4,5] }],
+      actions: [{ type: 'recording', operation: 'start', duration: 30 }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'Arm System via MQTT',
+    icon: '🔒',
+    desc: 'Set system.armed = true when an MQTT "arm" command arrives — pair with a condition on other rules',
+    rule: {
+      name: 'Arm System via MQTT',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/{{camera.serial}}/arm', payload_filter: 'arm' }],
+      conditions: [],
+      actions: [
+        { type: 'set_variable', name: 'system.armed', value: 'true' },
+        { type: 'send_syslog', message: 'System ARMED via MQTT at {{timestamp}}', level: 'info' }
+      ],
+    }
+  },
+  {
+    name: 'Disarm System via MQTT',
+    icon: '🔓',
+    desc: 'Set system.armed = false when an MQTT "disarm" command arrives',
+    rule: {
+      name: 'Disarm System via MQTT',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/{{camera.serial}}/arm', payload_filter: 'disarm' }],
+      conditions: [],
+      actions: [
+        { type: 'set_variable', name: 'system.armed', value: 'false' },
+        { type: 'send_syslog', message: 'System DISARMED via MQTT at {{timestamp}}', level: 'info' }
+      ],
+    }
+  },
+  {
+    name: 'Motion Alert When Armed',
+    icon: '🚨',
+    desc: 'Fire an MQTT alert on motion, but only when system.armed = true',
+    rule: {
+      name: 'Motion Alert When Armed',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{
+        type: 'vapix_event',
+        topic0: { tnsaxis: 'VideoAnalytics' },
+        topic1: { tnsaxis: 'MotionDetection' },
+        filter_key: 'active', filter_value: true
+      }],
+      conditions: [{ type: 'variable_compare', name: 'system.armed', op: 'eq', value: 'true' }],
+      actions: [{
+        type: 'mqtt_publish',
+        topic: 'cameras/{{camera.serial}}/alert',
+        payload: '{"event":"motion","camera":"{{camera.serial}}","time":"{{timestamp}}"}',
+        qos: 1, retain: false
+      }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'AOA Object Detection → MQTT',
+    icon: '🚗',
+    desc: 'Publish to MQTT whenever Object Analytics detects an object in a scenario',
+    rule: {
+      name: 'AOA Object Detection → MQTT',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'aoa_scenario', scenario_id: 1, object_class: 'any' }],
+      conditions: [],
+      actions: [{
+        type: 'mqtt_publish',
+        topic: 'cameras/{{camera.serial}}/aoa',
+        payload: '{"scenario":"{{trigger.scenario_id}}","class":"{{trigger.object_class}}","time":"{{timestamp}}"}',
+        qos: 0, retain: false
+      }],
+      cooldown: 5,
+    }
+  },
+  {
+    name: 'Schedule → InfluxDB Sensor Write',
+    icon: '📈',
+    desc: 'Poll a VAPIX sensor value every 5 minutes and write it to InfluxDB',
+    rule: {
+      name: 'Schedule → InfluxDB Sensor Write',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'interval', interval_seconds: 300 }],
+      conditions: [],
+      actions: [
+        { type: 'vapix_query' },
+        { type: 'influxdb_write',
+          url: 'http://influxdb:8086', version: 'v2',
+          org: 'my-org', bucket: 'cameras', token: '',
+          measurement: 'camera_sensors',
+          tags: 'camera={{camera.serial}},model={{camera.model}}',
+          fields: 'value={{trigger.Value}}' }
+      ],
+    }
+  },
+  {
+    name: 'Camera Event → Notification Digest',
+    icon: '📨',
+    desc: 'Batch events and send one summary message every 5 minutes instead of one alert per event',
+    rule: {
+      name: 'Camera Event → Notification Digest',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{
+        type: 'digest', deliver_via: 'slack', webhook_url: '',
+        interval: 300,
+        line: '{{timestamp}} — {{trigger_json}}'
+      }],
+    }
+  },
+  {
+    name: 'Sunrise → IR Cut Filter Day Mode',
+    icon: '🌅',
+    desc: 'Switch the IR cut filter to Day mode at sunrise each morning',
+    rule: {
+      name: 'Sunrise → IR Cut Filter Day Mode',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'astronomical', event: 'sunrise', offset_minutes: 0, latitude: 0, longitude: 0 }],
+      conditions: [],
+      actions: [{ type: 'ir_cut_filter', mode: 'day', channel: 1 }],
+    }
+  },
+  {
+    name: 'Sunset → IR Cut Filter Night Mode',
+    icon: '🌙',
+    desc: 'Switch the IR cut filter to Night mode at sunset each evening',
+    rule: {
+      name: 'Sunset → IR Cut Filter Night Mode',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'astronomical', event: 'sunset', offset_minutes: 0, latitude: 0, longitude: 0 }],
+      conditions: [],
+      actions: [{ type: 'ir_cut_filter', mode: 'night', channel: 1 }],
+    }
+  },
+  {
+    name: 'Counter Threshold → Slack Alert',
+    icon: '🔢',
+    desc: 'Send a Slack message when a counter exceeds a threshold',
+    rule: {
+      name: 'Counter Threshold → Slack Alert',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'counter_threshold', counter_name: 'my_counter', op: 'gte', value: 10 }],
+      conditions: [],
+      actions: [{ type: 'slack_webhook', webhook_url: '',
+                  message: 'Counter *{{trigger.counter_name}}* reached {{trigger.counter_value}} on {{camera.model}} at {{timestamp}}' }],
+      cooldown: 60,
+    }
+  },
+  {
+    name: 'I/O Input → Siren + MQTT',
+    icon: '🔔',
+    desc: 'Trigger the siren/light and publish an MQTT alert when an input port activates',
+    rule: {
+      name: 'I/O Input → Siren + MQTT',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'io_input', port: 1, edge: 'rising', hold_secs: 0 }],
+      conditions: [],
+      actions: [
+        { type: 'siren_light', signal_action: 'start', profile: '', while_active: true },
+        { type: 'mqtt_publish', topic: 'cameras/{{camera.serial}}/io/{{trigger.port}}',
+          payload: '{"port":"{{trigger.port}}","state":"{{trigger.state}}","time":"{{timestamp}}"}',
+          qos: 0, retain: false }
+      ],
+    }
+  },
+];
+
+function openTemplateModal() {
+  const existing = document.getElementById('_template_panel');
+  if (existing) { existing.remove(); return; }
+
+  const panel = document.createElement('div');
+  panel.id = '_template_panel';
+  panel.style.cssText =
+    'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);' +
+    'border-radius:8px;box-shadow:var(--shadow);padding:0;min-width:320px;max-width:380px;overflow:hidden;';
+
+  const header = `<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">
+    Create from Template
+    <button onclick="document.getElementById('_template_panel').remove()" style="float:right;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">&times;</button>
+  </div>`;
+  const items = RULE_TEMPLATES.map((t, i) =>
+    `<div onclick="applyTemplate(${i})" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;"
+          onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+      <span style="font-size:18px;flex-shrink:0;margin-top:1px;">${t.icon || '📄'}</span>
+      <div>
+        <div style="font-size:13px;font-weight:500;">${escHtml(t.name)}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escHtml(t.desc)}</div>
+      </div>
+    </div>`
+  ).join('');
+  panel.innerHTML = header + `<div style="max-height:380px;overflow-y:auto;">${items}</div>`;
+  document.body.appendChild(panel);
+
+  /* Position below whichever template button triggered it */
+  const btn = document.getElementById('btn-template') || document.getElementById('btn-template-empty');
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    const pw = 380;
+    const left = Math.min(rect.left, window.innerWidth - pw - 10);
+    panel.style.left = Math.max(10, left) + 'px';
+    panel.style.top  = (rect.bottom + 4) + 'px';
+  } else {
+    panel.style.left = '50%';
+    panel.style.top  = '80px';
+    panel.style.transform = 'translateX(-50%)';
+  }
+
+  setTimeout(() => {
+    document.addEventListener('click', function _close(e) {
+      const p = document.getElementById('_template_panel');
+      if (p && !p.contains(e.target) &&
+          e.target.id !== 'btn-template' && e.target.id !== 'btn-template-empty') {
+        p.remove();
+      }
+      document.removeEventListener('click', _close);
+    });
+  }, 0);
+}
+
+function applyTemplate(i) {
+  const p = document.getElementById('_template_panel');
+  if (p) p.remove();
+  const tmpl = RULE_TEMPLATES[i];
+  if (!tmpl) return;
+  /* Deep-copy so each use is independent */
+  openRuleEditor(JSON.parse(JSON.stringify(tmpl.rule)));
+}
+
+/* ===================================================
  * Rules Tab
  * =================================================== */
 async function loadRules() {
@@ -477,12 +873,30 @@ function renderRules() {
     list.innerHTML = `<div class="empty-state">
       <div class="empty-icon">⚡</div>
       <h3>No rules yet</h3>
-      <p>Click <strong>+ New Rule</strong> to create your first rule.</p>
+      <p style="margin-bottom:20px;">Create your first rule from scratch or start with a ready-made template.</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+        <button class="btn btn-template" onclick="openTemplateModal()" id="btn-template-empty">&#9881; From Template</button>
+        <button class="btn btn-primary" onclick="openRuleEditor(null)">+ New Rule</button>
+      </div>
     </div>`;
     return;
   }
 
-  list.innerHTML = allRules.map(r => `
+  const searchEl = document.getElementById('rule-search');
+  const search = searchEl ? searchEl.value.toLowerCase().trim() : '';
+  const visibleRules = search ? allRules.filter(r => r.name.toLowerCase().includes(search)) : allRules;
+
+  if (!visibleRules.length && search) {
+    list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">No rules match "<em>${escHtml(search)}</em>"</div>`;
+    return;
+  }
+
+  list.innerHTML = visibleRules.map(r => {
+    const isManualOnly = (r.trigger_types||[]).length > 0 && (r.trigger_types||[]).every(t => t === 'manual');
+    const fireBtn = isManualOnly
+      ? `<button class="btn btn-primary btn-sm" onclick="testRule('${r.id}')" title="Fire rule now">&#9654; Fire</button>`
+      : `<button class="btn btn-ghost btn-sm btn-icon" onclick="testRule('${r.id}')" title="Test / Fire now">&#9654;</button>`;
+    return `
     <div class="rule-card ${r.enabled ? '' : 'disabled'}" id="rule-card-${r.id}">
       <label class="toggle" title="${r.enabled ? 'Disable' : 'Enable'} rule">
         <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule('${r.id}', this.checked)">
@@ -497,15 +911,15 @@ function renderRules() {
           ${r.cooldown ? `<span class="badge">cooldown ${r.cooldown}s</span>` : ''}
         </div>
       </div>
-      <div class="rule-fired-time">${r.last_fired ? '⚡ ' + fmtTime(r.last_fired) : 'Never fired'}</div>
+      <div class="rule-fired-time">${r.last_fired ? '&#9889; ' + fmtTime(r.last_fired) : 'Never fired'}</div>
       <div class="rule-actions">
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="testRule('${r.id}')" title="Test / Fire now">▶</button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="editRule('${r.id}')" title="Edit">✏</button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="duplicateRule('${r.id}')" title="Duplicate">⎘</button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="deleteRule('${r.id}')" title="Delete">🗑</button>
+        ${fireBtn}
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="editRule('${r.id}')" title="Edit">&#9998;</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="duplicateRule('${r.id}')" title="Duplicate">&#10064;</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="deleteRule('${r.id}')" title="Delete">&#128465;</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 async function toggleRule(id, enabled) {
@@ -621,6 +1035,7 @@ function buildRuleForm(rule) {
       <div class="logic-toggle">
         <button class="logic-btn ${!rule || (rule.trigger_logic||'OR')==='OR' ? 'active' : ''}" onclick="setLogic('trigger','OR',this)">OR</button>
         <button class="logic-btn ${rule && rule.trigger_logic==='AND' ? 'active' : ''}" onclick="setLogic('trigger','AND',this)">AND</button>
+        <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">OR = any trigger fires | AND = all must activate</span>
       </div>
     </div>
     <div id="trigger-list"></div>
@@ -632,6 +1047,7 @@ function buildRuleForm(rule) {
       <div class="logic-toggle">
         <button class="logic-btn ${!rule || (rule.condition_logic||'AND')==='AND' ? 'active' : ''}" onclick="setLogic('condition','AND',this)">AND</button>
         <button class="logic-btn ${rule && rule.condition_logic==='OR' ? 'active' : ''}" onclick="setLogic('condition','OR',this)">OR</button>
+        <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">AND = all must pass | OR = any passing allows fire</span>
       </div>
     </div>
     <div id="condition-list"></div>
@@ -668,6 +1084,7 @@ const TRIGGER_TYPES = [
   { value: 'counter_threshold', label: 'Counter Threshold' },
   { value: 'rule_fired',        label: 'Rule Fired' },
   { value: 'aoa_scenario',      label: 'AOA Scenario' },
+  { value: 'manual',            label: 'Manual (button / API)' },
 ];
 
 function triggerTypeOptions(selected) {
@@ -986,6 +1403,12 @@ function triggerFields(t, rowIdx) {
       </div>
     </div>`;
   }
+  if (type === 'manual') return `
+    <div class="form-row">
+      <div class="form-group">
+        <div class="form-hint" style="color:var(--text-muted);">This rule has no automatic trigger. Use the <strong>&#9654; Fire</strong> button in the rule list to run it manually, or call <code>POST /local/acap_event_engine/fire</code> with <code>{"id":"&lt;rule_id&gt;"}</code>.</div>
+      </div>
+    </div>`;
   return '';
 }
 
@@ -1068,7 +1491,38 @@ function conditionTypeOptions(selected) {
   ).join('');
 }
 
-function conditionFields(c) {
+function vapixCatalogTopicPath(ev) {
+  const parts = [];
+  ['topic0','topic1','topic2','topic3'].forEach(k => {
+    if (ev.topics && ev.topics[k]) {
+      const entries = Object.entries(ev.topics[k]);
+      if (entries.length > 0) {
+        const [ns, val] = entries[0];
+        if (val) parts.push(ns ? `${ns}:${val}` : val);
+      }
+    }
+  });
+  return parts.join('/');
+}
+
+function applyVapixEventState(rowIdx, idxStr) {
+  const idx = parseInt(idxStr);
+  if (idx < 0 || !vapixEventCatalog) return;
+  const ev = vapixEventCatalog[idx];
+  if (!ev) return;
+  const path = vapixCatalogTopicPath(ev);
+  const row = document.getElementById('crow-' + rowIdx);
+  const data = { type: 'vapix_event_state' };
+  if (row) row.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  data.event_key = path;
+  if (ev.dataKeys.length === 1) data.data_key = ev.dataKeys[0];
+  conditionRows[rowIdx] = data;
+  renderConditionList();
+}
+
+function conditionFields(c, rowIdx) {
   const type = c.type || 'time_window';
   if (type === 'time_window') return `
     <div class="form-row">
@@ -1249,24 +1703,52 @@ function conditionFields(c) {
       </div>
     </div>`;
   }
-  if (type === 'vapix_event_state') return `
+  if (type === 'vapix_event_state') {
+    /* Build catalog quick-select if available */
+    const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
+      ? vapixEventCatalog.map((ev, i) => {
+          const path = vapixCatalogTopicPath(ev);
+          const sel = c.event_key && path && path.includes(c.event_key) ? 'selected' : '';
+          return `<option value="${i}" ${sel}>${escHtml(ev.label)}</option>`;
+        }).join('')
+      : '';
+    /* Find data keys for currently matched catalog entry */
+    const matchIdx = vapixEventCatalog
+      ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p.includes(c.event_key); })
+      : -1;
+    const dataKeys = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys : [];
+    const dataKeyCtrl = dataKeys.length
+      ? `<select data-k="data_key">${dataKeys.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
+      : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
+    return `
+    ${catalogOpts ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event <span style="color:var(--text-muted);font-weight:400;">(pick to auto-fill fields below)</span></label>
+        <select onchange="applyVapixEventState(${rowIdx}, this.value)">
+          <option value="-1" ${matchIdx < 0 ? 'selected' : ''}>— custom / enter manually —</option>
+          ${catalogOpts}
+        </select>
+      </div>
+    </div>` : ''}
     <div class="form-row">
       <div class="form-group">
         <label>Event Topic (partial match)</label>
         <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput">
-        <div class="form-hint">Substring matched against the event topic path</div>
+        <div class="form-hint">Substring matched against the event topic path returned by the camera</div>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label>Data Key</label>
-        <input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">
+        ${dataKeyCtrl}
       </div>
       <div class="form-group">
         <label>Expected Value</label>
-        <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1">
+        <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1 or true">
       </div>
     </div>`;
+  }
   return '';
 }
 
@@ -1282,7 +1764,7 @@ function renderConditionList() {
         </select>
         <button class="tca-remove" onclick="removeConditionRow(${i})">&times;</button>
       </div>
-      <div class="tca-fields">${conditionFields(c)}</div>
+      <div class="tca-fields">${conditionFields(c, i)}</div>
     </div>
   `).join('');
 }
@@ -2426,6 +2908,7 @@ function renderActionList() {
         </select>
         <button class="btn btn-ghost btn-sm btn-icon" onclick="moveAction(${i}, -1)" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
         <button class="btn btn-ghost btn-sm btn-icon" onclick="moveAction(${i},  1)" title="Move down" ${i === actionRows.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="btn btn-ghost btn-sm" id="atest-${i}" onclick="testActionRow(${i})" title="Send a test — executes this action with sample data now">Test</button>
         <button class="tca-remove" onclick="removeActionRow(${i})">&times;</button>
       </div>
       <div class="tca-fields">${actionFields(a)}</div>
@@ -2453,6 +2936,33 @@ function moveAction(i, dir) {
   if (j < 0 || j >= actionRows.length) return;
   [actionRows[i], actionRows[j]] = [actionRows[j], actionRows[i]];
   renderActionList();
+}
+
+async function testActionRow(i) {
+  /* Collect and normalize current form data for this row */
+  const el = document.getElementById('arow-' + i);
+  if (!el) return;
+  const data = { type: actionRows[i].type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  const normalized = normalizeAction(data);
+  const btn = document.getElementById('atest-' + i);
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    const resp = await API.testAction(normalized.type, normalized);
+    const result = await resp.json().catch(() => ({}));
+    if (resp.ok && result.success !== false) {
+      toast(`Action ${i + 1} test: OK${result.message ? ' — ' + result.message : ''}`, 'success');
+    } else {
+      toast(`Action ${i + 1} test failed: ${result.error || result.message || resp.status}`, 'error');
+    }
+  } catch(e) {
+    toast(`Action ${i + 1} test failed: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
 }
 
 /* ===== Collect form data ===== */
@@ -2524,6 +3034,7 @@ function normalizeTrigger(t) {
   } else if (t.type === 'rule_fired') {
     out.rule_id = t.rule_id || '';
   }
+  /* manual trigger has no extra fields */
   return out;
 }
 
@@ -2664,6 +3175,25 @@ async function saveRule() {
   if (!triggerRows.length) { toast('At least one trigger is required', 'error'); return; }
   if (!actionRows.length) { toast('At least one action is required', 'error'); return; }
 
+  /* Per-action required field validation */
+  for (let i = 0; i < actionRows.length; i++) {
+    const a = actionRows[i];
+    const label = `Action ${i + 1} (${ruleTypeLabel('action', a.type)})`;
+    if (a.type === 'http_request'    && !a.url)         { toast(`${label}: URL is required`, 'error'); return; }
+    if (a.type === 'mqtt_publish'    && !a.topic)       { toast(`${label}: Topic is required`, 'error'); return; }
+    if (a.type === 'email'           && !a.to)          { toast(`${label}: "To" address is required`, 'error'); return; }
+    if (a.type === 'slack_webhook'   && !a.webhook_url) { toast(`${label}: Webhook URL is required`, 'error'); return; }
+    if (a.type === 'teams_webhook'   && !a.webhook_url) { toast(`${label}: Webhook URL is required`, 'error'); return; }
+    if (a.type === 'telegram'        && !a.bot_token)   { toast(`${label}: Bot Token is required`, 'error'); return; }
+    if (a.type === 'telegram'        && !a.chat_id)     { toast(`${label}: Chat ID is required`, 'error'); return; }
+    if (a.type === 'ftp_upload'      && !a.url)         { toast(`${label}: FTP URL is required`, 'error'); return; }
+    if (a.type === 'snapshot_upload' && !a.url)         { toast(`${label}: URL is required`, 'error'); return; }
+    if (a.type === 'set_variable'    && !a.name)        { toast(`${label}: Variable name is required`, 'error'); return; }
+    if (a.type === 'increment_counter' && !a.name)      { toast(`${label}: Counter name is required`, 'error'); return; }
+    if (a.type === 'influxdb_write'  && !a.url)         { toast(`${label}: InfluxDB URL is required`, 'error'); return; }
+    if (a.type === 'influxdb_write'  && !a.measurement) { toast(`${label}: Measurement is required`, 'error'); return; }
+  }
+
   const rule = {
     name,
     enabled:         document.getElementById('f-enabled').checked,
@@ -2712,23 +3242,35 @@ function renderEventLog(events) {
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted);">No events yet</td></tr>';
     return;
   }
-  tbody.innerHTML = events.map(e => {
+  tbody.innerHTML = events.map((e, idx) => {
     const d = new Date(e.timestamp * 1000);
     const time = d.toLocaleTimeString([], { hour12: false }) + ' ' +
                  d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     const badge = e.fired
       ? '<span class="badge event-badge-fired">Fired</span>'
       : `<span class="badge event-badge-blocked">${escHtml(e.block_reason || 'Blocked')}</span>`;
-    const details = e.trigger_data
-      ? `<code style="font-size:11px;color:var(--text-muted)">${escHtml(JSON.stringify(e.trigger_data).slice(0,80))}</code>`
-      : '';
-    return `<tr>
+    const detailObj = e.trigger_data || null;
+    const detailStr = detailObj ? JSON.stringify(detailObj, null, 2) : '';
+    const shortDetail = detailStr ? JSON.stringify(detailObj).slice(0, 80) + (JSON.stringify(detailObj).length > 80 ? '…' : '') : '';
+    const expandId = `log-detail-${idx}`;
+    const hasDetail = !!detailStr;
+    return `<tr style="${hasDetail ? 'cursor:pointer;' : ''}" onclick="${hasDetail ? `toggleLogDetail('${expandId}')` : ''}">
       <td style="white-space:nowrap;color:var(--text-muted)">${time}</td>
       <td>${escHtml(e.rule_name || e.rule_id)}</td>
       <td>${badge}</td>
-      <td>${details}</td>
-    </tr>`;
+      <td><code style="font-size:11px;color:var(--text-muted)">${escHtml(shortDetail)}</code>${hasDetail ? ' <span style="opacity:.4;font-size:10px;">&#9660;</span>' : ''}</td>
+    </tr>
+    ${hasDetail ? `<tr id="${expandId}" style="display:none;">
+      <td colspan="4" style="padding:8px 16px 12px;background:var(--surface);border-top:none;">
+        <pre style="font-size:11px;color:var(--text-muted);margin:0;white-space:pre-wrap;word-break:break-all;">${escHtml(detailStr)}</pre>
+      </td>
+    </tr>` : ''}`;
   }).join('');
+}
+
+function toggleLogDetail(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
 function updateLogFilter() {
@@ -2816,15 +3358,90 @@ async function loadStatus() {
 
     /* Update MQTT status badge (non-destructive — doesn't touch the form) */
     updateMqttStatusBadge(s.mqtt || {});
+    renderDeviceCapabilities();
   } catch(e) {
     toast('Failed to load status', 'error');
   }
 }
 
+function renderDeviceCapabilities() {
+  const el = document.getElementById('capabilities-card');
+  if (!el) return;
+  const rows = [];
+  const yesNo = (v, yes) => v ? `<span style="color:var(--accent-success);">${yes}</span>` : `<span style="color:var(--text-dim);">No</span>`;
+
+  /* PTZ */
+  if (ptzPresets === null) {
+    rows.push(['PTZ', '<span style="color:var(--text-dim);">Loading…</span>']);
+  } else if (!ptzPresets.length) {
+    rows.push(['PTZ', yesNo(false)]);
+  } else {
+    const total = ptzPresets.reduce((n, c) => n + c.presets.length, 0);
+    rows.push(['PTZ', `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${total} preset${total !== 1 ? 's' : ''} on ${ptzPresets.length} channel${ptzPresets.length !== 1 ? 's' : ''})</span>`]);
+  }
+
+  /* Audio Clips */
+  if (audioClips === null) {
+    rows.push(['Audio Clips', '<span style="color:var(--text-dim);">Loading…</span>']);
+  } else {
+    rows.push(['Audio Clips', audioClips.length
+      ? `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${audioClips.length} clip${audioClips.length !== 1 ? 's' : ''})</span>`
+      : yesNo(false)]);
+  }
+
+  /* Siren & Light */
+  if (sirenProfiles === null) {
+    rows.push(['Siren & Light', '<span style="color:var(--text-dim);">Loading…</span>']);
+  } else {
+    rows.push(['Siren & Light', sirenProfiles.length
+      ? `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${sirenProfiles.length} profile${sirenProfiles.length !== 1 ? 's' : ''})</span>`
+      : yesNo(false)]);
+  }
+
+  /* Privacy Masks */
+  if (privacyMasks !== null && privacyMasks.length) {
+    rows.push(['Privacy Masks', `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${privacyMasks.length})</span>`]);
+  }
+
+  /* Guard Tours */
+  if (guardTours !== null && guardTours.length) {
+    rows.push(['Guard Tours', `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${guardTours.length})</span>`]);
+  }
+
+  /* Object Analytics */
+  if (aoaScenarios === null) {
+    rows.push(['Object Analytics', '<span style="color:var(--text-dim);">Loading…</span>']);
+  } else {
+    rows.push(['Object Analytics (AOA)', aoaScenarios.length
+      ? `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${aoaScenarios.length} scenario${aoaScenarios.length !== 1 ? 's' : ''})</span>`
+      : yesNo(false)]);
+  }
+
+  /* Installed ACAPs */
+  if (acapApps !== null && acapApps.length) {
+    const apps = acapApps.map(a => escHtml(a.niceName)).join(', ');
+    rows.push(['Installed ACAPs', `<span style="font-size:11px;color:var(--text-muted);">${apps}</span>`]);
+  }
+
+  if (!rows.length) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = `
+    <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">DEVICE CAPABILITIES</h3>
+    <table style="width:100%;font-size:12px;border-collapse:collapse;">
+      ${rows.map(([k, v]) => `<tr>
+        <td style="padding:4px 0;color:var(--text-muted);width:160px;vertical-align:top;">${k}</td>
+        <td style="padding:4px 0;">${v}</td>
+      </tr>`).join('')}
+    </table>`;
+}
+
 function formatUptime(s) {
-  const h = Math.floor(s / 3600);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }
 
 /* ===================================================
@@ -2940,22 +3557,40 @@ async function loadEngineSettings() {
     engineLon = eng.longitude !== undefined ? eng.longitude : 0;
     const lat = document.getElementById('engine-lat');
     const lon = document.getElementById('engine-lon');
-    const proxy = document.getElementById('engine-proxy');
     if (lat) lat.value = engineLat;
     if (lon) lon.value = engineLon;
-    if (proxy) proxy.value = eng.socks5_proxy || '';
     refreshSolarPreview(engineLat, engineLon, 'engine-solar-preview');
   } catch(e) { /* non-fatal */ }
+}
+
+async function loadProxySettings() {
+  try {
+    const settings = await API.get('settings');
+    const eng = (settings && settings.engine) || {};
+    const proxy = document.getElementById('engine-proxy');
+    if (proxy) proxy.value = eng.socks5_proxy || '';
+  } catch(e) { /* non-fatal */ }
+}
+
+async function saveProxySettings(event) {
+  event.preventDefault();
+  const proxyEl = document.getElementById('engine-proxy');
+  const proxy = proxyEl ? proxyEl.value.trim() : '';
+  try {
+    const r = await API.post('settings', { engine: { socks5_proxy: proxy } });
+    if (!r.ok) throw new Error(await r.text());
+    toast(proxy ? 'Proxy settings saved' : 'Proxy cleared');
+  } catch(e) {
+    toast('Failed to save proxy settings: ' + e.message, 'error');
+  }
 }
 
 async function saveEngineSettings(event) {
   event.preventDefault();
   const lat = parseFloat(document.getElementById('engine-lat').value) || 0;
   const lon = parseFloat(document.getElementById('engine-lon').value) || 0;
-  const proxyEl = document.getElementById('engine-proxy');
-  const proxy = proxyEl ? proxyEl.value.trim() : '';
   try {
-    const r = await API.post('settings', { engine: { latitude: lat, longitude: lon, socks5_proxy: proxy } });
+    const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
     if (!r.ok) throw new Error(await r.text());
     engineLat = lat;
     engineLon = lon;
@@ -3162,10 +3797,25 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
   updateThemeButton(next);
+  const fav = document.getElementById('favicon');
+  if (fav) fav.href = next === 'light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
+  const appIcon = document.getElementById('app-icon');
+  if (appIcon) appIcon.src = next === 'light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
 }
 
+/* Close modal on ESC key */
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const overlay = document.getElementById('modal-overlay');
+    if (overlay && !overlay.classList.contains('hidden')) closeModal();
+  }
+});
+
 window.addEventListener('DOMContentLoaded', () => {
-  updateThemeButton(document.documentElement.getAttribute('data-theme') || 'dark');
+  const initTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+  updateThemeButton(initTheme);
+  const appIcon = document.getElementById('app-icon');
+  if (appIcon) appIcon.src = initTheme === 'light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
   loadRules();
   loadStatus();
   startPoll();

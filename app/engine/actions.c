@@ -1691,3 +1691,32 @@ void Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_d
     if (!actions_array) return;
     execute_from(rule_id, actions_array, 0, trigger_data);
 }
+
+int Actions_Test(const char* type, cJSON* config) {
+    if (!type || !config) return -1;
+    /* Only allow safe/notification action types for testing */
+    const char* testable[] = {
+        "http_request", "mqtt_publish", "slack_webhook", "teams_webhook",
+        "telegram", "email", "send_syslog", "influxdb_write", NULL
+    };
+    int allowed = 0;
+    for (int i = 0; testable[i]; i++) {
+        if (strcmp(type, testable[i]) == 0) { allowed = 1; break; }
+    }
+    if (!allowed) return -2; /* not testable */
+
+    /* Build a single-item actions array with type injected */
+    cJSON* action = cJSON_Duplicate(config, 1);
+    cJSON_DeleteItemFromObject(action, "type");
+    cJSON_AddStringToObject(action, "type", type);
+    cJSON* arr = cJSON_CreateArray();
+    cJSON_AddItemToArray(arr, action);
+
+    /* Execute with empty trigger data */
+    cJSON* td = cJSON_CreateObject();
+    cJSON_AddStringToObject(td, "type", "test");
+    execute_from(NULL, arr, 0, td);
+    cJSON_Delete(td);
+    cJSON_Delete(arr);
+    return 0;
+}

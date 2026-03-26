@@ -5,15 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Event Engine</title>
   <link rel="stylesheet" href="style.css">
-  <script>(function(){document.documentElement.setAttribute('data-theme',localStorage.getItem('theme')||'dark');})();</script>
+  <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_dark.svg">
+  <script>(function(){
+    var t=localStorage.getItem('theme')||'dark';
+    document.documentElement.setAttribute('data-theme',t);
+    document.addEventListener('DOMContentLoaded',function(){
+      var el=document.getElementById('favicon');
+      if(el) el.href = t==='light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
+    });
+  })();</script>
 </head>
 <body>
 <div id="app">
 
   <header>
-    <div>
-      <h1>Event Engine</h1>
-      <div class="subtitle" id="header-subtitle">Loading...</div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <img id="app-icon" src="event_engine_icon_dark.svg" alt="" style="width:40px;height:40px;border-radius:10px;flex-shrink:0;">
+      <div>
+        <h1>Event Engine</h1>
+        <div class="subtitle" id="header-subtitle">Loading...</div>
+      </div>
     </div>
     <button class="btn btn-ghost btn-sm btn-icon" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme" style="margin-left:auto;font-size:16px;"></button>
   </header>
@@ -31,11 +42,14 @@
     <div class="container">
       <div class="rule-list-header">
         <h2 style="font-size:15px;">Rules <span id="rule-count" style="color:var(--text-muted);font-weight:400;"></span></h2>
-        <div style="display:flex;gap:8px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="rule-search" placeholder="Search rules…" oninput="renderRules()"
+                 style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;width:160px;">
           <button class="btn btn-ghost btn-sm" onclick="exportRules()" title="Download all rules as JSON">Export</button>
           <label class="btn btn-ghost btn-sm" style="cursor:pointer;" title="Import rules from JSON file">
             Import<input type="file" accept=".json" style="display:none;" onchange="importRules(this)">
           </label>
+          <button class="btn btn-template btn-sm" id="btn-template" onclick="openTemplateModal()" title="Create a rule from a starter template">&#9881; Templates</button>
           <button class="btn btn-primary" onclick="openRuleEditor(null)">+ New Rule</button>
         </div>
       </div>
@@ -100,6 +114,7 @@
       <!-- Status -->
       <div class="status-grid" id="status-grid"></div>
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
+      <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
 
       <!-- Engine Settings -->
       <div class="card" style="margin-bottom:16px;">
@@ -120,11 +135,6 @@
             </div>
           </div>
           <div id="engine-solar-preview"></div>
-          <div class="form-group">
-            <label>SOCKS5 Proxy <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
-            <input type="text" id="engine-proxy" placeholder="e.g. localhost:1055">
-            <div class="form-hint">Route all outbound connections (HTTP actions, HTTP conditions, and MQTT) through a SOCKS5 proxy. Leave blank to connect directly. Compatible with <a href="https://github.com/Mo3he/Axis_Cam_Tailscale" target="_blank" rel="noopener" style="color:var(--accent);">Axis Tailscale ACAP</a> — set to <code>localhost:1055</code> to send all traffic over Tailscale.</div>
-          </div>
           <div style="display:flex;justify-content:flex-end;">
             <button type="submit" class="btn btn-primary">Save Engine Settings</button>
           </div>
@@ -167,6 +177,21 @@
           </div>
           <div style="display:flex;justify-content:flex-end;">
             <button type="submit" class="btn btn-primary">Save SMTP Settings</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- SOCKS5 Proxy Settings -->
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">SOCKS5 PROXY</h3>
+        <form id="proxy-form" onsubmit="saveProxySettings(event)" style="display:flex;flex-direction:column;gap:14px;">
+          <div class="form-group">
+            <label>Proxy Address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+            <input type="text" id="engine-proxy" placeholder="e.g. localhost:1055">
+            <div class="form-hint">Routes all outbound connections (HTTP actions, HTTP conditions, and MQTT) through a SOCKS5 proxy. Leave blank to connect directly. Compatible with <a href="https://github.com/Mo3he/Axis_Cam_Tailscale" target="_blank" rel="noopener" style="color:var(--accent);">Axis Tailscale ACAP</a> — set to <code>localhost:1055</code> to tunnel all traffic over Tailscale.</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="submit" class="btn btn-primary">Save Proxy Settings</button>
           </div>
         </form>
       </div>

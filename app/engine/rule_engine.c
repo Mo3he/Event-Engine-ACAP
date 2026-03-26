@@ -163,7 +163,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     if (r->cooldown > 0 && r->last_fired > 0) {
         time_t now = time(NULL);
         if ((now - r->last_fired) < r->cooldown) {
-            EventLog_Append(r->id, r->name, 0, "cooldown", trigger_data);
+            EventLog_Append(r->id, r->name, 0, "cooldown", trigger_data, 0, 0);
             pthread_mutex_unlock(&store_lock);
             return;
         }
@@ -182,14 +182,14 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
                 r->period_exec_count = 0;
             }
             if (r->period_exec_count >= r->max_executions) {
-                EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data);
+                EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data, 0, 0);
                 pthread_mutex_unlock(&store_lock);
                 return;
             }
         } else {
             /* Lifetime limit */
             if (r->execution_count >= r->max_executions) {
-                EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data);
+                EventLog_Append(r->id, r->name, 0, "max_executions", trigger_data, 0, 0);
                 pthread_mutex_unlock(&store_lock);
                 return;
             }
@@ -205,7 +205,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
          * we can re-attempt when the window reopens. */
         if (!is_refire && rule_has_time_window(r) && r->cond_window_state == 0)
             r->trigger_pending = 1;
-        EventLog_Append(r->id, r->name, 0, "condition", trigger_data);
+        EventLog_Append(r->id, r->name, 0, "condition", trigger_data, 0, 0);
         pthread_mutex_unlock(&store_lock);
         return;
     }
@@ -221,7 +221,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     cJSON* trigger_dup = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
     pthread_mutex_unlock(&store_lock);
 
-    EventLog_Append(rid_copy, rname_copy, 1, NULL, trigger_data);
+    EventLog_Append(rid_copy, rname_copy, 1, NULL, trigger_data, 0, 0);
     cJSON* fired_data = cJSON_CreateObject();
     cJSON_AddStringToObject(fired_data, "rule_id",   rid_copy);
     cJSON_AddStringToObject(fired_data, "rule_name", rname_copy);
@@ -583,7 +583,7 @@ int RuleEngine_Fire(const char* id, cJSON* trigger_data) {
     pthread_mutex_unlock(&store_lock);
 
     cJSON* tdata = trigger_data ? trigger_data : cJSON_CreateObject();
-    EventLog_Append(rid, rname, 1, "manual", tdata);
+    EventLog_Append(rid, rname, 1, "manual", tdata, 0, 0);
     Actions_Execute(rid, actions_dup, tdata);
     if (!trigger_data) cJSON_Delete(tdata);
     cJSON_Delete(actions_dup);

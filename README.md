@@ -1,5 +1,7 @@
 # Event Engine - ACAP for Axis Cameras
 
+<img src="event_engine_icon_dark.svg" alt="Event Engine" width="72" align="right">
+
 A powerful IFTTT (If This Then That)-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
 
 Download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface

@@ -42,6 +42,7 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 #define TRIG_RULE_FIRED        5
 #define TRIG_MQTT_MESSAGE      6
 #define TRIG_AOA_SCENARIO      7
+#define TRIG_MANUAL            8
 
 typedef struct {
     int    type;
@@ -347,6 +348,10 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             cJSON_Delete(decl);
             s->acap_subscription_id = sub_id;
             if (!sub_id) LOG_WARN("AOA subscribe failed for rule %s scenario %d", rule_id, s->aoa_scenario_id);
+
+        } else if (strcmp(type, "manual") == 0) {
+            /* Manual trigger — no subscription; fires only via the HTTP fire endpoint */
+            s->type = TRIG_MANUAL;
 
         } else {
             LOG_WARN("unknown trigger type '%s' for rule %s", type, rule_id);
@@ -725,6 +730,12 @@ cJSON* Triggers_Catalog(void) {
     cJSON_AddStringToObject(t, "type", "aoa_scenario");
     cJSON_AddStringToObject(t, "label", "Object Analytics");
     cJSON_AddStringToObject(t, "description", "Fires when an Axis Object Analytics scenario is triggered");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "manual");
+    cJSON_AddStringToObject(t, "label", "Manual");
+    cJSON_AddStringToObject(t, "description", "No automatic trigger — fires only via the Fire button or POST /fire API");
     cJSON_AddItemToArray(arr, t);
 
     return arr;

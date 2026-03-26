@@ -38,6 +38,11 @@ static gboolean Engine_Tick(gpointer user_data) {
     (void)user_data;
     RuleEngine_Tick();
     Actions_Digest_Tick();
+    static int persist_counter = 0;
+    if (++persist_counter >= 60) {
+        persist_counter = 0;
+        EventLog_Persist();
+    }
     return G_SOURCE_CONTINUE;
 }
 
@@ -270,8 +275,36 @@ static void HTTP_Triggers(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) 
 /*=====================================================
  * GET /local/acap_event_engine/actions
  * Returns catalog of available action types
+ * POST /local/acap_event_engine/actions
+ * Test a single action without saving a rule
  *=====================================================*/
 static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    const char* method = get_method(req);
+
+    if (strcmp(method, "POST") == 0) {
+        cJSON* body = get_body_json(req);
+        if (!body) { ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON"); return; }
+
+        const char* type   = cJSON_GetStringValue(cJSON_GetObjectItem(body, "type"));
+        cJSON*      config = cJSON_GetObjectItem(body, "config");
+
+        if (!type || !config) {
+            cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, "Missing 'type' or 'config'");
+            return;
+        }
+
+        int ok = Actions_Test(type, config);
+        cJSON_Delete(body);
+
+        cJSON* result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "success", ok == 0);
+        if (ok != 0) cJSON_AddStringToObject(result, "error", "Action failed — check syslog for details");
+        ACAP_HTTP_Respond_JSON(resp, result);
+        cJSON_Delete(result);
+        return;
+    }
+
     (void)req;
     cJSON* arr = cJSON_CreateArray();
 
@@ -355,7 +388,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
-    cJSON_AddStringToObject(obj, "engine_version", "1.7.2");
+    cJSON_AddStringToObject(obj, "engine_version", "1.7.3");
 
     cJSON* mqtt_st = MQTT_Status();
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);
@@ -540,6 +573,7 @@ int main(void) {
     /* Initialize subsystems */
     Variables_Init();
     EventLog_Init();
+    EventLog_Load();
 
     /* MQTT — must init before RuleEngine so subscriptions can be set up */
     {
