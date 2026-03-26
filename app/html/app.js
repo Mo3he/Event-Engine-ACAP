@@ -3798,9 +3798,9 @@ function toggleTheme() {
   localStorage.setItem('theme', next);
   updateThemeButton(next);
   const fav = document.getElementById('favicon');
-  if (fav) fav.href = next === 'light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
+  if (fav) fav.href = next === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
   const appIcon = document.getElementById('app-icon');
-  if (appIcon) appIcon.src = next === 'light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
+  if (appIcon) appIcon.src = next === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
 }
 
 /* Close modal on ESC key */
@@ -3815,7 +3815,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const initTheme = document.documentElement.getAttribute('data-theme') || 'dark';
   updateThemeButton(initTheme);
   const appIcon = document.getElementById('app-icon');
-  if (appIcon) appIcon.src = initTheme === 'light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
+  if (appIcon) appIcon.src = initTheme === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
   loadRules();
   loadStatus();
   startPoll();

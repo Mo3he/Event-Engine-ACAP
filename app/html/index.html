@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Event Engine</title>
   <link rel="stylesheet" href="style.css">
-  <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_dark.svg">
+  <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_light.svg">
   <script>(function(){
     var t=localStorage.getItem('theme')||'dark';
     document.documentElement.setAttribute('data-theme',t);
     document.addEventListener('DOMContentLoaded',function(){
       var el=document.getElementById('favicon');
-      if(el) el.href = t==='light' ? 'event_engine_icon_light.svg' : 'event_engine_icon_dark.svg';
+      if(el) el.href = t==='light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
     });
   })();</script>
 </head>
@@ -20,7 +20,7 @@
 
   <header>
     <div style="display:flex;align-items:center;gap:12px;">
-      <img id="app-icon" src="event_engine_icon_dark.svg" alt="" style="width:40px;height:40px;border-radius:10px;flex-shrink:0;">
+      <img id="app-icon" src="event_engine_icon_light.svg" alt="" style="width:40px;height:40px;border-radius:10px;flex-shrink:0;">
       <div>
         <h1>Event Engine</h1>
         <div class="subtitle" id="header-subtitle">Loading...</div>
