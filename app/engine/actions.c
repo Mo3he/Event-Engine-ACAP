@@ -306,12 +306,36 @@ static char* base64_wrap_lines(const char* b64, size_t line_len) {
     return out;
 }
 
+/* Some cameras can return a black first JPEG when the imaging pipeline is idle.
+ * Warm up by grabbing one frame, then return the next frame for use in actions. */
+static char* capture_snapshot_jpeg_warm(size_t* out_len) {
+    if (out_len) *out_len = 0;
+
+    size_t warm_len = 0;
+    char* warm = ACAP_VAPIX_GetBinary("jpg/image.cgi", &warm_len);
+    if (warm && warm_len > 0) {
+        free(warm);
+        g_usleep(120000); /* 120 ms */
+    } else {
+        free(warm);
+    }
+
+    size_t snap_len = 0;
+    char* snap = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+    if (!snap || snap_len == 0) {
+        free(snap);
+        return NULL;
+    }
+    if (out_len) *out_len = snap_len;
+    return snap;
+}
+
 static cJSON* build_trigger_data_with_snapshot(cJSON* cfg, cJSON* trigger_data) {
     cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
     if (!snap_j || !cJSON_IsTrue(snap_j)) return NULL;
 
     size_t snap_len = 0;
-    char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+    char* snap_raw = capture_snapshot_jpeg_warm(&snap_len);
     if (!snap_raw || snap_len == 0) {
         free(snap_raw);
         return NULL;
@@ -343,7 +367,7 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     cJSON* td_with_snap = NULL; /* extended trigger_data that includes snapshot_base64 */
     if (snap_j && cJSON_IsTrue(snap_j)) {
         size_t snap_len = 0;
-        char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+        char* snap_raw = capture_snapshot_jpeg_warm(&snap_len);
         if (snap_raw && snap_len > 0) {
             snap_b64 = base64_encode((unsigned char*)snap_raw, snap_len);
             free(snap_raw);
@@ -1000,7 +1024,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     cJSON* td_with_snap = NULL;
     if (attach_snapshot) {
         size_t snap_len = 0;
-        char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+        char* snap_raw = capture_snapshot_jpeg_warm(&snap_len);
         if (snap_raw && snap_len > 0) {
             snap_b64 = base64_encode((unsigned char*)snap_raw, snap_len);
             free(snap_raw);
@@ -1167,7 +1191,7 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
 
     if (attach_snapshot) {
         size_t snap_len = 0;
-        char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+        char* snap_raw = capture_snapshot_jpeg_warm(&snap_len);
         if (snap_raw && snap_len > 0) {
             char url[512];
             snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendPhoto", bot_token);
@@ -1250,7 +1274,7 @@ static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
 
     /* Fetch JPEG snapshot */
     size_t snap_len = 0;
-    char* snap = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+    char* snap = capture_snapshot_jpeg_warm(&snap_len);
     if (!snap || snap_len == 0) {
         LOG_WARN("ftp_upload: failed to capture snapshot");
         free(url); free(snap);
