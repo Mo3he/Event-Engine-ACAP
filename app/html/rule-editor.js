@@ -1155,6 +1155,13 @@ function actionFields(a) {
       </div>
     </div>
     ${recStart ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Stream Profile</label>
+        <input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Quality">
+        <div class="form-hint">Name of the stream profile configured on the camera. Defaults to Quality if left blank.</div>
+      </div>
+    </div>
     <div class="form-row"><div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
@@ -2178,7 +2185,7 @@ function normalizeCondition(c) {
 function normalizeAction(a) {
   const out = { type: a.type };
   const pass = ['url','method','headers','body','username','password','operation','duration','text','channel',
-                 'preset','port','state','clip_name','message','level','event_id',
+                 'preset','port','state','clip_name','message','level','event_id','profile',
                  'seconds','name','value','delta','rule_id','cron','interval_seconds',
                  'schedule_type','time','counter_name','op','token','edge',
                  'topic','payload','qos','position','text_color',
