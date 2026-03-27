@@ -743,6 +743,8 @@ function renderEventLog(events) {
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted);">No events yet</td></tr>';
     return;
   }
+  /* Sort by timestamp descending (newest first) to ensure chronological order */
+  events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   tbody.innerHTML = events.map((e, idx) => {
     const d = new Date(e.timestamp * 1000);
     const time = d.toLocaleTimeString([], { hour12: false }) + ' ' +
