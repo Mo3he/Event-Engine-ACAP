@@ -432,9 +432,17 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
 
         /* IO edge filter + hold duration */
         if (s->type == TRIG_IO_INPUT) {
+            /* Filter by port number (if specified) */
+            if (s->io_port > 0) {
+                cJSON* port_j = cJSON_GetObjectItem(event, "port");
+                int event_port = port_j && cJSON_IsNumber(port_j) ? (int)port_j->valuedouble : -1;
+                if (event_port != s->io_port) continue; /* port mismatch — skip this event */
+            }
+
             cJSON* st = cJSON_GetObjectItem(event, "state");
             int active = st ? (cJSON_IsTrue(st) ? 1 : 0) : -1;
-            if (active >= 0) s->io_last_state = active;
+            /* NOTE: io_last_state is currently unused; commented out to avoid dead code */
+            /* if (active >= 0) s->io_last_state = active; */
 
             /* Check edge match */
             int edge_matches = 1;

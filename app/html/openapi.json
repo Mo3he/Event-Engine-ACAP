@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an IFTTT-style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | ISO 8601 UTC timestamp |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n",
-    "version": "1.8.5",
+    "version": "1.8.6",
     "contact": {
       "url": "https://github.com/Mo3he"
     }
@@ -49,7 +49,12 @@
             "type": "string",
             "enum": ["OR", "AND"],
             "default": "OR",
-            "description": "How multiple triggers are combined"
+            "description": "How multiple triggers are combined. AND = all triggers must fire within trigger_window seconds."
+          },
+          "trigger_window": {
+            "type": "integer",
+            "default": 0,
+            "description": "AND correlation window in seconds. When trigger_logic is AND, all triggers must fire within this period. 0 = no time limit (all must fire at least once)."
           },
           "condition_logic": {
             "type": "string",
@@ -985,7 +990,7 @@
           "rule_name": { "type": "string" },
           "result": {
             "type": "string",
-            "enum": ["ok", "condition_failed", "error", "cooldown", "max_executions"]
+            "enum": ["ok", "condition_failed", "error", "cooldown", "max_executions", "trigger_and_pending"]
           },
           "detail": { "type": "string" }
         }

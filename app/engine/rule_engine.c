@@ -20,6 +20,7 @@
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "rule_engine: " fmt, ## args)
 
 #define MAX_RULES 256
+#define MAX_TRIGGERS_PER_RULE 16
 
 typedef struct {
     char    id[37];
@@ -33,6 +34,8 @@ typedef struct {
     int     cooldown;
     int     max_executions;
     char    max_exec_period[8]; /* "minute", "hour", "day", or "" = lifetime */
+    int     trigger_window;   /* AND correlation window in seconds; 0 = no time limit */
+    int     trigger_count;    /* number of triggers in this rule */
     /* runtime state */
     time_t  last_fired;
     int     execution_count;
@@ -43,6 +46,8 @@ typedef struct {
     /* set when a real trigger fired but was blocked by a time_window condition;
      * cleared when the rule actually fires or when a new rule load resets state */
     int     trigger_pending;
+    /* AND correlation: per-trigger last-fire timestamps */
+    time_t  trigger_fired_at[MAX_TRIGGERS_PER_RULE];
 } Rule;
 
 static Rule            rules[MAX_RULES];
@@ -90,6 +95,7 @@ static void rules_save_locked(void) {
         cJSON_AddNumberToObject(obj, "cooldown",        r->cooldown);
         cJSON_AddNumberToObject(obj, "max_executions",  r->max_executions);
         if (r->max_exec_period[0]) cJSON_AddStringToObject(obj, "max_exec_period", r->max_exec_period);
+        if (r->trigger_window > 0) cJSON_AddNumberToObject(obj, "trigger_window", r->trigger_window);
         cJSON_AddItemToArray(arr, obj);
     }
     ACAP_FILE_Write("localdata/rules.json", arr);
@@ -126,12 +132,20 @@ static void rule_from_json(Rule* r, cJSON* obj) {
     const char* mxp = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "max_exec_period"));
     snprintf(r->max_exec_period, sizeof(r->max_exec_period), "%s", mxp ? mxp : "");
 
+    cJSON* tw = cJSON_GetObjectItem(obj, "trigger_window");
+    r->trigger_window = tw ? (int)tw->valuedouble : 0;
+
+    /* Compute trigger count from triggers array (capped at MAX_TRIGGERS_PER_RULE) */
+    int tc = r->triggers_json ? cJSON_GetArraySize(r->triggers_json) : 0;
+    r->trigger_count = (tc > MAX_TRIGGERS_PER_RULE) ? MAX_TRIGGERS_PER_RULE : tc;
+
     r->last_fired        = 0;
     r->execution_count   = 0;
     r->period_exec_count = 0;
     r->period_start      = 0;
     r->cond_window_state = -1;
     r->trigger_pending   = 0;
+    memset(r->trigger_fired_at, 0, sizeof(r->trigger_fired_at));
 }
 
 static void rule_free_json(Rule* r) {
@@ -158,8 +172,6 @@ static int rule_has_time_window(Rule* r) {
  * Called on GMainLoop thread.
  *-----------------------------------------------------*/
 static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trigger_data) {
-    (void)trigger_index;
-
     pthread_mutex_lock(&store_lock);
     Rule* r = NULL;
     for (int i = 0; i < rule_count; i++) {
@@ -168,6 +180,27 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     if (!r || !r->enabled) {
         pthread_mutex_unlock(&store_lock);
         return;
+    }
+
+    /* AND correlation — all triggers must fire within trigger_window seconds */
+    if (r->trigger_logic == 1 && r->trigger_count > 1) {
+        time_t now = time(NULL);
+        if (trigger_index >= 0 && trigger_index < r->trigger_count)
+            r->trigger_fired_at[trigger_index] = now;
+
+        int all_fired = 1;
+        for (int i = 0; i < r->trigger_count; i++) {
+            if (r->trigger_fired_at[i] == 0) { all_fired = 0; break; }
+            if (r->trigger_window > 0 &&
+                (now - r->trigger_fired_at[i]) > r->trigger_window) {
+                all_fired = 0; break;
+            }
+        }
+        if (!all_fired) {
+            EventLog_Append(r->id, r->name, 0, "trigger_and_pending", trigger_data, 0, 0);
+            pthread_mutex_unlock(&store_lock);
+            return;
+        }
     }
 
     /* Cooldown check */
@@ -223,6 +256,8 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
 
     /* Execute */
     r->trigger_pending = 0;
+    if (r->trigger_logic == 1)
+        memset(r->trigger_fired_at, 0, sizeof(r->trigger_fired_at));
     r->last_fired = time(NULL);
     r->execution_count++;
     if (r->max_exec_period[0]) r->period_exec_count++;
@@ -410,6 +445,7 @@ cJSON* RuleEngine_Get(const char* id) {
             cJSON_AddNumberToObject(result, "cooldown",        r->cooldown);
             cJSON_AddNumberToObject(result, "max_executions",  r->max_executions);
             if (r->max_exec_period[0]) cJSON_AddStringToObject(result, "max_exec_period", r->max_exec_period);
+            if (r->trigger_window > 0) cJSON_AddNumberToObject(result, "trigger_window", r->trigger_window);
             cJSON_AddNumberToObject(result, "execution_count", r->execution_count);
             cJSON_AddNumberToObject(result, "last_fired",      (double)r->last_fired);
             break;

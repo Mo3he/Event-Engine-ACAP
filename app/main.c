@@ -129,6 +129,12 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         return 0;
     }
 
+    cJSON* trigger_window = cJSON_GetObjectItem(rule_json, "trigger_window");
+    if (trigger_window && (!cJSON_IsNumber(trigger_window) || trigger_window->valuedouble < 0)) {
+        snprintf(error, error_size, "'trigger_window' must be a non-negative number (seconds)");
+        return 0;
+    }
+
     cJSON* max_executions = cJSON_GetObjectItem(rule_json, "max_executions");
     if (max_executions && (!cJSON_IsNumber(max_executions) || max_executions->valuedouble < 0)) {
         snprintf(error, error_size, "'max_executions' must be a non-negative number");

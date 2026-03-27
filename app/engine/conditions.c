@@ -340,7 +340,8 @@ static int cond_aoa_occupancy(cJSON* cfg) {
  *-----------------------------------------------------*/
 
 static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSON* trigger_data, int skip_expensive) {
-    (void)trigger_data;
+    /* NOTE: trigger_data is currently unused but available for future enhancements
+     * (e.g., condition: "fire only if trigger value > 30") */
     if (!conditions_array || cJSON_GetArraySize(conditions_array) == 0)
         return 1; /* no conditions → always pass */
 

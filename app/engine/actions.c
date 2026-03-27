@@ -620,6 +620,9 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
     free(text);
     if (identity >= 0) {
         cJSON_AddNumberToObject(params, "identity", identity);
+        /* Send position and textColor on setText too — the overlay may be cleared and need repositioning */
+        cJSON_AddStringToObject(params, "position",   position);
+        cJSON_AddStringToObject(params, "textColor",  text_color);
     } else {
         cJSON_AddStringToObject(params, "position",   position);
         cJSON_AddStringToObject(params, "textColor",  text_color);
@@ -784,6 +787,8 @@ static void action_increment_counter(cJSON* cfg) {
         Counter_Reset(name);
     else if (op && strcmp(op, "set") == 0)
         Counter_Set(name, delta);
+    else if (op && strcmp(op, "decrement") == 0)
+        Counter_Increment(name, -delta);
     else
         Counter_Increment(name, delta);
 }
@@ -901,6 +906,10 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     cJSON_AddStringToObject(card, "type", "AdaptiveCard");
     cJSON_AddStringToObject(card, "version", "1.4");
     cJSON_AddItemToObject(card, "body", card_body);
+
+    const char* theme_color = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "theme_color"));
+    if (theme_color && theme_color[0])
+        cJSON_AddStringToObject(card, "accentColor", theme_color);
 
     cJSON* attachment = cJSON_CreateObject();
     cJSON_AddStringToObject(attachment, "contentType", "application/vnd.microsoft.card.adaptive");
@@ -1429,6 +1438,10 @@ static void action_vapix_query(cJSON* cfg, cJSON* trigger_data) {
 static void action_guard_tour(cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     int starting = (!op || strcmp(op, "stop") != 0);
+
+    /* Parse channel field if present (unused; documented as VAPIX limitation) */
+    cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
+    if (ch_j) LOG_WARN("guard_tour: 'channel' field is stored but not implemented (all tours are global)");
 
     const char* tour_name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tour_id"));
     if (starting && (!tour_name || !tour_name[0])) {
