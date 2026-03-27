@@ -308,26 +308,70 @@ static char* base64_wrap_lines(const char* b64, size_t line_len) {
 
 /* Some cameras can return a black first JPEG when the imaging pipeline is idle.
  * Warm up by grabbing one frame, then return the next frame for use in actions. */
-static char* capture_snapshot_jpeg_warm(size_t* out_len) {
+static char* capture_snapshot_jpeg_warm_channel(int channel, size_t* out_len) {
     if (out_len) *out_len = 0;
 
-    size_t warm_len = 0;
-    char* warm = ACAP_VAPIX_GetBinary("jpg/image.cgi", &warm_len);
-    if (warm && warm_len > 0) {
-        free(warm);
-        g_usleep(120000); /* 120 ms */
-    } else {
-        free(warm);
+    /* Some models (including door stations) may return low-detail/black frames
+     * during warm-up. Capture a short burst and keep the most data-rich frame
+     * (largest JPEG payload) instead of the last frame. */
+    const int attempts = 6;
+    const int delay_us = 200000; /* 200 ms */
+    char* best = NULL;
+    size_t best_len = 0;
+
+    for (int i = 0; i < attempts; i++) {
+        char endpoint[128];
+        snprintf(endpoint, sizeof(endpoint), "jpg/image.cgi?camera=%d&_=%lld", channel,
+                 (long long)(g_get_real_time() + i));
+        size_t snap_len = 0;
+        char* snap = ACAP_VAPIX_GetBinary(endpoint, &snap_len);
+        if (snap && snap_len > 0) {
+            if (!best || snap_len > best_len) {
+                free(best);
+                best = snap;
+                best_len = snap_len;
+            } else {
+                free(snap);
+            }
+        } else {
+            free(snap);
+        }
+        if (best_len > 60000 && i >= 1) break;
+        if (i < attempts - 1) g_usleep(delay_us);
     }
 
-    size_t snap_len = 0;
-    char* snap = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
-    if (!snap || snap_len == 0) {
-        free(snap);
+    if (!best) {
+        for (int i = 0; i < 2; i++) {
+            char endpoint[96];
+            snprintf(endpoint, sizeof(endpoint), "jpg/image.cgi?_=%lld",
+                     (long long)(g_get_real_time() + i));
+            size_t snap_len = 0;
+            char* snap = ACAP_VAPIX_GetBinary(endpoint, &snap_len);
+            if (snap && snap_len > 0) {
+                if (!best || snap_len > best_len) {
+                    free(best);
+                    best = snap;
+                    best_len = snap_len;
+                } else {
+                    free(snap);
+                }
+            } else {
+                free(snap);
+            }
+            if (i < 1) g_usleep(delay_us);
+        }
+    }
+
+    if (!best || best_len == 0) {
+        free(best);
         return NULL;
     }
-    if (out_len) *out_len = snap_len;
-    return snap;
+    if (out_len) *out_len = best_len;
+    return best;
+}
+
+static char* capture_snapshot_jpeg_warm(size_t* out_len) {
+    return capture_snapshot_jpeg_warm_channel(1, out_len);
 }
 
 static cJSON* build_trigger_data_with_snapshot(cJSON* cfg, cJSON* trigger_data) {
@@ -1456,10 +1500,8 @@ static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
     cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
     int channel = ch_j ? (int)ch_j->valuedouble : 1;
 
-    char endpoint[64];
-    snprintf(endpoint, sizeof(endpoint), "jpg/image.cgi?camera=%d", channel);
     size_t snap_len = 0;
-    char* snap_raw = ACAP_VAPIX_GetBinary(endpoint, &snap_len);
+    char* snap_raw = capture_snapshot_jpeg_warm_channel(channel, &snap_len);
     if (!snap_raw || snap_len == 0) {
         LOG_WARN("snapshot_upload: failed to capture snapshot");
         if (snap_raw) free(snap_raw);
