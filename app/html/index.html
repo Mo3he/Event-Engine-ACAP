@@ -7,13 +7,32 @@
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_light.svg">
   <script>(function(){
-    var t=localStorage.getItem('theme')||'dark';
+    var t=localStorage.getItem('theme')||'light';
     document.documentElement.setAttribute('data-theme',t);
     document.addEventListener('DOMContentLoaded',function(){
       var el=document.getElementById('favicon');
       if(el) el.href = t==='light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
     });
   })();</script>
+  <script>
+    window.__appBooted = false;
+    window.__scriptLoadError = function(name) {
+      var s = document.getElementById('header-subtitle');
+      if (s) s.textContent = 'Failed to load ' + name;
+      var d = document.createElement('div');
+      d.style.cssText = 'position:fixed;left:12px;right:12px;top:64px;z-index:1200;background:#fff1f1;border:1px solid #d34a4a;color:#7a1818;padding:10px 12px;border-radius:6px;font:12px/1.4 sans-serif';
+      d.textContent = 'Script load error: ' + name;
+      document.body.appendChild(d);
+    };
+    window.addEventListener('DOMContentLoaded', function() {
+      setTimeout(function() {
+        if (!window.__appBooted) {
+          var s = document.getElementById('header-subtitle');
+          if (s && s.textContent === 'Loading...') s.textContent = 'JavaScript startup failed';
+        }
+      }, 1500);
+    });
+  </script>
 </head>
 <body>
 <div id="app">
@@ -49,7 +68,7 @@
           <label class="btn btn-ghost btn-sm" style="cursor:pointer;" title="Import rules from JSON file">
             Import<input type="file" accept=".json" style="display:none;" onchange="importRules(this)">
           </label>
-          <button class="btn btn-template btn-sm" id="btn-template" onclick="openTemplateModal()" title="Create a rule from a starter template">&#9881; Templates</button>
+          <button class="btn btn-template btn-sm" id="btn-template" onclick="openTemplateModal()" title="Create a rule from a starter template"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M438-240q33 0 56.5-23.5T518-320q0-33-23.5-56.5T438-400q-33 0-56.5 23.5T358-320q0 33 23.5 56.5T438-240Zm0-120q33 0 56.5-23.5T518-440q0-33-23.5-56.5T438-520q-33 0-56.5 23.5T358-440q0 33 23.5 56.5T438-360Zm0-120q33 0 56.5-23.5T518-560q0-33-23.5-56.5T438-640q-33 0-56.5 23.5T358-560q0 33 23.5 56.5T438-480Zm242 240q33 0 56.5-23.5T760-320q0-33-23.5-56.5T680-400q-33 0-56.5 23.5T600-320q0 33 23.5 56.5T680-240Zm0-120q33 0 56.5-23.5T760-440q0-33-23.5-56.5T680-520q-33 0-56.5 23.5T600-440q0 33 23.5 56.5T680-360Zm0-120q33 0 56.5-23.5T760-560q0-33-23.5-56.5T680-640q-33 0-56.5 23.5T600-560q0 33 23.5 56.5T680-480ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h440v80H200v560h560v-440h80v440q0 33-23.5 56.5T760-120H200Z"/></svg> Templates</button>
           <button class="btn btn-primary" onclick="openRuleEditor(null)">+ New Rule</button>
         </div>
       </div>
@@ -155,6 +174,15 @@
             <div class="form-group" style="flex:0 0 130px;">
               <label>Keepalive (seconds)</label>
               <input type="number" name="keepalive" value="60" min="0">
+            </div>
+            <div class="form-group" style="flex:0 0 auto;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
+                <span style="font-size:13px;">Use TLS</span>
+                <label class="toggle">
+                  <input type="checkbox" name="use_tls">
+                  <span class="toggle-slider"></span>
+                </label>
+              </label>
             </div>
             <div class="form-group" style="flex:0 0 auto;">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
@@ -295,6 +323,10 @@
 <!-- ===== Toast Container ===== -->
 <div class="toast-container" id="toast-container"></div>
 
-<script src="app.js"></script>
+<script src="api.js" onerror="__scriptLoadError('api.js')"></script>
+<script src="app.js" onerror="__scriptLoadError('app.js')"></script>
+<script src="device-capabilities.js" onerror="__scriptLoadError('device-capabilities.js')"></script>
+<script src="settings.js" onerror="__scriptLoadError('settings.js')"></script>
+<script src="rule-editor.js" onerror="__scriptLoadError('rule-editor.js')"></script>
 </body>
 </html>

@@ -172,12 +172,12 @@ Camera {{camera.serial}} at {{timestamp}}: {{trigger_json}}
 
 ## MQTT
 
-The built-in MQTT client supports MQTT 3.1.1 over raw POSIX sockets (no external library). Features:
+The built-in MQTT client supports MQTT 3.1.1 with the following features:
 
 - QoS 0 and QoS 1 publish
 - Wildcard topic subscriptions (`+` and `#`)
 - Automatic reconnect with exponential backoff
-- TLS support
+- **TLS/SSL encryption** for secure broker connections
 - Password stored separately from the API response and never exposed via GET
 
 Configure broker, port, credentials, client ID, and a base topic in the **MQTT** tab.
@@ -211,7 +211,7 @@ Download the latest `.eap` from [Releases](../../releases) and install via the c
    
    - `aarch64` — newer Axis cameras (ARTPEC-8, most cameras from 2020+)
    - `armv7hf` — older Axis cameras (ARTPEC-6/7)
-4. Start the app
+3. Start the app
 
 If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
 
@@ -233,7 +233,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET / POST / DELETE | `/rules` | Rule CRUD - POST without `id` creates, POST with `?id=` updates |
+| GET / POST / DELETE | `/rules` | Rule CRUD - POST without `id` creates, POST with `?id=` updates, GET with `?id=<id>&action=export` downloads rule as JSON |
 | POST | `/fire` | Fire a rule manually or via webhook token (viewer credentials) |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET | `/actions` | Available action types and their schemas |
@@ -241,7 +241,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 | GET | `/events` | Event log (most recent rule firings) |
 | GET | `/engine` | Engine status, MQTT status, device info |
 | GET | `/aoa` | List configured Axis Object Analytics scenarios (id, name, type) |
-| GET / POST | `/settings` | Engine and MQTT configuration |
+| GET / POST | `/settings` | Engine, MQTT, SMTP, and device configuration |
 
 Full spec: `app/html/openapi.json`
 Interactive docs: `http://<camera-ip>/local/acap_event_engine/swagger.html`
@@ -261,7 +261,7 @@ curl -u viewer:pass -X POST \
 
 ## Persistence
 
-Rules and settings are stored in `localdata/` on the camera and survive in-place application updates. To preserve data across a full uninstall/reinstall, use the **Export** buttons in the Status tab to download your rules and settings as JSON files before uninstalling.
+Rules and settings are stored in `localdata/` on the camera and survive in-place application updates. To preserve data across a full uninstall/reinstall, use the **Export** buttons in the Settings tab to download your rules and settings as JSON files before uninstalling.
 
 ---
 
@@ -285,8 +285,12 @@ app/
 │   └── event_log.c         # In-memory ring-buffer event log
 ├── html/
 │   ├── index.html          # Web UI shell
-│   ├── app.js              # UI logic
-│   ├── style.css           # Dark theme
+│   ├── api.js              # API client layer
+│   ├── app.js              # Main UI logic and event dispatcher
+│   ├── device-capabilities.js # Camera capability detection (PTZ, audio, AOA, etc.)
+│   ├── settings.js         # Settings tab and device integration
+│   ├── rule-editor.js      # Full rule editor with 2200+ lines
+│   ├── style.css           # Light and dark theme
 │   ├── swagger.html        # Swagger UI
 │   └── openapi.json        # OpenAPI 3.0 spec
 └── settings/

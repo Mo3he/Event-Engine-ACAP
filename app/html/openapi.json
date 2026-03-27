@@ -911,7 +911,7 @@
           "rules_enabled":  { "type": "integer" },
           "events_today":   { "type": "integer" },
           "time":           { "type": "string", "format": "date-time" },
-          "engine_version": { "type": "string", "example": "1.6.0" },
+          "engine_version": { "type": "string", "example": "1.8.0" },
           "mqtt": {
             "type": "object",
             "properties": {
@@ -965,7 +965,8 @@
               "client_id": { "type": "string", "default": "acap_event_engine" },
               "username":  { "type": "string" },
               "password":  { "type": "string", "format": "password", "description": "Write-only. Never returned in GET responses." },
-              "keepalive": { "type": "integer", "default": 60 }
+              "keepalive": { "type": "integer", "default": 60 },
+              "use_tls":   { "type": "boolean", "default": false, "description": "Enable TLS for the broker connection." }
             }
           }
         }
@@ -1452,7 +1453,8 @@
                       "client_id": "axis-cam-01",
                       "username": "camuser",
                       "password": "secret",
-                      "keepalive": 60
+                      "keepalive": 60,
+                      "use_tls": true
                     }
                   }
                 }

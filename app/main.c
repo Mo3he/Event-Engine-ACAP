@@ -23,6 +23,139 @@
 
 static GMainLoop* main_loop = NULL;
 
+static int string_in_list(const char* value, const char* const* list) {
+    if (!value) return 0;
+    for (int i = 0; list[i]; i++) {
+        if (strcmp(value, list[i]) == 0) return 1;
+    }
+    return 0;
+}
+
+static int validate_rule_steps(const char* label, cJSON* arr,
+                               const char* const* allowed_types,
+                               int required, char* error, size_t error_size) {
+    if (!arr) {
+        if (required) snprintf(error, error_size, "Missing '%s' array", label);
+        return required ? 0 : 1;
+    }
+    if (!cJSON_IsArray(arr)) {
+        snprintf(error, error_size, "'%s' must be an array", label);
+        return 0;
+    }
+    int count = cJSON_GetArraySize(arr);
+    if (required && count <= 0) {
+        snprintf(error, error_size, "'%s' must not be empty", label);
+        return 0;
+    }
+    cJSON* item;
+    int idx = 0;
+    cJSON_ArrayForEach(item, arr) {
+        if (!cJSON_IsObject(item)) {
+            snprintf(error, error_size, "%s %d must be an object", label, idx + 1);
+            return 0;
+        }
+        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(item, "type"));
+        if (!type || !type[0]) {
+            snprintf(error, error_size, "%s %d is missing 'type'", label, idx + 1);
+            return 0;
+        }
+        if (!string_in_list(type, allowed_types)) {
+            snprintf(error, error_size, "%s %d has unknown type '%s'", label, idx + 1, type);
+            return 0;
+        }
+        idx++;
+    }
+    return 1;
+}
+
+static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) {
+    static const char* const trigger_types[] = {
+        "vapix_event", "schedule", "mqtt_message", "http_webhook", "io_input",
+        "counter_threshold", "rule_fired", "aoa_scenario", "manual", NULL
+    };
+    static const char* const condition_types[] = {
+        "time_window", "io_state", "counter", "variable_compare", "http_check",
+        "aoa_occupancy", "day_night", "vapix_event_state", NULL
+    };
+    static const char* const action_types[] = {
+        "http_request", "mqtt_publish", "slack_webhook", "teams_webhook", "telegram",
+        "email", "snapshot_upload", "ftp_upload", "send_syslog", "recording",
+        "overlay_text", "ptz_preset", "guard_tour", "ir_cut_filter", "privacy_mask",
+        "wiper", "light_control", "audio_clip", "siren_light", "io_output", "digest",
+        "delay", "set_variable", "increment_counter", "run_rule", "fire_vapix_event",
+        "vapix_query", "set_device_param", "acap_control", "influxdb_write", "aoa_get_counts",
+        NULL
+    };
+    static const char* const trigger_logic_values[] = {"OR", "AND", NULL};
+    static const char* const condition_logic_values[] = {"AND", "OR", NULL};
+    static const char* const max_exec_period_values[] = {"", "minute", "hour", "day", NULL};
+
+    if (!rule_json || !cJSON_IsObject(rule_json)) {
+        snprintf(error, error_size, "Rule payload must be a JSON object");
+        return 0;
+    }
+
+    const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "name"));
+    if (!name || !name[0]) {
+        snprintf(error, error_size, "Rule name is required");
+        return 0;
+    }
+
+    cJSON* enabled = cJSON_GetObjectItem(rule_json, "enabled");
+    if (enabled && !cJSON_IsBool(enabled)) {
+        snprintf(error, error_size, "'enabled' must be a boolean");
+        return 0;
+    }
+
+    const char* trigger_logic = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "trigger_logic"));
+    if (trigger_logic && !string_in_list(trigger_logic, trigger_logic_values)) {
+        snprintf(error, error_size, "'trigger_logic' must be OR or AND");
+        return 0;
+    }
+
+    const char* condition_logic = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "condition_logic"));
+    if (condition_logic && !string_in_list(condition_logic, condition_logic_values)) {
+        snprintf(error, error_size, "'condition_logic' must be AND or OR");
+        return 0;
+    }
+
+    cJSON* cooldown = cJSON_GetObjectItem(rule_json, "cooldown");
+    if (cooldown && (!cJSON_IsNumber(cooldown) || cooldown->valuedouble < 0)) {
+        snprintf(error, error_size, "'cooldown' must be a non-negative number");
+        return 0;
+    }
+
+    cJSON* max_executions = cJSON_GetObjectItem(rule_json, "max_executions");
+    if (max_executions && (!cJSON_IsNumber(max_executions) || max_executions->valuedouble < 0)) {
+        snprintf(error, error_size, "'max_executions' must be a non-negative number");
+        return 0;
+    }
+
+    const char* max_exec_period = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "max_exec_period"));
+    if (max_exec_period && !string_in_list(max_exec_period, max_exec_period_values)) {
+        snprintf(error, error_size, "'max_exec_period' must be minute, hour, day, or empty");
+        return 0;
+    }
+
+    if (!validate_rule_steps("triggers", cJSON_GetObjectItem(rule_json, "triggers"), trigger_types, 1, error, error_size))
+        return 0;
+    if (!validate_rule_steps("conditions", cJSON_GetObjectItem(rule_json, "conditions"), condition_types, 0, error, error_size))
+        return 0;
+    if (!validate_rule_steps("actions", cJSON_GetObjectItem(rule_json, "actions"), action_types, 1, error, error_size))
+        return 0;
+
+    return 1;
+}
+
+static const char* app_version(void) {
+    cJSON* manifest = ACAP_Get_Config("manifest");
+    if (!manifest) return "unknown";
+    cJSON* pkg = cJSON_GetObjectItem(manifest, "acapPackageConf");
+    cJSON* setup = pkg ? cJSON_GetObjectItem(pkg, "setup") : NULL;
+    const char* version = setup ? cJSON_GetStringValue(cJSON_GetObjectItem(setup, "version")) : NULL;
+    return version && version[0] ? version : "unknown";
+}
+
 /*=====================================================
  * VAPIX event callback (GMainLoop thread)
  *=====================================================*/
@@ -95,6 +228,7 @@ static void apply_mqtt_config(cJSON* mqtt_json) {
     mc.port = port ? (int)port->valuedouble : 1883;
     cJSON* ka   = cJSON_GetObjectItem(mqtt_json, "keepalive");
     mc.keepalive = ka ? (int)ka->valuedouble : 60;
+    mc.use_tls = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_json, "use_tls")) ? 1 : 0;
     mc.enabled = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_json, "enabled")) ? 1 : 0;
     MQTT_Reconfigure(&mc);
 }
@@ -193,14 +327,57 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 
     if (strcmp(method, "GET") == 0) {
         char* id = ACAP_HTTP_Request_Param(req, "id");
+        char* action = ACAP_HTTP_Request_Param(req, "action");
         if (id && *id) {
             cJSON* rule = RuleEngine_Get(id);
-            free(id);
-            if (!rule) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
-            ACAP_HTTP_Respond_JSON(resp, rule);
+            if (!rule) { 
+                if (id) free(id);
+                if (action) free(action);
+                ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); 
+                return; 
+            }
+
+            if (action && *action && strcmp(action, "export") == 0) {
+                /* Export rule as downloadable file */
+                const char* rule_name = cJSON_GetStringValue(cJSON_GetObjectItem(rule, "name"));
+                char filename[256] = "rule.json";
+                if (rule_name && *rule_name) {
+                    /* Sanitize filename: allow alphanumeric, dash, underscore; replace spaces/special */
+                    int fi = 0;
+                    for (int si = 0; rule_name[si] && fi < 240; si++) {
+                        char c = rule_name[si];
+                        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+                            (c >= '0' && c <= '9') || c == '_' || c == '-') {
+                            filename[fi++] = c;
+                        } else if (c == ' ' || c == '.' || c == ',') {
+                            filename[fi++] = '_';
+                        }
+                    }
+                    snprintf(filename + fi, sizeof(filename) - fi, ".json");
+                }
+
+                /* Convert rule to JSON string to get size */
+                char* json_str = cJSON_Print(rule);
+                unsigned json_size = json_str ? strlen(json_str) : 0;
+                
+                if (json_str) {
+                    ACAP_HTTP_Header_FILE(resp, filename, "application/json", json_size);
+                    ACAP_HTTP_Respond_Data(resp, json_size, (const void*)json_str);
+                    free(json_str);
+                } else {
+                    ACAP_HTTP_Respond_Error(resp, 500, "Failed to serialize rule");
+                }
+            } else {
+                /* Return rule as JSON response */
+                ACAP_HTTP_Respond_JSON(resp, rule);
+            }
+
             cJSON_Delete(rule);
+            if (id) free(id);
+            if (action) free(action);
         } else {
             if (id) free(id);
+            if (action) free(action);
             cJSON* list = RuleEngine_List();
             ACAP_HTTP_Respond_JSON(resp, list);
             cJSON_Delete(list);
@@ -223,6 +400,12 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 ACAP_HTTP_Respond_Text(resp, "OK");
                 return;
             }
+            char error[256] = "";
+            if (!validate_rule_json(body, error, sizeof(error))) {
+                free(id); cJSON_Delete(body);
+                ACAP_HTTP_Respond_Error(resp, 400, error);
+                return;
+            }
             int result = RuleEngine_Update(id, body);
             free(id); cJSON_Delete(body);
             if (!result) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
@@ -230,6 +413,12 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         } else {
             /* POST (no id) → create new rule */
             if (id) free(id);
+            char error[256] = "";
+            if (!validate_rule_json(body, error, sizeof(error))) {
+                cJSON_Delete(body);
+                ACAP_HTTP_Respond_Error(resp, 400, error);
+                return;
+            }
             char new_id[37] = "";
             if (!RuleEngine_Add(body, new_id)) {
                 cJSON_Delete(body);
@@ -401,7 +590,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
-    cJSON_AddStringToObject(obj, "engine_version", "1.7.3");
+    cJSON_AddStringToObject(obj, "engine_version", app_version());
 
     cJSON* mqtt_st = MQTT_Status();
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);
@@ -614,9 +803,10 @@ int main(void) {
             mc.port = port ? (int)port->valuedouble : 1883;
             cJSON* ka   = cJSON_GetObjectItem(mqtt_cfg, "keepalive");
             mc.keepalive = ka ? (int)ka->valuedouble : 60;
+            mc.use_tls = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_cfg, "use_tls")) ? 1 : 0;
             mc.enabled = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_cfg, "enabled")) ? 1 : 0;
         } else {
-            mc.port = 1883; mc.keepalive = 60;
+            mc.port = 1883; mc.keepalive = 60; mc.use_tls = 0;
             snprintf(mc.client_id, sizeof(mc.client_id), "acap_event_engine");
         }
         MQTT_Init(&mc, mqtt_message_cb, NULL);

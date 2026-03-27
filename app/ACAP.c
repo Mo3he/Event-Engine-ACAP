@@ -1962,11 +1962,51 @@ int ACAP_EVENTS_Fire_JSON(const char* Id, cJSON* data) {
     return 1;
 }
 
+static int event_add_typed_key(AXEventKeyValueSet* set, const char* key_name, const char* key_type, GError** error) {
+    int defaultInt = 0;
+    double defaultDouble = 0;
+    char defaultString[] = "";
+
+    if (!set || !key_name || !key_type) return 0;
+
+    if (g_ascii_strcasecmp(key_type, "string") == 0)
+        return ax_event_key_value_set_add_key_value(set, key_name, NULL, &defaultString, AX_VALUE_TYPE_STRING, error);
+    if (g_ascii_strcasecmp(key_type, "int") == 0)
+        return ax_event_key_value_set_add_key_value(set, key_name, NULL, &defaultInt, AX_VALUE_TYPE_INT, error);
+    if (g_ascii_strcasecmp(key_type, "double") == 0)
+        return ax_event_key_value_set_add_key_value(set, key_name, NULL, &defaultDouble, AX_VALUE_TYPE_DOUBLE, error);
+    if (g_ascii_strcasecmp(key_type, "bool") == 0)
+        return ax_event_key_value_set_add_key_value(set, key_name, NULL, &defaultInt, AX_VALUE_TYPE_BOOL, error);
+    return 0;
+}
+
+static int event_extract_name_type(cJSON* item, const char** out_name, const char** out_type) {
+    if (!item || !cJSON_IsObject(item)) return 0;
+
+    cJSON* name_j = cJSON_GetObjectItem(item, "name");
+    cJSON* type_j = cJSON_GetObjectItem(item, "type");
+    const char* name = cJSON_GetStringValue(name_j);
+    const char* type = cJSON_GetStringValue(type_j);
+    if (name && type) {
+        *out_name = name;
+        *out_type = type;
+        return 1;
+    }
+
+    /* Backward compatibility: allow legacy object format like {"temperature":"double"}. */
+    cJSON* first = item->child;
+    if (!first || !first->string || !cJSON_IsString(first)) return 0;
+    *out_name = first->string;
+    *out_type = first->valuestring;
+    return 1;
+}
+
 int ACAP_EVENTS_Add_Event_JSON(cJSON* event) {
     AXEventKeyValueSet* set = NULL;
     GError* error = NULL;
     guint declarationID;
     int success = 0;
+    int defaultInt = 0;
     set = ax_event_key_value_set_new();
 
     char* eventID   = cJSON_GetObjectItem(event, "id")   ? cJSON_GetObjectItem(event, "id")->valuestring   : NULL;
@@ -1988,22 +2028,22 @@ int ACAP_EVENTS_Add_Event_JSON(cJSON* event) {
     if (cJSON_GetObjectItem(event, "show") && cJSON_GetObjectItem(event, "show")->type == cJSON_False)
         ax_event_key_value_set_mark_as_user_defined(set, eventID, "tnsaxis", "isApplicationData", NULL);
 
-    int defaultInt = 0;
-    double defaultDouble = 0;
-    char defaultString[] = "";
-
     cJSON* source = cJSON_GetObjectItem(event, "source") ? cJSON_GetObjectItem(event, "source")->child : NULL;
     while (source) {
-        cJSON* property = source->child;
-        if (property) {
-            if (strcmp(property->valuestring, "string") == 0)
-                ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultString, AX_VALUE_TYPE_STRING, NULL);
-            if (strcmp(property->valuestring, "int") == 0)
-                ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultInt, AX_VALUE_TYPE_INT, NULL);
-            if (strcmp(property->valuestring, "bool") == 0)
-                ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultInt, AX_VALUE_TYPE_BOOL, NULL);
-            ax_event_key_value_set_mark_as_source(set, property->string, NULL, NULL);
-            LOG_TRACE("%s: %s Source %s %s\n", __func__, eventID, property->string, property->valuestring);
+        const char* key_name = NULL;
+        const char* key_type = NULL;
+        if (event_extract_name_type(source, &key_name, &key_type)) {
+            if (!event_add_typed_key(set, key_name, key_type, &error)) {
+                if (error) {
+                    LOG_WARN("%s: Unable to add source %s %s\n", __func__, key_name, error->message);
+                    g_error_free(error);
+                    error = NULL;
+                } else {
+                    LOG_WARN("%s: Invalid source type for %s: %s\n", __func__, key_name, key_type);
+                }
+            }
+            ax_event_key_value_set_mark_as_source(set, key_name, NULL, NULL);
+            LOG_TRACE("%s: %s Source %s %s\n", __func__, eventID, key_name, key_type);
         }
         source = source->next;
     }
@@ -2011,24 +2051,21 @@ int ACAP_EVENTS_Add_Event_JSON(cJSON* event) {
     cJSON* dataItem = cJSON_GetObjectItem(event, "data") ? cJSON_GetObjectItem(event, "data")->child : NULL;
     int propertyCounter = 0;
     while (dataItem) {
-        cJSON* property = dataItem->child;
-        if (property) {
+        const char* key_name = NULL;
+        const char* key_type = NULL;
+        if (event_extract_name_type(dataItem, &key_name, &key_type)) {
             propertyCounter++;
-            if (strcmp(property->valuestring, "string") == 0) {
-                if (!ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultString, AX_VALUE_TYPE_STRING, &error)) {
-                    LOG_WARN("%s: Unable to add string %s %s\n", __func__, property->string, error->message);
+            if (!event_add_typed_key(set, key_name, key_type, &error)) {
+                if (error) {
+                    LOG_WARN("%s: Unable to add data %s %s\n", __func__, key_name, error->message);
                     g_error_free(error);
                     error = NULL;
+                } else {
+                    LOG_WARN("%s: Invalid data type for %s: %s\n", __func__, key_name, key_type);
                 }
             }
-            if (strcmp(property->valuestring, "int") == 0)
-                ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultInt, AX_VALUE_TYPE_INT, NULL);
-            if (strcmp(property->valuestring, "double") == 0)
-                ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultDouble, AX_VALUE_TYPE_DOUBLE, NULL);
-            if (strcmp(property->valuestring, "bool") == 0)
-                ax_event_key_value_set_add_key_value(set, property->string, NULL, &defaultInt, AX_VALUE_TYPE_BOOL, NULL);
-            ax_event_key_value_set_mark_as_data(set, property->string, NULL, NULL);
-            LOG_TRACE("%s: %s Data %s %s\n", __func__, eventID, property->string, property->valuestring);
+            ax_event_key_value_set_mark_as_data(set, key_name, NULL, NULL);
+            LOG_TRACE("%s: %s Data %s %s\n", __func__, eventID, key_name, key_type);
         }
         dataItem = dataItem->next;
     }

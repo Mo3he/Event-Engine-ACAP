@@ -537,11 +537,14 @@ void RuleEngine_Tick(void) {
      * This handles the case where a stateful trigger (e.g. CO2 threshold) fired
      * before the window and is still active when the window reopens — no new
      * trigger event arrives because the underlying state never changed. */
-    char refire_ids[16][37];
-    int  refire_count = 0;
+    char (*refire_ids)[37] = NULL;
+    int refire_count = 0;
 
     pthread_mutex_lock(&store_lock);
-    for (int i = 0; i < rule_count && refire_count < 16; i++) {
+    if (rule_count > 0)
+        refire_ids = calloc((size_t)rule_count, sizeof(*refire_ids));
+
+    for (int i = 0; i < rule_count; i++) {
         Rule* r = &rules[i];
         if (!r->enabled || !rule_has_time_window(r)) continue;
 
@@ -555,8 +558,8 @@ void RuleEngine_Tick(void) {
         if (prev == 1 && now_open == 0 && Triggers_Any_Active(r->id))
             r->trigger_pending = 1;
 
-        if (prev == 0 && now_open == 1 && r->trigger_pending &&
-                Triggers_Any_Active(r->id))
+        if (refire_ids && prev == 0 && now_open == 1 && r->trigger_pending &&
+            Triggers_Any_Active(r->id))
             snprintf(refire_ids[refire_count++], 37, "%s", r->id);
     }
     pthread_mutex_unlock(&store_lock);
@@ -567,6 +570,7 @@ void RuleEngine_Tick(void) {
         on_trigger_fired(refire_ids[i], -1, tdata);
         cJSON_Delete(tdata);
     }
+    free(refire_ids);
 }
 
 int RuleEngine_Fire(const char* id, cJSON* trigger_data) {

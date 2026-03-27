@@ -20,6 +20,7 @@
     "client_id": "acap_event_engine",
     "username": "",
     "password": "",
-    "keepalive": 60
+    "keepalive": 60,
+    "use_tls": false
   }
 }

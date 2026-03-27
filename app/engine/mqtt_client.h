@@ -8,8 +8,7 @@ extern "C" {
 #endif
 
 /*
- * Minimal MQTT 3.1.1 client over raw POSIX TCP sockets.
- * No external library required.
+ * Minimal MQTT 3.1.1 client over POSIX TCP sockets.
  *
  * Features:
  *   - QoS 0 and QoS 1 publish (per-message, optional)
@@ -19,12 +18,12 @@ extern "C" {
  *   - Automatic reconnection with exponential backoff
  *   - Keepalive PINGREQ/PINGRESP
  *   - Multiple topic subscriptions with wildcard support (+ and #)
+ *   - Optional TLS transport with hostname verification
  *   - Incoming message dispatch via callback (on GMainLoop thread)
  *   - Thread-safe publish (mutex protected)
  *
  * Limitations:
  *   - No QoS 1 retransmit (message sent once; PUBACK acknowledged but not enforced)
- *   - No TLS (plain TCP, port 1883)
  *   - Single broker
  */
 
@@ -38,6 +37,7 @@ typedef struct {
     char username[128];
     char password[128];
     int  keepalive;       /* seconds, 0 = disabled */
+    int  use_tls;         /* 1 = TLS transport, 0 = plain TCP */
     int  enabled;
 } MQTT_Config;
 

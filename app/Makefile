@@ -13,7 +13,7 @@ PROGS = $(PROG1)
 PKGS = glib-2.0 gio-2.0 axevent fcgi
 CFLAGS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --cflags $(PKGS))
 LDLIBS += $(shell PKG_CONFIG_PATH=$(PKG_CONFIG_PATH) pkg-config --libs $(PKGS))
-LDLIBS += -s -lm -ldl -laxparameter -lfcgi -lcurl -lpthread
+LDLIBS += -s -lm -ldl -laxparameter -lfcgi -lcurl -lpthread -lssl -lcrypto
 
 all: $(PROGS)
 
