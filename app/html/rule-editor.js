@@ -729,7 +729,7 @@ function conditionFields(c, rowIdx) {
     const set  = calcSolarEvent(lat, lon, 'sunset', 0);
     const solarHint = rise && set
       ? `Today: sunrise ${rise}, sunset ${set}`
-      : (lat === 0 && lon === 0 ? 'Set latitude/longitude in Engine Settings' : 'No sunrise/sunset today (polar)');
+      : (lat === 0 && lon === 0 ? 'Set latitude/longitude in Location' : 'No sunrise/sunset today (polar)');
     return `
     <div class="form-row">
       <div class="form-group">
@@ -927,7 +927,9 @@ function toggleTokenPicker(btn) {
   /* build token groups */
   const triggerTokens = getTriggerTokens();
   /* Check if any action in the current form has attach_snapshot enabled */
-  const hasSnapshot = actionRows.some(a => a.type === 'http_request' && a.attach_snapshot);
+  const hasSnapshot = actionRows.some(a =>
+    ['http_request', 'email', 'mqtt_publish', 'slack_webhook', 'teams_webhook', 'telegram'].includes(a.type) && a.attach_snapshot
+  );
   const groups = [
     { label: 'Time',    tokens: ['{{timestamp}}', '{{date}}', '{{time}}'] },
     { label: 'Camera',  tokens: ['{{camera.serial}}', '{{camera.model}}', '{{camera.ip}}',
@@ -964,12 +966,36 @@ function toggleTokenPicker(btn) {
   panel.innerHTML = header + groups.map(g => label(g.label) + g.tokens.map(row).join('')).join('');
   document.body.appendChild(panel);
 
-  /* position below the button, flip left if near right edge */
+  /* Position inside viewport: clamp horizontally and flip upward near bottom edge. */
   const rect = btn.getBoundingClientRect();
-  const pw = 210;
-  const left = (rect.left + pw > window.innerWidth) ? Math.max(0, rect.right - pw) : rect.left;
+  const margin = 8;
+  const gap = 4;
+
+  const panelW = Math.max(200, panel.offsetWidth || 210);
+  let left = rect.left;
+  if (left + panelW > window.innerWidth - margin) left = rect.right - panelW;
+  left = Math.max(margin, Math.min(left, window.innerWidth - panelW - margin));
+
+  const spaceBelow = window.innerHeight - rect.bottom - margin;
+  const spaceAbove = rect.top - margin;
+  const preferBelow = spaceBelow >= 140 || spaceBelow >= spaceAbove;
+  const available = Math.max(120, Math.min(240, preferBelow ? spaceBelow : spaceAbove));
+  panel.style.maxHeight = available + 'px';
+
+  const panelH = panel.offsetHeight;
+  let top;
+  if (preferBelow) {
+    top = rect.bottom + gap;
+    if (top + panelH > window.innerHeight - margin)
+      top = Math.max(margin, window.innerHeight - panelH - margin);
+  } else {
+    top = rect.top - panelH - gap;
+    if (top < margin)
+      top = margin;
+  }
+
   panel.style.left = left + 'px';
-  panel.style.top  = (rect.bottom + 4) + 'px';
+  panel.style.top = top + 'px';
 
   /* close on outside click */
   setTimeout(() => {
@@ -1460,6 +1486,12 @@ function actionFields(a) {
           <option value="true"  ${ a.retain ? 'selected':''}>Yes</option>
         </select>
       </div>
+      <div class="form-group" style="flex:0 0 220px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
+          <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+          Include snapshot as {{trigger.snapshot_base64}}
+        </label>
+      </div>
     </div>`;
   if (type === 'slack_webhook') return `
     <div class="form-row"><div class="form-group">
@@ -1470,6 +1502,10 @@ function actionFields(a) {
       <label>Message</label>
       <textarea data-k="message" placeholder="Motion detected on {{camera.name}} at {{timestamp}}">${escHtml(a.message || '')}</textarea>
       ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Include snapshot as {{trigger.snapshot_base64}}
+      </label>
     </div></div>
     <div class="form-row">
       <div class="form-group">
@@ -1496,6 +1532,10 @@ function actionFields(a) {
       <label>Message</label>
       <textarea data-k="message" placeholder="Motion detected at {{timestamp}}">${escHtml(a.message || '')}</textarea>
       ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Include snapshot as {{trigger.snapshot_base64}}
+      </label>
     </div></div>
     <div class="form-row"><div class="form-group">
       <label>Theme Colour <span style="color:var(--text-muted);font-weight:400;">(optional hex)</span></label>
@@ -1570,6 +1610,11 @@ function actionFields(a) {
       <label>Message</label>
       <textarea data-k="message" placeholder="Motion detected on {{camera.name}} at {{timestamp}}">${escHtml(a.message || '')}</textarea>
       ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Send camera snapshot as photo attachment
+      </label>
+      <div class="form-hint">Uses Telegram <code>sendPhoto</code> when enabled. Also exposes <b>{{trigger.snapshot_base64}}</b> in templates.</div>
     </div></div>
     <div class="form-row">
       <div class="form-group" style="flex:0 0 140px;">
@@ -1600,6 +1645,11 @@ function actionFields(a) {
       <label>Body</label>
       <textarea data-k="body" placeholder="Motion detected at {{timestamp}}&#10;Camera: {{camera.serial}}">${escHtml(a.body || '')}</textarea>
       ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Attach camera snapshot (JPEG)
+      </label>
+      <div class="form-hint">Adds a <b>snapshot.jpg</b> attachment to the email and exposes <b>{{trigger.snapshot_base64}}</b> for template use.</div>
     </div></div>`;
   if (type === 'ftp_upload') return `
     <div class="form-row"><div class="form-group">
@@ -2148,6 +2198,7 @@ function normalizeAction(a) {
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
     out.qos    = parseInt(a.qos) || 0;
+    out.attach_snapshot = a.attach_snapshot === true;
   }
   if (a.type === 'vapix_query') {
     /* Reconstruct topic0-3 objects from the hidden _ns / _val fields */
@@ -2184,6 +2235,10 @@ function normalizeAction(a) {
   }
   if (a.type === 'email') {
     out.use_tls = a.use_tls !== 'false' && a.use_tls !== false;
+    out.attach_snapshot = a.attach_snapshot === true;
+  }
+  if (a.type === 'slack_webhook' || a.type === 'teams_webhook' || a.type === 'telegram') {
+    out.attach_snapshot = a.attach_snapshot === true;
   }
   if (a.type === 'telegram') {
     out.disable_preview = a.disable_preview === true;

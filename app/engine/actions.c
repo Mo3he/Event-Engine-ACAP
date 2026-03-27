@@ -284,6 +284,50 @@ static char* base64_encode(const unsigned char* data, size_t len) {
     return out;
 }
 
+static char* base64_wrap_lines(const char* b64, size_t line_len) {
+    if (!b64 || !line_len) return NULL;
+    size_t in_len = strlen(b64);
+    size_t lines = (in_len + line_len - 1) / line_len;
+    size_t out_len = in_len + (lines * 2) + 1; /* +CRLF per line +NUL */
+    char* out = malloc(out_len);
+    if (!out) return NULL;
+
+    size_t i = 0, j = 0;
+    while (i < in_len) {
+        size_t chunk = in_len - i;
+        if (chunk > line_len) chunk = line_len;
+        memcpy(out + j, b64 + i, chunk);
+        j += chunk;
+        out[j++] = '\r';
+        out[j++] = '\n';
+        i += chunk;
+    }
+    out[j] = '\0';
+    return out;
+}
+
+static cJSON* build_trigger_data_with_snapshot(cJSON* cfg, cJSON* trigger_data) {
+    cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
+    if (!snap_j || !cJSON_IsTrue(snap_j)) return NULL;
+
+    size_t snap_len = 0;
+    char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+    if (!snap_raw || snap_len == 0) {
+        free(snap_raw);
+        return NULL;
+    }
+
+    char* snap_b64 = base64_encode((unsigned char*)snap_raw, snap_len);
+    free(snap_raw);
+    if (!snap_b64) return NULL;
+
+    cJSON* td = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
+    if (td)
+        cJSON_AddStringToObject(td, "snapshot_base64", snap_b64);
+    free(snap_b64);
+    return td;
+}
+
 /* http_request */
 static size_t curl_discard(void* p, size_t sz, size_t n, void* ud) {
     (void)p; (void)ud; return sz * n;
@@ -670,11 +714,15 @@ static void action_increment_counter(cJSON* cfg) {
 static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     const char* topic_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "topic"));
     if (!topic_tmpl) return;
-    char* topic = Actions_Expand_Template(topic_tmpl, trigger_data);
+
+    cJSON* td_with_snap = build_trigger_data_with_snapshot(cfg, trigger_data);
+    cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
+
+    char* topic = Actions_Expand_Template(topic_tmpl, effective_td);
 
     char* payload = NULL;
     const char* payload_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "payload"));
-    if (payload_tmpl) payload = Actions_Expand_Template(payload_tmpl, trigger_data);
+    if (payload_tmpl) payload = Actions_Expand_Template(payload_tmpl, effective_td);
 
     cJSON* retain_j = cJSON_GetObjectItem(cfg, "retain");
     int retain = retain_j && cJSON_IsTrue(retain_j) ? 1 : 0;
@@ -686,6 +734,7 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     if (!MQTT_Publish(topic, payload, retain, qos))
         LOG_ACTION_ERR("mqtt_publish failed (not connected?)");
 
+    if (td_with_snap) cJSON_Delete(td_with_snap);
     free(topic);
     free(payload);
 }
@@ -697,7 +746,10 @@ static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
 
     const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
     if (!msg_tmpl) msg_tmpl = "";
-    char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
+
+    cJSON* td_with_snap = build_trigger_data_with_snapshot(cfg, trigger_data);
+    cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
+    char* msg = Actions_Expand_Template(msg_tmpl, effective_td);
 
     cJSON* body = cJSON_CreateObject();
     cJSON_AddStringToObject(body, "text", msg);
@@ -708,6 +760,7 @@ static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
 
     char* json_str = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);
+    if (td_with_snap) cJSON_Delete(td_with_snap);
     free(msg);
 
     CURL* curl = curl_easy_init();
@@ -741,8 +794,11 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     const char* msg_tmpl   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
     if (!msg_tmpl) msg_tmpl = "";
 
-    char* title = title_tmpl ? Actions_Expand_Template(title_tmpl, trigger_data) : NULL;
-    char* msg   = Actions_Expand_Template(msg_tmpl, trigger_data);
+    cJSON* td_with_snap = build_trigger_data_with_snapshot(cfg, trigger_data);
+    cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
+
+    char* title = title_tmpl ? Actions_Expand_Template(title_tmpl, effective_td) : NULL;
+    char* msg   = Actions_Expand_Template(msg_tmpl, effective_td);
 
     /* Build Adaptive Card body array */
     cJSON* card_body = cJSON_CreateArray();
@@ -781,6 +837,7 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
 
     char* json_str = cJSON_PrintUnformatted(envelope);
     cJSON_Delete(envelope);
+    if (td_with_snap) cJSON_Delete(td_with_snap);
     free(title);
     free(msg);
 
@@ -916,32 +973,108 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     /* Read SMTP config from global settings — smtp lives under app["settings"]["smtp"] */
     cJSON* _sett    = ACAP_Get_Config("settings");
     cJSON* smtp_cfg = _sett ? cJSON_GetObjectItem(_sett, "smtp") : NULL;
-    const char* smtp_url = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "server")) : NULL;
+    const char* smtp_server = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "server")) : NULL;
     const char* from     = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "from"))   : NULL;
-    if (!smtp_url || !smtp_url[0]) { LOG_ACTION_ERR("email: SMTP server not configured in settings"); return; }
+    if (!smtp_server || !smtp_server[0]) { LOG_ACTION_ERR("email: SMTP server not configured in settings"); return; }
     if (!from || !from[0]) { LOG_ACTION_ERR("email: 'from' address not configured in SMTP settings"); return; }
+
+    cJSON* use_tls_j = smtp_cfg ? cJSON_GetObjectItem(smtp_cfg, "use_tls") : NULL;
+    int use_tls = (!use_tls_j || cJSON_IsTrue(use_tls_j)) ? 1 : 0;
+
+    char smtp_url_buf[768];
+    const char* smtp_url = smtp_server;
+    if (!strstr(smtp_server, "://")) {
+        /* Accept plain host:port input from the UI and default to SMTP transport URL */
+        snprintf(smtp_url_buf, sizeof(smtp_url_buf), "smtp://%s", smtp_server);
+        smtp_url = smtp_url_buf;
+    }
 
     const char* to = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "to"));
     if (!to || !to[0]) { LOG_ACTION_ERR("email: no 'to' address"); return; }
 
+    /* Optional snapshot attachment: include JPEG as MIME attachment and expose {{trigger.snapshot_base64}} */
+    cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
+    int attach_snapshot = snap_j && cJSON_IsTrue(snap_j);
+    char* snap_b64 = NULL;
+    char* snap_b64_wrapped = NULL;
+    cJSON* td_with_snap = NULL;
+    if (attach_snapshot) {
+        size_t snap_len = 0;
+        char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+        if (snap_raw && snap_len > 0) {
+            snap_b64 = base64_encode((unsigned char*)snap_raw, snap_len);
+            free(snap_raw);
+        }
+        if (snap_b64) {
+            td_with_snap = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
+            if (td_with_snap)
+                cJSON_AddStringToObject(td_with_snap, "snapshot_base64", snap_b64);
+            snap_b64_wrapped = base64_wrap_lines(snap_b64, 76);
+        } else {
+            LOG_ACTION_ERR("email: attach_snapshot requested but snapshot capture failed");
+        }
+    }
+    cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
+
     const char* subj_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "subject"));
     const char* body_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "body"));
-    char* subject = subj_tmpl ? Actions_Expand_Template(subj_tmpl, trigger_data) : strdup("Event Engine Alert");
-    char* body    = body_tmpl ? Actions_Expand_Template(body_tmpl, trigger_data) : strdup("");
+    char* subject = subj_tmpl ? Actions_Expand_Template(subj_tmpl, effective_td) : strdup("Event Engine Alert");
+    char* body    = body_tmpl ? Actions_Expand_Template(body_tmpl, effective_td) : strdup("");
+    if (td_with_snap) cJSON_Delete(td_with_snap);
+    free(snap_b64);
 
-    /* Build RFC 5322 message dynamically */
-    size_t msg_len = strlen(from) + strlen(to) + strlen(subject) + strlen(body) + 128;
+    /* Build RFC 5322 message dynamically (plain text or multipart with snapshot attachment) */
+    const char* boundary = "----ACAP_EVENT_ENGINE_BOUNDARY";
+    int has_attachment = attach_snapshot && snap_b64_wrapped && snap_b64_wrapped[0];
+    size_t msg_len;
+    if (has_attachment) {
+        msg_len = strlen(from) + strlen(to) + strlen(subject) + strlen(body) +
+                  strlen(boundary) * 4 + strlen(snap_b64_wrapped) + 1024;
+    } else {
+        msg_len = strlen(from) + strlen(to) + strlen(subject) + strlen(body) + 128;
+    }
     char* msg = malloc(msg_len);
-    if (!msg) { free(subject); free(body); return; }
-    snprintf(msg, msg_len,
-        "From: %s\r\n"
-        "To: %s\r\n"
-        "Subject: %s\r\n"
-        "Content-Type: text/plain; charset=UTF-8\r\n"
-        "\r\n"
-        "%s\r\n", from, to, subject, body);
+    if (!msg) { free(subject); free(body); free(snap_b64_wrapped); return; }
+
+    if (has_attachment) {
+        snprintf(msg, msg_len,
+            "From: %s\r\n"
+            "To: %s\r\n"
+            "Subject: %s\r\n"
+            "MIME-Version: 1.0\r\n"
+            "Content-Type: multipart/mixed; boundary=\"%s\"\r\n"
+            "\r\n"
+            "--%s\r\n"
+            "Content-Type: text/plain; charset=UTF-8\r\n"
+            "\r\n"
+            "%s\r\n"
+            "\r\n"
+            "--%s\r\n"
+            "Content-Type: image/jpeg; name=\"snapshot.jpg\"\r\n"
+            "Content-Transfer-Encoding: base64\r\n"
+            "Content-Disposition: attachment; filename=\"snapshot.jpg\"\r\n"
+            "\r\n"
+            "%s"
+            "\r\n"
+            "--%s--\r\n",
+            from, to, subject, boundary,
+            boundary,
+            body,
+            boundary,
+            snap_b64_wrapped,
+            boundary);
+    } else {
+        snprintf(msg, msg_len,
+            "From: %s\r\n"
+            "To: %s\r\n"
+            "Subject: %s\r\n"
+            "Content-Type: text/plain; charset=UTF-8\r\n"
+            "\r\n"
+            "%s\r\n", from, to, subject, body);
+    }
     free(subject);
     free(body);
+    free(snap_b64_wrapped);
 
     /* libcurl SMTP upload via CURLOPT_READFUNCTION on a buffer */
     UploadBuf upload = { msg, 0, strlen(msg) };
@@ -987,8 +1120,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
         curl_easy_setopt(curl, CURLOPT_PASSWORD, smtp_pw);
     }
 
-    cJSON* use_tls_j = smtp_cfg ? cJSON_GetObjectItem(smtp_cfg, "use_tls") : NULL;
-    if (!use_tls_j || cJSON_IsTrue(use_tls_j))
+    if (use_tls)
         curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
 
     if (g_socks5_proxy[0]) {
@@ -1011,45 +1143,102 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
 
     const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
     if (!msg_tmpl) msg_tmpl = "";
-    char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
 
-    char url[512];
-    snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendMessage", bot_token);
+    /* Optionally expose {{trigger.snapshot_base64}} in templates when attach_snapshot is enabled */
+    cJSON* td_with_snap = build_trigger_data_with_snapshot(cfg, trigger_data);
+    cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
+    char* msg = Actions_Expand_Template(msg_tmpl, effective_td);
+    if (td_with_snap) cJSON_Delete(td_with_snap);
 
-    cJSON* body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "chat_id", chat_id);
-    cJSON_AddStringToObject(body, "text", msg);
-    const char* parse_mode = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "parse_mode"));
-    if (parse_mode && parse_mode[0])
-        cJSON_AddStringToObject(body, "parse_mode", parse_mode);
-    cJSON* disable_preview = cJSON_GetObjectItem(cfg, "disable_preview");
-    if (disable_preview && cJSON_IsTrue(disable_preview))
-        cJSON_AddBoolToObject(body, "disable_web_page_preview", 1);
-
-    char* json_str = cJSON_PrintUnformatted(body);
-    cJSON_Delete(body);
-    free(msg);
+    cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
+    int attach_snapshot = snap_j && cJSON_IsTrue(snap_j);
 
     CURL* curl = curl_easy_init();
-    if (!curl) { free(json_str); return; }
-    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    if (!curl) { free(msg); return; }
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
-    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     if (g_socks5_proxy[0]) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
         curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
     }
 
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_ACTION_ERR("telegram failed: %s", curl_easy_strerror(res));
-    curl_slist_free_all(hdrs);
+    const char* parse_mode = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "parse_mode"));
+
+    if (attach_snapshot) {
+        size_t snap_len = 0;
+        char* snap_raw = ACAP_VAPIX_GetBinary("jpg/image.cgi", &snap_len);
+        if (snap_raw && snap_len > 0) {
+            char url[512];
+            snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendPhoto", bot_token);
+            curl_easy_setopt(curl, CURLOPT_URL, url);
+
+            curl_mime* form = curl_mime_init(curl);
+            curl_mimepart* part = curl_mime_addpart(form);
+            curl_mime_name(part, "chat_id");
+            curl_mime_data(part, chat_id, CURL_ZERO_TERMINATED);
+
+            part = curl_mime_addpart(form);
+            curl_mime_name(part, "caption");
+            curl_mime_data(part, msg, CURL_ZERO_TERMINATED);
+
+            if (parse_mode && parse_mode[0]) {
+                part = curl_mime_addpart(form);
+                curl_mime_name(part, "parse_mode");
+                curl_mime_data(part, parse_mode, CURL_ZERO_TERMINATED);
+            }
+
+            part = curl_mime_addpart(form);
+            curl_mime_name(part, "photo");
+            curl_mime_filename(part, "snapshot.jpg");
+            curl_mime_type(part, "image/jpeg");
+            curl_mime_data(part, snap_raw, (curl_off_t)snap_len);
+
+            curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+            CURLcode res = curl_easy_perform(curl);
+            if (res != CURLE_OK) LOG_ACTION_ERR("telegram sendPhoto failed: %s", curl_easy_strerror(res));
+
+            curl_mime_free(form);
+            free(snap_raw);
+            curl_easy_cleanup(curl);
+            free(msg);
+            return;
+        }
+        free(snap_raw);
+        LOG_ACTION_ERR("telegram: attach_snapshot requested but snapshot capture failed; falling back to sendMessage");
+    }
+
+    {
+        char url[512];
+        snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/sendMessage", bot_token);
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+
+        cJSON* body = cJSON_CreateObject();
+        cJSON_AddStringToObject(body, "chat_id", chat_id);
+        cJSON_AddStringToObject(body, "text", msg);
+        if (parse_mode && parse_mode[0])
+            cJSON_AddStringToObject(body, "parse_mode", parse_mode);
+        cJSON* disable_preview = cJSON_GetObjectItem(cfg, "disable_preview");
+        if (disable_preview && cJSON_IsTrue(disable_preview))
+            cJSON_AddBoolToObject(body, "disable_web_page_preview", 1);
+
+        char* json_str = cJSON_PrintUnformatted(body);
+        cJSON_Delete(body);
+
+        struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+
+        CURLcode res = curl_easy_perform(curl);
+        if (res != CURLE_OK) LOG_ACTION_ERR("telegram failed: %s", curl_easy_strerror(res));
+
+        curl_slist_free_all(hdrs);
+        free(json_str);
+    }
+
     curl_easy_cleanup(curl);
-    free(json_str);
+    free(msg);
 }
 
 /* ftp_upload — Upload a snapshot to FTP/SFTP via libcurl */

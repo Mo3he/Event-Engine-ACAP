@@ -261,7 +261,7 @@ async function saveEngineSettings(event) {
     if (!r.ok) throw new Error(await r.text());
     engineLat = lat;
     engineLon = lon;
-    toast('Engine settings saved');
+    toast('Location saved');
     refreshSolarPreview(lat, lon, 'engine-solar-preview');
   } catch(e) {
     toast('Failed to save: ' + e.message, 'error');
@@ -277,7 +277,7 @@ async function loadSmtpSettings() {
     if (el('smtp-user'))   el('smtp-user').value   = smtp.username || '';
     if (el('smtp-pass'))   el('smtp-pass').value   = '';  /* never show stored pw */
     if (el('smtp-from'))   el('smtp-from').value   = smtp.from || '';
-    if (el('smtp-tls'))    el('smtp-tls').value    = smtp.use_tls === false ? 'false' : 'true';
+      if (el('smtp-tls'))    el('smtp-tls').checked   = smtp.use_tls !== false;
   } catch(e) { /* non-fatal */ }
 }
 
@@ -288,7 +288,7 @@ async function saveSmtpSettings(event) {
     server:   el('smtp-server') ? el('smtp-server').value.trim() : '',
     username: el('smtp-user')   ? el('smtp-user').value.trim()   : '',
     from:     el('smtp-from')   ? el('smtp-from').value.trim()   : '',
-    use_tls:  el('smtp-tls')    ? el('smtp-tls').value === 'true': true,
+      use_tls:  el('smtp-tls')    ? !!el('smtp-tls').checked : true,
   };
   const pw = el('smtp-pass') ? el('smtp-pass').value : '';
   if (pw) data.password = pw;

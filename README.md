@@ -46,7 +46,7 @@ Rules are built in a clean web UI and take effect immediately.
 | **Variable Compare** | Compare a named variable against a value |
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
 | **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count |
-| **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Engine Settings. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
+| **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Location. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
 | **VAPIX Event State** | Check the current state of any VAPIX event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?) |
 
 ## Actions
@@ -191,7 +191,7 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 - **Rules** - create, edit, duplicate, enable/disable, and delete rules
 - **Event Log** - per-rule firing history with timestamps and result codes
 - **Variables** - view and manage named variables and counters
-- **Settings** - engine settings (location for sunrise/sunset), SMTP configuration, MQTT broker configuration, device info, and backup/restore
+- **Settings** - Location (used for sunrise/sunset), SMTP configuration, MQTT broker configuration, device info, and backup/restore
 
 ---
 
