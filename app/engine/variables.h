@@ -22,7 +22,7 @@ void          Variables_Cleanup(void);
 
 /* Generic variables */
 int           Variables_Set(const char* name, const char* value);
-const char*   Variables_Get(const char* name);          /* internal pointer — do NOT free */
+char*         Variables_Get(const char* name);          /* caller must free() the returned string */
 int           Variables_Delete(const char* name);
 int           Variables_Compare(const char* name, const char* op, const char* value);
 cJSON*        Variables_List(void);                     /* caller must cJSON_Delete */

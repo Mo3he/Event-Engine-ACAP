@@ -39,7 +39,7 @@ static Variable* find_or_create(const char* name) {
     Variable* v = find_var(name);
     if (v) return v;
     if (store_count >= MAX_VARS) {
-        LOG_WARN("variable store full, cannot create '%s'", name);
+        LOG_WARN("variable store full (%d) — cannot create '%s'", MAX_VARS, name);
         return NULL;
     }
     v = &store[store_count++];
@@ -122,11 +122,11 @@ int Variables_Set(const char* name, const char* value) {
     return 1;
 }
 
-const char* Variables_Get(const char* name) {
+char* Variables_Get(const char* name) {
     if (!name) return NULL;
     pthread_mutex_lock(&lock);
     Variable* v = find_var(name);
-    const char* ret = v ? v->value : NULL;
+    char* ret = v ? strdup(v->value) : NULL;
     pthread_mutex_unlock(&lock);
     return ret;
 }

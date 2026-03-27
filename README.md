@@ -30,7 +30,7 @@ Rules are built in a clean web UI and take effect immediately.
 | **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition - boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
-| **HTTP Webhook** | External POST request with a secret token. Requires viewer-level camera credentials |
+| **HTTP Webhook** | External POST request with a secret token (max 120 characters). Requires admin-level camera credentials |
 | **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
 | **Counter Threshold** | When a named counter crosses a configured value |
 | **Rule Chain** | Fires when another named rule executes |
@@ -220,21 +220,23 @@ If you're unsure which architecture your camera uses, check **System → About**
 ## Build From Source
 
 ```bash
-./build.sh
+./build.sh            # builds both aarch64 and armv7hf
+./build.sh aarch64    # build only aarch64
+./build.sh armv7hf    # build only armv7hf
 ```
 
-Requires Docker. The build pulls `axisecp/acap-native-sdk:12.0.0` automatically and produces both `.eap` files.
+Requires Docker. The build pulls `axisecp/acap-native-sdk:12.0.0` automatically and produces `.eap` files.
 
 ---
 
 ## API
 
-All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth (admin credentials), except `/fire` which requires viewer-level credentials.
+All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth (admin credentials).
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET / POST / DELETE | `/rules` | Rule CRUD - POST without `id` creates, POST with `?id=` updates, GET with `?id=<id>&action=export` downloads rule as JSON |
-| POST | `/fire` | Fire a rule manually or via webhook token (viewer credentials) |
+| POST | `/fire` | Fire a rule manually or via webhook token |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET | `/actions` | Available action types and their schemas |
 | GET / POST / DELETE | `/variables` | Named variables and counters |
@@ -251,7 +253,7 @@ Interactive docs: `http://<camera-ip>/local/acap_event_engine/swagger.html`
 Trigger a rule from any external system:
 
 ```bash
-curl -u viewer:pass -X POST \
+curl -u admin:pass -X POST \
   "http://<camera-ip>/local/acap_event_engine/fire" \
   -H "Content-Type: application/json" \
   -d '{"token": "my-secret-token", "payload": {"source": "doorbell"}}'

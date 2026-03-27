@@ -5,6 +5,8 @@
 #include <time.h>
 #include <syslog.h>
 #include <glib.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include "rule_engine.h"
 #include "triggers.h"
@@ -48,16 +50,25 @@ static int             rule_count = 0;
 static pthread_mutex_t store_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*-----------------------------------------------------
- * UUID generation (simple v4 using rand())
+ * UUID generation (v4 using /dev/urandom)
  *-----------------------------------------------------*/
 static void gen_uuid(char* out37) {
+    unsigned char buf[16];
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+        if (read(fd, buf, sizeof(buf)) != sizeof(buf))
+            memset(buf, 0, sizeof(buf)); /* fallback zeros — extremely unlikely */
+        close(fd);
+    } else {
+        /* Fallback to rand() if /dev/urandom unavailable */
+        for (int i = 0; i < 16; i++) buf[i] = (unsigned char)(rand() & 0xFF);
+    }
+    buf[6] = (buf[6] & 0x0F) | 0x40; /* version 4 */
+    buf[8] = (buf[8] & 0x3F) | 0x80; /* variant 1 */
     snprintf(out37, 37,
-        "%08x-%04x-4%03x-%04x-%012llx",
-        (unsigned)rand(),
-        (unsigned)(rand() & 0xFFFF),
-        (unsigned)(rand() & 0x0FFF),
-        (unsigned)((rand() & 0x3FFF) | 0x8000),
-        (unsigned long long)rand() * rand() & 0xFFFFFFFFFFFFLL);
+        "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+        buf[0],buf[1],buf[2],buf[3], buf[4],buf[5], buf[6],buf[7],
+        buf[8],buf[9], buf[10],buf[11],buf[12],buf[13],buf[14],buf[15]);
 }
 
 /*-----------------------------------------------------
@@ -412,6 +423,7 @@ int RuleEngine_Add(cJSON* rule_json, char* id_out_37) {
     if (!rule_json) return 0;
     pthread_mutex_lock(&store_lock);
     if (rule_count >= MAX_RULES) {
+        LOG_WARN("rule limit reached (%d) — cannot add more rules", MAX_RULES);
         pthread_mutex_unlock(&store_lock);
         return 0;
     }

@@ -1,5 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 set -e
+trap 'echo "Build failed at line $LINENO"; exit 1' ERR
 
 rm -rf build *.eap
 
@@ -14,8 +15,19 @@ build_arch() {
     rm -rf build
 }
 
-build_arch aarch64
-build_arch armv7hf
+TARGET=${1:-all}
+case "$TARGET" in
+    aarch64)  build_arch aarch64 ;;
+    armv7hf)  build_arch armv7hf ;;
+    all)
+        build_arch aarch64
+        build_arch armv7hf
+        ;;
+    *)
+        echo "Usage: $0 [aarch64|armv7hf|all]"
+        exit 1
+        ;;
+esac
 
 echo "=== Done ==="
 ls -lh *.eap

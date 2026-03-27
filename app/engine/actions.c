@@ -78,6 +78,8 @@ static void while_active_register(WhileActiveEntry* e) {
     }
     if (while_active_count < MAX_WHILE_ACTIVE)
         while_active_entries[while_active_count++] = *e;
+    else
+        LOG_WARN("while_active table full (%d) — undo action will not be registered for rule %s", MAX_WHILE_ACTIVE, e->rule_id);
 }
 
 static void while_active_undo(WhileActiveEntry* e) {
@@ -159,6 +161,8 @@ void Actions_Init(void) {
  *   {{var.NAME}}         variable value
  *   {{counter.NAME}}     counter value
  *-----------------------------------------------------*/
+#define MAX_TEMPLATE_OUTPUT (256 * 1024) /* 256 KB cap on expanded template */
+
 char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
     if (!tmpl) return strdup("");
 
@@ -222,7 +226,8 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
                     if (dyn_replacement) replacement = dyn_replacement;
                 }
             } else if (strncmp(key, "var.", 4) == 0) {
-                replacement = Variables_Get(key + 4);
+                dyn_replacement = Variables_Get(key + 4);
+                if (dyn_replacement) replacement = dyn_replacement;
             } else if (strncmp(key, "counter.", 8) == 0) {
                 snprintf(tmp, sizeof(tmp), "%g", Counter_Get(key + 8));
                 replacement = tmp;
@@ -230,6 +235,11 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
 
             if (!replacement) replacement = "";
             size_t rlen = strlen(replacement);
+            if (out_len + rlen + 1 > MAX_TEMPLATE_OUTPUT) {
+                LOG_WARN("template expansion exceeded %d bytes, truncating", MAX_TEMPLATE_OUTPUT);
+                free(dyn_replacement);
+                break;
+            }
             if (out_len + rlen + 1 > out_cap) {
                 out_cap = out_len + rlen + 256;
                 out = realloc(out, out_cap);

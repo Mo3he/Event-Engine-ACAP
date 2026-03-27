@@ -157,14 +157,17 @@ static int event_topic_matches(Subscription* s, cJSON* event) {
     cJSON* event_path = cJSON_GetObjectItem(event, "event");
     if (!event_path || !event_path->valuestring) return 0;
 
-    char expected[200] = "";
+    char expected[200];
+    int pos = 0;
     const char* keys[] = {"topic0", "topic1", "topic2", "topic3", NULL};
     for (int i = 0; keys[i]; i++) {
         cJSON* t = cJSON_GetObjectItem(s->topic_filter, keys[i]);
         if (!t || !t->child || !t->child->valuestring || !t->child->valuestring[0]) continue;
-        if (expected[0]) strncat(expected, "/", sizeof(expected) - strlen(expected) - 1);
-        strncat(expected, t->child->valuestring, sizeof(expected) - strlen(expected) - 1);
+        if (pos > 0 && pos < (int)sizeof(expected) - 1) expected[pos++] = '/';
+        const char* val = t->child->valuestring;
+        while (*val && pos < (int)sizeof(expected) - 1) expected[pos++] = *val++;
     }
+    expected[pos] = '\0';
     /* Prefix match: if filter has fewer topic levels than the event, still match.
      * e.g. filter "VideoSource/Thermometry" matches event path
      * "VideoSource/Thermometry/TemperatureDetection". */
@@ -226,7 +229,7 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
     int idx = 0;
     cJSON* trig;
     cJSON_ArrayForEach(trig, triggers_array) {
-        if (sub_count >= MAX_SUBS) { LOG_WARN("subscription table full"); break; }
+        if (sub_count >= MAX_SUBS) { LOG_WARN("subscription table full (%d) — cannot subscribe more triggers", MAX_SUBS); break; }
 
         const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "type"));
         if (!type) { idx++; continue; }
@@ -289,6 +292,8 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
         } else if (strcmp(type, "http_webhook") == 0) {
             s->type = TRIG_HTTP_WEBHOOK;
             const char* tok = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "token"));
+            if (tok && strlen(tok) >= sizeof(s->token))
+                LOG_WARN("webhook token for rule %s truncated to %d chars", rule_id, (int)sizeof(s->token) - 1);
             snprintf(s->token, sizeof(s->token), "%s", tok ? tok : "");
 
         } else if (strcmp(type, "schedule") == 0) {

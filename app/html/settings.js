@@ -245,7 +245,6 @@ async function saveProxySettings(event) {
   const proxy = proxyEl ? proxyEl.value.trim() : '';
   try {
     const r = await API.post('settings', { engine: { socks5_proxy: proxy } });
-    if (!r.ok) throw new Error(await r.text());
     toast(proxy ? 'Proxy settings saved' : 'Proxy cleared');
   } catch(e) {
     toast('Failed to save proxy settings: ' + e.message, 'error');
@@ -258,7 +257,6 @@ async function saveEngineSettings(event) {
   const lon = parseFloat(document.getElementById('engine-lon').value) || 0;
   try {
     const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
-    if (!r.ok) throw new Error(await r.text());
     engineLat = lat;
     engineLon = lon;
     toast('Location saved');
@@ -294,7 +292,6 @@ async function saveSmtpSettings(event) {
   if (pw) data.password = pw;
   try {
     const r = await API.post('settings', { smtp: data });
-    if (!r.ok) throw new Error(await r.text());
     toast('SMTP settings saved');
     if (el('smtp-pass')) el('smtp-pass').value = '';
   } catch(e) {
@@ -344,7 +341,6 @@ async function saveMqttSettings(event) {
   if (pw) payload.mqtt.password = pw;
   try {
     const r = await API.post('settings', payload);
-    if (!r.ok) throw new Error(await r.text());
     toast('MQTT settings saved');
     form.querySelector('[name="password"]').value = '';
     /* Refresh status badge after a short delay to let the engine reconnect */

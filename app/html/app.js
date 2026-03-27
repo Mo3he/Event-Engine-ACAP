@@ -55,35 +55,39 @@ window.addEventListener('unhandledrejection', e => {
  * recreate the API object locally so the UI does not stall on "Loading...". */
 if (typeof API === 'undefined') {
   const BASE = '/local/acap_event_engine';
+  const _apiFetch = (url, opts) => fetch(url, opts).then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r;
+  });
   window.API = {
-    get:  path => fetch(`${BASE}/${path}`).then(r => r.json()),
-    post: (path, body) => fetch(`${BASE}/${path}`, {
+    get:  path => _apiFetch(`${BASE}/${path}`).then(r => r.json()),
+    post: (path, body) => _apiFetch(`${BASE}/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }),
-    put: (path, body) => fetch(`${BASE}/${path}`, {
+    put: (path, body) => _apiFetch(`${BASE}/${path}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }),
-    delete: path => fetch(`${BASE}/${path}`, { method: 'DELETE' }),
+    delete: path => _apiFetch(`${BASE}/${path}`, { method: 'DELETE' }),
 
     getRules:      ()      => API.get('rules'),
-    getRule:       id      => API.get(`rules?id=${id}`),
+    getRule:       id      => API.get(`rules?id=${encodeURIComponent(id)}`),
     addRule:       rule    => API.post('rules', rule),
-    updateRule:    (id, r) => API.post(`rules?id=${id}`, r),
-    deleteRule:    id      => API.delete(`rules?id=${id}`),
-    setEnabled:    (id, v) => API.post(`rules?id=${id}`, { enabled: v }),
+    updateRule:    (id, r) => API.post(`rules?id=${encodeURIComponent(id)}`, r),
+    deleteRule:    id      => API.delete(`rules?id=${encodeURIComponent(id)}`),
+    setEnabled:    (id, v) => API.post(`rules?id=${encodeURIComponent(id)}`, { enabled: v }),
     fireRule:      id      => API.post('fire', { id }),
     testAction:    (type, config) => API.post('actions', { type, config }),
 
-    getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + rule : ''}`),
+    getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + encodeURIComponent(rule) : ''}`),
     clearEvents:   ()      => API.delete('events'),
     getStatus:     ()      => API.get('engine'),
     getVariables:  ()      => API.get('variables'),
     setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
-    deleteVariable: name   => API.delete(`variables?name=${name}`),
+    deleteVariable: name   => API.delete(`variables?name=${encodeURIComponent(name)}`),
   };
 }
 
@@ -586,7 +590,7 @@ function renderRules() {
       <h3>No rules yet</h3>
       <p style="margin-bottom:20px;">Create your first rule from scratch or start with a ready-made template.</p>
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-        <button class="btn btn-template" onclick="openTemplateModal()" id="btn-template-empty"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M438-240q33 0 56.5-23.5T518-320q0-33-23.5-56.5T438-400q-33 0-56.5 23.5T358-320q0 33 23.5 56.5T438-240Zm0-120q33 0 56.5-23.5T518-440q0-33-23.5-56.5T438-520q-33 0-56.5 23.5T358-440q0 33 23.5 56.5T438-360Zm0-120q33 0 56.5-23.5T518-560q0-33-23.5-56.5T438-640q-33 0-56.5 23.5T358-560q0 33 23.5 56.5T438-480Zm242 240q33 0 56.5-23.5T760-320q0-33-23.5-56.5T680-400q-33 0-56.5 23.5T600-320q0 33 23.5 56.5T680-240Zm0-120q33 0 56.5-23.5T760-440q0-33-23.5-56.5T680-520q-33 0-56.5 23.5T600-440q0 33 23.5 56.5T680-360Zm0-120q33 0 56.5-23.5T760-560q0-33-23.5-56.5T680-640q-33 0-56.5 23.5T600-560q0 33 23.5 56.5T680-480ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h440v80H200v560h560v-440h80v440q0 33-23.5 56.5T760-120H200Z"/></svg> From Template</button>
+        <button class="btn btn-template" onclick="openTemplateModal()" id="btn-template-empty"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-240q-33 0-56.5-23.5T240-320v-480q0-33 23.5-56.5T320-880h400q33 0 56.5 23.5T800-800v80h80q33 0 56.5 23.5T960-640v400q0 33-23.5 56.5T880-160H400q-33 0-56.5-23.5T320-240Zm0-80h400v-480H320v480Zm480 0v-400H400v80h320q33 0 56.5 23.5T800-560v320h-80Z"/></svg> From Template</button>
         <button class="btn btn-primary" onclick="openRuleEditor(null)">+ New Rule</button>
       </div>
     </div>`;
@@ -656,8 +660,12 @@ async function testRule(id) {
 }
 
 async function editRule(id) {
-  const rule = await API.getRule(id);
-  openRuleEditor(rule);
+  try {
+    const rule = await API.getRule(id);
+    openRuleEditor(rule);
+  } catch(e) {
+    toast('Failed to load rule: ' + e.message, 'error');
+  }
 }
 
 async function duplicateRule(id) {
@@ -866,8 +874,10 @@ async function importRules(input) {
     for (const rule of list) {
       /* Strip the id so the engine assigns a new one */
       const { id: _id, ...r } = rule;
-      const resp = await API.addRule(r);
-      if (resp.ok) ok++; else fail++;
+      try {
+        await API.addRule(r);
+        ok++;
+      } catch(_) { fail++; }
     }
     toast(`Imported ${ok} rule(s)${fail ? ', ' + fail + ' failed' : ''}`);
     loadRules();
@@ -893,7 +903,6 @@ async function importSettings(input) {
     const text = await file.text();
     const settings = JSON.parse(text);
     const resp = await API.post('settings', settings);
-    if (!resp.ok) throw new Error(await resp.text());
     toast('Settings imported — reloading…');
     setTimeout(loadStatus, 500);
     setTimeout(loadMqttSettings, 600);
@@ -973,14 +982,16 @@ window.addEventListener('DOMContentLoaded', () => {
     loadStatus();
     startPoll();
     loadVapixEventCatalog();
-    loadPtzPresets();
-    loadAudioClips();
-    loadSirenProfiles();
-    loadAcapApps();
-    loadPrivacyMasks();
-    loadDeviceParams();
-    loadGuardTours();
-    loadAoaScenarios();
+    Promise.all([
+      loadPtzPresets(),
+      loadAudioClips(),
+      loadSirenProfiles(),
+      loadAcapApps(),
+      loadPrivacyMasks(),
+      loadDeviceParams(),
+      loadGuardTours(),
+      loadAoaScenarios()
+    ]).then(() => renderDeviceCapabilities()).catch(() => {});
 
     /* Load engine lat/lon early so astronomical trigger defaults are correct */
     API.get('settings').then(s => {

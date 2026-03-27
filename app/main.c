@@ -100,6 +100,10 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         snprintf(error, error_size, "Rule name is required");
         return 0;
     }
+    if (strlen(name) > 100) {
+        snprintf(error, error_size, "Rule name must be 100 characters or fewer");
+        return 0;
+    }
 
     cJSON* enabled = cJSON_GetObjectItem(rule_json, "enabled");
     if (enabled && !cJSON_IsBool(enabled)) {
@@ -231,6 +235,7 @@ static void apply_mqtt_config(cJSON* mqtt_json) {
     mc.use_tls = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_json, "use_tls")) ? 1 : 0;
     mc.enabled = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_json, "enabled")) ? 1 : 0;
     MQTT_Reconfigure(&mc);
+    memset(mc.password, 0, sizeof(mc.password));
 }
 
 static void mqtt_message_cb(const char* topic, const char* payload,
@@ -742,6 +747,12 @@ static void HTTP_Fire(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     if (!token && body) token = cJSON_GetStringValue(cJSON_GetObjectItem(body, "token"));
 
     if (token) {
+        if (strlen(token) > 120) {
+            if (token_param) free(token_param);
+            if (body) cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, "Token too long (max 120 characters)");
+            return;
+        }
         cJSON* payload = body ? cJSON_GetObjectItem(body, "payload") : NULL;
         int fired = RuleEngine_Dispatch_Webhook(token, payload);
         if (token_param) free(token_param);
