@@ -271,7 +271,8 @@ static void load_smtp_password(void) {
     const char* pw = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "pw"));
     if (pw && pw[0]) {
         /* Inject into in-memory smtp config so actions.c can read it */
-        cJSON* smtp_cfg = ACAP_Get_Config("smtp");
+        cJSON* _sett    = ACAP_Get_Config("settings");
+        cJSON* smtp_cfg = _sett ? cJSON_GetObjectItem(_sett, "smtp") : NULL;
         if (smtp_cfg) {
             cJSON* pw_item = cJSON_GetObjectItem(smtp_cfg, "password");
             if (pw_item) cJSON_SetValuestring(pw_item, pw);
@@ -321,6 +322,18 @@ static cJSON* get_body_json(const ACAP_HTTP_Request req) {
 
 /*=====================================================
  * GET/POST/PUT/DELETE /local/acap_event_engine/rules
+ * 
+ * GET /rules                          - List all rules
+ * GET /rules?id=UUID                  - Get a single rule
+ * GET /rules?id=UUID&action=export    - Export one rule as JSON download
+ * GET /rules?action=export            - Export all rules as JSON download
+ *
+ * POST /rules                         - Create a new rule
+ * POST /rules?id=UUID                 - Update existing rule
+ * POST /rules?action=export           - Export all rules as JSON (body response)
+ * POST /rules?action=import           - Bulk import rules from JSON array
+ *
+ * DELETE /rules?id=UUID               - Delete a rule
  *=====================================================*/
 static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     const char* method = get_method(req);
@@ -328,6 +341,26 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     if (strcmp(method, "GET") == 0) {
         char* id = ACAP_HTTP_Request_Param(req, "id");
         char* action = ACAP_HTTP_Request_Param(req, "action");
+        
+        /* GET ?action=export → bulk export all rules as file download */
+        if (!id && action && *action && strcmp(action, "export") == 0) {
+            cJSON* list = RuleEngine_List();
+            char* json_str = cJSON_Print(list);
+            unsigned json_size = json_str ? strlen(json_str) : 0;
+            
+            if (json_str && json_size > 0) {
+                ACAP_HTTP_Header_FILE(resp, "rules_backup.json", "application/json", json_size);
+                ACAP_HTTP_Respond_Data(resp, json_size, (const void*)json_str);
+                free(json_str);
+            } else {
+                ACAP_HTTP_Respond_Error(resp, 500, "Failed to serialize rules");
+            }
+            cJSON_Delete(list);
+            if (action) free(action);
+            if (id) free(id);
+            return;
+        }
+        
         if (id && *id) {
             cJSON* rule = RuleEngine_Get(id);
             if (!rule) { 
@@ -384,6 +417,90 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         }
 
     } else if (strcmp(method, "POST") == 0) {
+        char* action = ACAP_HTTP_Request_Param(req, "action");
+        
+        /* POST ?action=export → bulk export all rules (JSON response body) */
+        if (action && *action && strcmp(action, "export") == 0) {
+            cJSON* list = RuleEngine_List();
+            ACAP_HTTP_Respond_JSON(resp, list);
+            cJSON_Delete(list);
+            if (action) free(action);
+            return;
+        }
+        
+        /* POST ?action=import → bulk import rules from JSON array */
+        if (action && *action && strcmp(action, "import") == 0) {
+            cJSON* body = get_body_json(req);
+            if (!body) { 
+                ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON body"); 
+                if (action) free(action);
+                return; 
+            }
+
+            /* Expect an array of rules */
+            if (!cJSON_IsArray(body)) {
+                cJSON_Delete(body);
+                ACAP_HTTP_Respond_Error(resp, 400, "Import body must be a JSON array of rules");
+                if (action) free(action);
+                return;
+            }
+
+            /* Process each rule in the array */
+            cJSON* result = cJSON_CreateObject();
+            cJSON* imported_array = cJSON_AddArrayToObject(result, "imported");
+            cJSON* errors_array = cJSON_AddArrayToObject(result, "errors");
+            int total = 0, success = 0;
+
+            cJSON* rule_item = NULL;
+            cJSON_ArrayForEach(rule_item, body) {
+                total++;
+                char error[256] = "";
+                
+                /* Validate rule before import */
+                if (!validate_rule_json(rule_item, error, sizeof(error))) {
+                    cJSON* err_obj = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(err_obj, "index", total - 1);
+                    cJSON_AddStringToObject(err_obj, "rule_name", 
+                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) ? 
+                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) : "unknown");
+                    cJSON_AddStringToObject(err_obj, "error", error);
+                    cJSON_AddItemToArray(errors_array, err_obj);
+                    continue;
+                }
+
+                /* Try to add the rule */
+                char new_id[37] = "";
+                if (RuleEngine_Add(rule_item, new_id)) {
+                    cJSON* imported_obj = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(imported_obj, "index", total - 1);
+                    cJSON_AddStringToObject(imported_obj, "id", new_id);
+                    cJSON_AddStringToObject(imported_obj, "rule_name", 
+                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")));
+                    cJSON_AddItemToArray(imported_array, imported_obj);
+                    success++;
+                } else {
+                    cJSON* err_obj = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(err_obj, "index", total - 1);
+                    cJSON_AddStringToObject(err_obj, "rule_name", 
+                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) ? 
+                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) : "unknown");
+                    cJSON_AddStringToObject(err_obj, "error", "Failed to add rule");
+                    cJSON_AddItemToArray(errors_array, err_obj);
+                }
+            }
+
+            cJSON_Delete(body);
+            cJSON_AddNumberToObject(result, "total", total);
+            cJSON_AddNumberToObject(result, "success", success);
+            cJSON_AddNumberToObject(result, "failed", total - success);
+            
+            ACAP_HTTP_Respond_JSON(resp, result);
+            cJSON_Delete(result);
+            if (action) free(action);
+            return;
+        }
+
+        if (action) free(action);
         cJSON* body = get_body_json(req);
         if (!body) { ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON body"); return; }
 

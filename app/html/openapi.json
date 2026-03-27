@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an IFTTT-style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | ISO 8601 UTC timestamp |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (only when `attach_snapshot` is true on an HTTP Request action) |\n",
-    "version": "1.8.2",
+    "version": "1.8.3",
     "contact": {
       "url": "https://github.com/Mo3he"
     }

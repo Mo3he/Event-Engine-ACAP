@@ -913,8 +913,9 @@ static size_t curl_read_buf(char* ptr, size_t sz, size_t n, void* ud) {
  * settings (settings.json "smtp" section); per-action config only has
  * to, subject, and body. */
 static void action_email(cJSON* cfg, cJSON* trigger_data) {
-    /* Read SMTP config from global settings */
-    cJSON* smtp_cfg = ACAP_Get_Config("smtp");
+    /* Read SMTP config from global settings — smtp lives under app["settings"]["smtp"] */
+    cJSON* _sett    = ACAP_Get_Config("settings");
+    cJSON* smtp_cfg = _sett ? cJSON_GetObjectItem(_sett, "smtp") : NULL;
     const char* smtp_url = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "server")) : NULL;
     const char* from     = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "from"))   : NULL;
     if (!smtp_url || !smtp_url[0]) { LOG_ACTION_ERR("email: SMTP server not configured in settings"); return; }
