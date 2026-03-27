@@ -680,7 +680,10 @@ static void action_ptz_preset(cJSON* cfg) {
     const char* preset = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "preset"));
     if (!preset) {
         cJSON* pid = cJSON_GetObjectItem(cfg, "preset_id");
-        if (!pid) return;
+        if (!pid) {
+            LOG_ACTION_ERR("ptz_preset: neither preset name nor preset_id provided");
+            return;
+        }
         char req[128];
         snprintf(req, sizeof(req), "com/ptz.cgi?camera=%d&gotoserverpresetno=%d",
                  channel, (int)pid->valuedouble);

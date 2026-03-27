@@ -63,14 +63,10 @@ function buildRuleForm(rule) {
         <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">OR = any trigger fires | AND = all must activate</span>
       </div>
       <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'block' : 'none'};margin-top:8px;">
-        <div class="form-row" style="align-items:center;gap:8px;">
-          <label for="f-trigger-window" style="font-size:12px;white-space:nowrap;">Correlation window (seconds):</label>
-          <input type="number" id="f-trigger-window" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" style="width:80px;" title="All triggers must fire within this many seconds. 0 = no time limit.">
-          <span style="font-size:10px;color:var(--text-dim);">0 = no time limit</span>
-        </div>
-        <div style="margin-top:5px;padding:7px 10px;background:var(--bg-alt,#2a2a2a);border-left:3px solid var(--accent,#4a9eff);border-radius:3px;font-size:11px;color:var(--text-dim);line-height:1.5;">
-          <strong style="color:var(--text);">How AND + correlation window works:</strong><br>
-          The rule fires only when <em>every</em> trigger has activated. With a window (e.g. 30 s), all triggers must fire within that rolling period — if any timestamp falls outside the window the partial state is discarded and they must all fire again. Set to 0 to require all triggers to have fired at least once with no time constraint.
+        <div class="form-group">
+          <label>Correlation Window (s, 0 = off)</label>
+          <input id="f-trigger-window" type="number" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" placeholder="0 = no time limit">
+          <div class="form-hint">All triggers must happen within this time. 0 = no time limit.</div>
         </div>
       </div>
     </div>
@@ -2250,7 +2246,7 @@ function normalizeAction(a) {
     out.version = a.version || 'v2';
   }
   if (a.type === 'email') {
-    out.use_tls = a.use_tls !== 'false' && a.use_tls !== false;
+    /* use_tls is controlled by global SMTP config, not per-action */
     out.attach_snapshot = a.attach_snapshot === true;
   }
   if (a.type === 'slack_webhook' || a.type === 'teams_webhook' || a.type === 'telegram') {
