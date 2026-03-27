@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an IFTTT-style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | ISO 8601 UTC timestamp |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (only when `attach_snapshot` is true on an HTTP Request action) |\n",
-    "version": "1.6.0",
+    "version": "1.8.2",
     "contact": {
       "url": "https://github.com/Mo3he"
     }
@@ -911,7 +911,7 @@
           "rules_enabled":  { "type": "integer" },
           "events_today":   { "type": "integer" },
           "time":           { "type": "string", "format": "date-time" },
-          "engine_version": { "type": "string", "example": "1.8.0" },
+          "engine_version": { "type": "string", "example": "1.8.2" },
           "mqtt": {
             "type": "object",
             "properties": {
@@ -998,20 +998,27 @@
   "paths": {
     "/rules": {
       "get": {
-        "summary": "List all rules (or fetch one by ID)",
+        "summary": "List all rules, fetch one by ID, or export all rules",
         "operationId": "listRules",
         "tags": ["Rules"],
+        "description": "Without query parameters: returns all rules.\n\nWith `?id=UUID`: returns a single rule.\n\nWith `?action=export`: exports all rules as a JSON file download.\n\nWith `?id=UUID&action=export`: exports a single rule as JSON file.",
         "parameters": [
           {
             "name": "id",
             "in": "query",
             "schema": { "type": "string", "format": "uuid" },
-            "description": "If provided, return the single rule with this ID"
+            "description": "If provided, return/export the single rule with this ID"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["export"] },
+            "description": "If 'export', return rules as downloadable JSON file instead of response body"
           }
         ],
         "responses": {
           "200": {
-            "description": "Array of rules, or a single rule object if ?id= is given",
+            "description": "Array of rules, single rule object, or JSON file download",
             "content": {
               "application/json": {
                 "schema": {
@@ -1023,27 +1030,44 @@
               }
             }
           },
-          "404": { "description": "Rule not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+          "404": { "description": "Rule not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "500": { "description": "Failed to serialize rules" }
         }
       },
       "post": {
-        "summary": "Create a new rule, or update an existing one",
+        "summary": "Create/update a rule, bulk export, or bulk import rules",
         "operationId": "createOrUpdateRule",
         "tags": ["Rules"],
-        "description": "Without `?id=`: creates a new rule and returns the assigned UUID.\n\nWith `?id=<uuid>`: replaces the rule with that ID. The existing rule is fully replaced.",
+        "description": "Multiple modes:\n\n**Create** (no parameters): POST a single rule object to create a new rule.\n\n**Update** (`?id=UUID`): POST a single rule object to update existing rule with that ID.\n\n**Export all** (`?action=export`): POST with optional empty body to export all rules as JSON array.\n\n**Import** (`?action=import`): POST a **JSON array** of rule objects to bulk import them. Cannot import a single rule object — use the Create endpoint instead.",
         "parameters": [
           {
             "name": "id",
             "in": "query",
             "schema": { "type": "string", "format": "uuid" },
-            "description": "If provided, update the rule with this ID instead of creating"
+            "description": "For create/update: if provided, updates the rule with this ID instead of creating new"
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["export", "import"] },
+            "description": "Operation: 'export' to get all rules as JSON array, 'import' to bulk import rules from a JSON array"
           }
         ],
         "requestBody": {
-          "required": true,
+          "description": "Format depends on operation: single object for create/update, JSON array for import",
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/Rule" },
+              "schema": { 
+                "oneOf": [
+                  { "title": "Single Rule (for Create/Update)", "$ref": "#/components/schemas/Rule", "description": "POST without ?action=import or with ?id=UUID to create/update a single rule" },
+                  {
+                    "title": "Array of Rules (for Import)",
+                    "description": "POST with ?action=import to bulk import multiple rules. Must be a JSON array.",
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/Rule" }
+                  }
+                ]
+              },
               "examples": {
                 "motion_record": {
                   "summary": "Motion detection → start recording",
@@ -1108,7 +1132,7 @@
         },
         "responses": {
           "200": {
-            "description": "Created or updated successfully",
+            "description": "Operation successful - response type depends on the operation (create/update/export/import)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1127,15 +1151,70 @@
                       "properties": {
                         "status": { "type": "string", "example": "updated" }
                       }
+                    },
+                    {
+                      "title": "Export Result",
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Rule" },
+                      "description": "Array of all rules when using ?action=export"
+                    },
+                    {
+                      "title": "Import Result",
+                      "type": "object",
+                      "properties": {
+                        "total": { "type": "integer", "description": "Total rules in import request" },
+                        "success": { "type": "integer", "description": "Successfully imported" },
+                        "failed": { "type": "integer", "description": "Failed to import" },
+                        "imported": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": { "type": "integer" },
+                              "id": { "type": "string", "format": "uuid" },
+                              "rule_name": { "type": "string" }
+                            }
+                          }
+                        },
+                        "errors": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": { "type": "integer" },
+                              "rule_name": { "type": "string" },
+                              "error": { "type": "string" }
+                            }
+                          }
+                        }
+                      },
+                      "description": "Import summary when using ?action=import"
                     }
                   ]
+                },
+                "examples": {
+                  "import": { 
+                    "summary": "Import response: 2 of 3 rules succeeded",
+                    "value": {
+                      "total": 3,
+                      "success": 2,
+                      "failed": 1,
+                      "imported": [
+                        { "index": 0, "id": "550e8400-e29b-41d4-a716-446655440000", "rule_name": "Motion Alert" },
+                        { "index": 1, "id": "550e8400-e29b-41d4-a716-446655440001", "rule_name": "Schedule" }
+                      ],
+                      "errors": [
+                        { "index": 2, "rule_name": "Bad Rule", "error": "Rule name is required" }
+                      ]
+                    }
+                  }
                 }
               }
             }
           },
           "400": { "description": "Invalid request body" },
           "404": { "description": "Rule not found (update mode)" },
-          "500": { "description": "Failed to save rule" }
+          "500": { "description": "Failed to save rule or process import/export" }
         }
       },
       "delete": {
