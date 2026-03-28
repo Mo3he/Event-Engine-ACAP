@@ -1,0 +1,66 @@
+{
+  "name": "Perimeter Intrusion Response",
+  "description": "Full security response when a person is detected in the perimeter zone after hours while the system is armed: record, activate siren/strobe, trigger external alarm via I/O, send Telegram alert with snapshot, and display warning overlay.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 120,
+  "max_executions": 10,
+  "max_exec_period": "hour",
+  "triggers": [
+    {
+      "type": "aoa_scenario",
+      "scenario_id": 1,
+      "object_class": "human"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "time_window",
+      "start": "19:00",
+      "end": "06:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    },
+    {
+      "type": "variable_compare",
+      "name": "system.armed",
+      "op": "eq",
+      "value": "true"
+    }
+  ],
+  "actions": [
+    {
+      "type": "recording",
+      "operation": "start",
+      "duration": 120
+    },
+    {
+      "type": "siren_light",
+      "profile": "Intrusion",
+      "signal_action": "start"
+    },
+    {
+      "type": "io_output",
+      "port": 1,
+      "state": "active",
+      "duration": 30
+    },
+    {
+      "type": "telegram",
+      "bot_token": "YOUR_BOT_TOKEN",
+      "chat_id": "YOUR_CHAT_ID",
+      "message": "🚨 *INTRUSION DETECTED*\n\nCamera: {{camera.model}} ({{camera.serial}})\nIP: {{camera.ip}}\nTime: {{date}} {{time}}\nObject: {{trigger.object_class}}\n\nRecording started. Siren activated. External alarm triggered.",
+      "parse_mode": "Markdown",
+      "attach_snapshot": true
+    },
+    {
+      "type": "overlay_text",
+      "text": "⚠ INTRUSION DETECTED — {{time}}",
+      "channel": 1,
+      "position": "topLeft",
+      "text_color": "white",
+      "duration": 60
+    }
+  ]
+}

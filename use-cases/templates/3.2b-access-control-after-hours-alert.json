@@ -1,0 +1,47 @@
+{
+  "name": "Access Control — After-Hours Alert",
+  "description": "Outside business hours, when the card reader triggers I/O input port 1, do NOT release the door — instead send a Telegram alert with snapshot to notify security of the after-hours access attempt.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 10,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "rising"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "time_window",
+      "start": "18:00",
+      "end": "08:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "actions": [
+    {
+      "type": "recording",
+      "operation": "start",
+      "duration": 30
+    },
+    {
+      "type": "telegram",
+      "bot_token": "YOUR_BOT_TOKEN",
+      "chat_id": "YOUR_CHAT_ID",
+      "message": "⚠️ *After-Hours Access Attempt*\n\nCamera: {{camera.model}} ({{camera.serial}})\nIP: {{camera.ip}}\nTime: {{date}} {{time}}\nDoor: NOT released\n\nRecording captured.",
+      "parse_mode": "Markdown",
+      "attach_snapshot": true
+    },
+    {
+      "type": "increment_counter",
+      "name": "after_hours_attempts",
+      "operation": "increment",
+      "delta": 1
+    }
+  ]
+}

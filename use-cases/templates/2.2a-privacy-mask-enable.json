@@ -1,0 +1,35 @@
+{
+  "name": "Enable Privacy Mask — Business Hours",
+  "description": "At 08:00 on weekdays, enable the 'Office Window' privacy mask to comply with GDPR during business hours. Only fires if the system.privacy_mode variable is not set to 'override'.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 1,
+  "max_exec_period": "day",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "daily_time",
+      "daily_time": "08:00",
+      "days": [1, 2, 3, 4, 5]
+    }
+  ],
+  "conditions": [
+    {
+      "type": "variable_compare",
+      "name": "system.privacy_mode",
+      "op": "ne",
+      "value": "override"
+    }
+  ],
+  "actions": [
+    {
+      "type": "privacy_mask",
+      "mask_id": "Office Window",
+      "channel": 1,
+      "enabled": true
+    }
+  ]
+}

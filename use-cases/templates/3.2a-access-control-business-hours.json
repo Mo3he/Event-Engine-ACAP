@@ -1,0 +1,45 @@
+{
+  "name": "Access Control — Business Hours",
+  "description": "During Mon-Fri 08:00-18:00, when the card reader triggers I/O input port 1, release the door lock (I/O output port 2 for 5 seconds), start a short recording, and increment the access counter.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 3,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "rising"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "time_window",
+      "start": "08:00",
+      "end": "18:00",
+      "days": [1, 2, 3, 4, 5]
+    }
+  ],
+  "actions": [
+    {
+      "type": "io_output",
+      "port": 2,
+      "state": "active",
+      "duration": 5
+    },
+    {
+      "type": "recording",
+      "operation": "start",
+      "duration": 15
+    },
+    {
+      "type": "increment_counter",
+      "name": "door_access",
+      "operation": "increment",
+      "delta": 1
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Sunset — Night Mode + IR Illuminator",
+  "description": "At sunset, switch the IR cut filter to night mode and turn on the IR illuminator at 80% intensity. Uses the camera's configured latitude/longitude for accurate sunset calculation.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 1,
+  "max_exec_period": "day",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "sunset",
+      "offset": 0
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "ir_cut_filter",
+      "mode": "night",
+      "channel": 1
+    },
+    {
+      "type": "light_control",
+      "operation": "on",
+      "light_id": "led0",
+      "intensity": 80
+    }
+  ]
+}

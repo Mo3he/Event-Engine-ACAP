@@ -1,0 +1,37 @@
+{
+  "name": "Sensor Data to InfluxDB — Grafana Dashboard",
+  "description": "Every 60 seconds, read environmental sensor data (temperature, humidity, CO2) and write directly to InfluxDB as a time-series data point — ready for Grafana visualisation with no middleware required.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval": 60
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tns1": "Environment" },
+      "topic1": { "tnsaxis": "AirQuality" }
+    },
+    {
+      "type": "influxdb_write",
+      "url": "http://YOUR_INFLUXDB_HOST:8086",
+      "version": "v2",
+      "org": "your-org",
+      "bucket": "environment",
+      "token": "YOUR_INFLUXDB_TOKEN",
+      "measurement": "air_quality",
+      "tags": "camera={{camera.serial}},model={{camera.model}}",
+      "fields": "temperature={{trigger.Temperature}},humidity={{trigger.Humidity}},co2={{trigger.CO2}}"
+    }
+  ]
+}

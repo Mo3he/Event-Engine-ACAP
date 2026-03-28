@@ -1,0 +1,41 @@
+{
+  "name": "Occupancy Warning — Approaching Limit",
+  "description": "Every 30 seconds, check AOA occupancy. When 20 or more people are detected, display a warning overlay on the live stream. The overlay auto-removes after 35 seconds (before the next check).",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 25,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval": 30
+    }
+  ],
+  "conditions": [
+    {
+      "type": "aoa_occupancy",
+      "scenario_id": 1,
+      "object_class": "human",
+      "op": "gte",
+      "value": 20
+    }
+  ],
+  "actions": [
+    {
+      "type": "aoa_get_counts",
+      "scenario_id": 1
+    },
+    {
+      "type": "overlay_text",
+      "text": "OCCUPANCY: {{aoa_human}} — LIMIT APPROACHING",
+      "channel": 1,
+      "position": "topLeft",
+      "text_color": "white",
+      "duration": 35
+    }
+  ]
+}

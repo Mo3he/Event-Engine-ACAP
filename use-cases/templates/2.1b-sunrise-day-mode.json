@@ -1,0 +1,31 @@
+{
+  "name": "Sunrise — Day Mode + Illuminator Off",
+  "description": "At sunrise, switch the IR cut filter back to day mode and turn off the IR illuminator. Paired with the sunset rule for automatic day/night imaging management.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 1,
+  "max_exec_period": "day",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "sunrise",
+      "offset": 0
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "ir_cut_filter",
+      "mode": "day",
+      "channel": 1
+    },
+    {
+      "type": "light_control",
+      "operation": "off",
+      "light_id": "led0"
+    }
+  ]
+}

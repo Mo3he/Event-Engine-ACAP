@@ -1,0 +1,33 @@
+{
+  "name": "Sensor Data over MQTT — Home Automation",
+  "description": "Every 60 seconds, read environmental sensor data (temperature, humidity, CO2) and publish as a structured JSON message over MQTT — ready for Home Assistant, Node-RED, or any MQTT subscriber to consume.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval": 60
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tns1": "Environment" },
+      "topic1": { "tnsaxis": "AirQuality" }
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "sensors/{{camera.serial}}/environment",
+      "payload": "{\"timestamp\":\"{{timestamp}}\",\"model\":\"{{camera.model}}\",\"serial\":\"{{camera.serial}}\",\"temperature\":{{trigger.Temperature}},\"humidity\":{{trigger.Humidity}},\"co2\":{{trigger.CO2}}}",
+      "qos": 1,
+      "retain": true
+    }
+  ]
+}

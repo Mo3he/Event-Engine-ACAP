@@ -1,0 +1,46 @@
+{
+  "name": "Occupancy Critical — Capacity Exceeded",
+  "description": "Every 30 seconds, check AOA occupancy. When 30 or more people are detected, send a Slack alert to the store manager and activate the door indicator light via I/O output for 35 seconds.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 25,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval": 30
+    }
+  ],
+  "conditions": [
+    {
+      "type": "aoa_occupancy",
+      "scenario_id": 1,
+      "object_class": "human",
+      "op": "gte",
+      "value": 30
+    }
+  ],
+  "actions": [
+    {
+      "type": "aoa_get_counts",
+      "scenario_id": 1
+    },
+    {
+      "type": "slack_webhook",
+      "webhook_url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "message": ":red_circle: *CRITICAL — STORE CAPACITY EXCEEDED*\n\nOccupancy: {{aoa_human}} people (limit: 30)\nCamera: {{camera.model}} ({{camera.serial}})\nTime: {{date}} {{time}}\n\nDoor indicator activated. Please manage entry.",
+      "channel": "#store-alerts",
+      "username": "Occupancy Monitor"
+    },
+    {
+      "type": "io_output",
+      "port": 1,
+      "state": "active",
+      "duration": 35
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "Multi-Channel Motion Alerts",
+  "description": "On motion detection during weekday business hours, send an alert with snapshot to Slack, Microsoft Teams, and email simultaneously.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 30,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [
+    {
+      "type": "time_window",
+      "start": "08:00",
+      "end": "18:00",
+      "days": [1, 2, 3, 4, 5]
+    }
+  ],
+  "actions": [
+    {
+      "type": "slack_webhook",
+      "webhook_url": "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
+      "message": ":rotating_light: *Motion Detected*\nCamera: {{camera.model}} ({{camera.serial}})\nIP: {{camera.ip}}\nTime: {{date}} {{time}}",
+      "channel": "#security-alerts",
+      "username": "Axis Camera"
+    },
+    {
+      "type": "teams_webhook",
+      "webhook_url": "https://YOUR_TENANT.webhook.office.com/webhookb2/YOUR/TEAMS/WEBHOOK",
+      "title": "Motion Detected — {{camera.model}}",
+      "message": "Motion detected on camera {{camera.serial}} ({{camera.ip}}) at {{date}} {{time}}.",
+      "theme_color": "FF6600"
+    },
+    {
+      "type": "email",
+      "to": "security@example.com",
+      "subject": "Motion Alert — {{camera.model}} ({{camera.serial}})",
+      "body": "Motion was detected on camera {{camera.model}} ({{camera.serial}}) at {{camera.ip}}.\n\nTime: {{date}} {{time}}\n\nPlease review the live feed.",
+      "attach_snapshot": true
+    }
+  ]
+}

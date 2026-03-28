@@ -1,0 +1,38 @@
+{
+  "name": "Daily Activity Digest",
+  "description": "Buffer every motion detection event throughout the day into a single digest and deliver it as one email at 18:00 — a daily activity report for facility managers.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 5,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    },
+    {
+      "type": "schedule",
+      "schedule_type": "daily_time",
+      "daily_time": "18:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "digest",
+      "operation": "buffer",
+      "interval": 86400,
+      "delivery": "email",
+      "to": "facilities@example.com",
+      "subject": "Daily Activity Report — {{camera.model}} ({{camera.serial}}) — {{date}}",
+      "template": "{{time}} — Motion detected on {{camera.model}} ({{camera.serial}}) at {{camera.ip}}"
+    }
+  ]
+}

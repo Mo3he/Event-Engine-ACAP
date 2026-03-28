@@ -1,0 +1,39 @@
+{
+  "name": "PTZ Auto-Track + Resume Guard Tour",
+  "description": "When AOA detects a person in scenario 1, stop the patrol guard tour, move to a close-up PTZ preset, hold for 30 seconds, then resume the tour. 60-second cooldown prevents repeated interruptions.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 60,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "aoa_scenario",
+      "scenario_id": 1,
+      "object_class": "human"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "guard_tour",
+      "operation": "stop",
+      "tour_id": "Patrol Route"
+    },
+    {
+      "type": "ptz_preset",
+      "preset": "Zone A Close-up"
+    },
+    {
+      "type": "delay",
+      "duration": 30
+    },
+    {
+      "type": "guard_tour",
+      "operation": "start",
+      "tour_id": "Patrol Route"
+    }
+  ]
+}
