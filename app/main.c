@@ -357,10 +357,19 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         char* id = ACAP_HTTP_Request_Param(req, "id");
         char* action = ACAP_HTTP_Request_Param(req, "action");
         
-        /* GET ?action=export → bulk export all rules as file download */
+        /* GET ?action=export → bulk export all rules (full details) as file download */
         if (!id && action && *action && strcmp(action, "export") == 0) {
-            cJSON* list = RuleEngine_List();
-            char* json_str = cJSON_Print(list);
+            cJSON* summaries = RuleEngine_List();
+            cJSON* full_arr = cJSON_CreateArray();
+            cJSON* item;
+            cJSON_ArrayForEach(item, summaries) {
+                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+                if (!rid) continue;
+                cJSON* full_rule = RuleEngine_Get(rid);
+                if (full_rule) cJSON_AddItemToArray(full_arr, full_rule);
+            }
+            cJSON_Delete(summaries);
+            char* json_str = cJSON_Print(full_arr);
             unsigned json_size = json_str ? strlen(json_str) : 0;
             
             if (json_str && json_size > 0) {
@@ -370,7 +379,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
             } else {
                 ACAP_HTTP_Respond_Error(resp, 500, "Failed to serialize rules");
             }
-            cJSON_Delete(list);
+            cJSON_Delete(full_arr);
             if (action) free(action);
             if (id) free(id);
             return;
@@ -434,11 +443,20 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     } else if (strcmp(method, "POST") == 0) {
         char* action = ACAP_HTTP_Request_Param(req, "action");
         
-        /* POST ?action=export → bulk export all rules (JSON response body) */
+        /* POST ?action=export → bulk export all rules (JSON response body, full details) */
         if (action && *action && strcmp(action, "export") == 0) {
-            cJSON* list = RuleEngine_List();
-            ACAP_HTTP_Respond_JSON(resp, list);
-            cJSON_Delete(list);
+            cJSON* summaries = RuleEngine_List();
+            cJSON* full_arr = cJSON_CreateArray();
+            cJSON* item;
+            cJSON_ArrayForEach(item, summaries) {
+                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+                if (!rid) continue;
+                cJSON* full_rule = RuleEngine_Get(rid);
+                if (full_rule) cJSON_AddItemToArray(full_arr, full_rule);
+            }
+            cJSON_Delete(summaries);
+            ACAP_HTTP_Respond_JSON(resp, full_arr);
+            cJSON_Delete(full_arr);
             if (action) free(action);
             return;
         }
