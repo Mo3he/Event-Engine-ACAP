@@ -6,7 +6,7 @@ A powerful IFTTT (If This Then That)-style automation engine that runs directly 
 
 Want to know why you need this ACAP, take a look at [Use Cases](../../blob/main/use-cases/USE_CASES.md)
 
-Download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface
+To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface.
 
 ---
 
