@@ -1,5 +1,5 @@
 {
-  "name": "Multi-Channel Motion Alerts",
+  "name": "Multi-Platform Motion Alerts",
   "description": "On motion detection during weekday business hours, send an alert with snapshot to Slack, Microsoft Teams, and email simultaneously.",
   "enabled": true,
   "trigger_logic": "OR",
