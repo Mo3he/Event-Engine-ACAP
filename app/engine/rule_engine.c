@@ -48,6 +48,8 @@ typedef struct {
     int     trigger_pending;
     /* AND correlation: per-trigger last-fire timestamps */
     time_t  trigger_fired_at[MAX_TRIGGERS_PER_RULE];
+    /* cached: 1 if any condition is of type time_window */
+    int     has_time_window;
 } Rule;
 
 static Rule            rules[MAX_RULES];
@@ -139,6 +141,16 @@ static void rule_from_json(Rule* r, cJSON* obj) {
     int tc = r->triggers_json ? cJSON_GetArraySize(r->triggers_json) : 0;
     r->trigger_count = (tc > MAX_TRIGGERS_PER_RULE) ? MAX_TRIGGERS_PER_RULE : tc;
 
+    /* Cache whether any condition is a time_window (avoids scanning on every trigger fire) */
+    r->has_time_window = 0;
+    if (r->conditions_json) {
+        cJSON* c;
+        cJSON_ArrayForEach(c, r->conditions_json) {
+            const char* t = cJSON_GetStringValue(cJSON_GetObjectItem(c, "type"));
+            if (t && strcmp(t, "time_window") == 0) { r->has_time_window = 1; break; }
+        }
+    }
+
     r->last_fired        = 0;
     r->execution_count   = 0;
     r->period_exec_count = 0;
@@ -155,16 +167,6 @@ static void rule_free_json(Rule* r) {
     r->triggers_json   = NULL;
     r->conditions_json = NULL;
     r->actions_json    = NULL;
-}
-
-static int rule_has_time_window(Rule* r) {
-    if (!r->conditions_json) return 0;
-    cJSON* c;
-    cJSON_ArrayForEach(c, r->conditions_json) {
-        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(c, "type"));
-        if (type && strcmp(type, "time_window") == 0) return 1;
-    }
-    return 0;
 }
 
 /*-----------------------------------------------------
@@ -247,7 +249,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     if (!cond_pass) {
         /* If a real trigger fired while the time window is closed, remember it so
          * we can re-attempt when the window reopens. */
-        if (!is_refire && rule_has_time_window(r) && r->cond_window_state == 0)
+        if (!is_refire && r->has_time_window && r->cond_window_state == 0)
             r->trigger_pending = 1;
         EventLog_Append(r->id, r->name, 0, "condition", trigger_data, 0, 0);
         pthread_mutex_unlock(&store_lock);
@@ -594,7 +596,7 @@ void RuleEngine_Tick(void) {
 
     for (int i = 0; i < rule_count; i++) {
         Rule* r = &rules[i];
-        if (!r->enabled || !rule_has_time_window(r)) continue;
+        if (!r->enabled || !r->has_time_window) continue;
 
         int now_open = Conditions_Evaluate_Lightweight(r->conditions_json, r->condition_logic);
         int prev = r->cond_window_state;

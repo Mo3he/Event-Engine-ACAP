@@ -31,6 +31,8 @@ const API = {
 
   getRules:      ()      => API.get('rules'),
   getRule:       id      => API.get(`rules?id=${encodeURIComponent(id)}`),
+  exportRules:   ()      => API.get('rules?action=export'),
+  importRules:   rules   => API.post('rules?action=import', rules).then(r => r.json()),
   addRule:       rule    => API.post('rules', rule),
   updateRule:    (id, r) => API.post(`rules?id=${encodeURIComponent(id)}`, r),
   deleteRule:    id      => API.delete(`rules?id=${encodeURIComponent(id)}`),

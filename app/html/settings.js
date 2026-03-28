@@ -199,7 +199,7 @@ function refreshSolarPreview(lat, lon, containerId) {
     : `<div style="font-size:12px;color:var(--text-muted);margin-top:8px;">No sunrise/sunset at this location today (polar)</div>`;
 }
 
-function refreshAstroTriggerPreview(rowIdx) {
+function _refreshAstroTriggerPreview(rowIdx) {
   const latEl    = document.getElementById(`astro-lat-${rowIdx}`);
   const lonEl    = document.getElementById(`astro-lon-${rowIdx}`);
   const eventEl  = document.getElementById(`astro-event-${rowIdx}`);
@@ -216,9 +216,15 @@ function refreshAstroTriggerPreview(rowIdx) {
     : `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">No event at this location today</div>`;
 }
 
-async function loadEngineSettings() {
+const _astroDebounceTimers = {};
+function refreshAstroTriggerPreview(rowIdx) {
+  clearTimeout(_astroDebounceTimers[rowIdx]);
+  _astroDebounceTimers[rowIdx] = setTimeout(() => _refreshAstroTriggerPreview(rowIdx), 300);
+}
+
+async function loadEngineSettings(settings) {
   try {
-    const settings = await API.get('settings');
+    if (!settings) settings = await API.get('settings');
     const eng = (settings && settings.engine) || {};
     engineLat = eng.latitude !== undefined ? eng.latitude : 0;
     engineLon = eng.longitude !== undefined ? eng.longitude : 0;
@@ -230,9 +236,9 @@ async function loadEngineSettings() {
   } catch(e) { /* non-fatal */ }
 }
 
-async function loadProxySettings() {
+async function loadProxySettings(settings) {
   try {
-    const settings = await API.get('settings');
+    if (!settings) settings = await API.get('settings');
     const eng = (settings && settings.engine) || {};
     const proxy = document.getElementById('engine-proxy');
     if (proxy) proxy.value = eng.socks5_proxy || '';
@@ -266,9 +272,9 @@ async function saveEngineSettings(event) {
   }
 }
 
-async function loadSmtpSettings() {
+async function loadSmtpSettings(settings) {
   try {
-    const settings = await API.get('settings');
+    if (!settings) settings = await API.get('settings');
     const smtp = (settings && settings.smtp) || {};
     const el = (id) => document.getElementById(id);
     if (el('smtp-server')) el('smtp-server').value = smtp.server || '';
@@ -299,9 +305,9 @@ async function saveSmtpSettings(event) {
   }
 }
 
-async function loadMqttSettings() {
+async function loadMqttSettings(settings) {
   try {
-    const settings = await API.get('settings');
+    if (!settings) settings = await API.get('settings');
     const mq = (settings && settings.mqtt) || {};
     const form = document.getElementById('mqtt-form');
     if (!form) return;
@@ -348,4 +354,15 @@ async function saveMqttSettings(event) {
   } catch(e) {
     toast('Failed to save: ' + e.message, 'error');
   }
+}
+
+/* Fetch /settings once and populate all settings sections */
+async function loadAllSettings() {
+  try {
+    const settings = await API.get('settings');
+    loadEngineSettings(settings);
+    loadProxySettings(settings);
+    loadSmtpSettings(settings);
+    loadMqttSettings(settings);
+  } catch(e) { /* non-fatal — individual loaders will show errors as needed */ }
 }

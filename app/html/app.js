@@ -75,6 +75,8 @@ if (typeof API === 'undefined') {
 
     getRules:      ()      => API.get('rules'),
     getRule:       id      => API.get(`rules?id=${encodeURIComponent(id)}`),
+    exportRules:   ()      => API.get('rules?action=export'),
+    importRules:   rules   => API.post('rules?action=import', rules).then(r => r.json()),
     addRule:       rule    => API.post('rules', rule),
     updateRule:    (id, r) => API.post(`rules?id=${encodeURIComponent(id)}`, r),
     deleteRule:    id      => API.delete(`rules?id=${encodeURIComponent(id)}`),
@@ -118,7 +120,7 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'log')       loadEvents();
     if (btn.dataset.tab === 'variables') loadVariables();
-    if (btn.dataset.tab === 'settings')  { loadStatus(); loadSmtpSettings(); loadProxySettings(); loadMqttSettings(); loadEngineSettings(); }
+    if (btn.dataset.tab === 'settings')  { loadStatus(); loadAllSettings(); }
   });
 });
 
@@ -854,8 +856,7 @@ function downloadJSON(filename, data) {
 
 async function exportRules() {
   try {
-    const summaries = await API.getRules();
-    const full = await Promise.all(summaries.map(r => API.getRule(r.id)));
+    const full = await API.exportRules();
     downloadJSON('event_engine_rules.json', full);
   } catch(e) {
     toast('Export failed: ' + e.message, 'error');
@@ -869,17 +870,10 @@ async function importRules(input) {
   try {
     const text = await file.text();
     const rules = JSON.parse(text);
-    const list = Array.isArray(rules) ? rules : [rules];
-    let ok = 0, fail = 0;
-    for (const rule of list) {
-      /* Strip the id so the engine assigns a new one */
-      const { id: _id, ...r } = rule;
-      try {
-        await API.addRule(r);
-        ok++;
-      } catch(_) { fail++; }
-    }
-    toast(`Imported ${ok} rule(s)${fail ? ', ' + fail + ' failed' : ''}`);
+    /* Strip ids so the engine assigns new ones */
+    const list = (Array.isArray(rules) ? rules : [rules]).map(({ id: _id, ...r }) => r);
+    const result = await API.importRules(list);
+    toast(`Imported ${result.success} rule(s)${result.failed ? ', ' + result.failed + ' failed' : ''}`);
     loadRules();
   } catch(e) {
     toast('Import failed: ' + e.message, 'error');

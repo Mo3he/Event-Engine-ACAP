@@ -211,35 +211,39 @@ static void load_mqtt_password(char* out, size_t out_size) {
     cJSON_Delete(obj);
 }
 
+/* Fill mc from JSON config. Handles NULL cfg (sets defaults only). */
+static void fill_mqtt_config(cJSON* cfg, MQTT_Config* mc) {
+    snprintf(mc->client_id, sizeof(mc->client_id), "acap_event_engine");
+    mc->port = 1883; mc->keepalive = 60;
+    if (!cfg) return;
+    const char* host = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "host"));
+    snprintf(mc->host,      sizeof(mc->host),      "%s", host ? host : "");
+    const char* cid  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "client_id"));
+    if (cid && cid[0]) snprintf(mc->client_id, sizeof(mc->client_id), "%s", cid);
+    const char* user = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
+    snprintf(mc->username,  sizeof(mc->username),  "%s", user ? user : "");
+    const char* pass = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));
+    if (pass && pass[0]) {
+        save_mqtt_password(pass);
+        snprintf(mc->password, sizeof(mc->password), "%s", pass);
+        cJSON* pw_item = cJSON_GetObjectItem(cfg, "password");
+        if (pw_item) cJSON_SetValuestring(pw_item, "");
+    } else {
+        load_mqtt_password(mc->password, sizeof(mc->password));
+    }
+    cJSON* port = cJSON_GetObjectItem(cfg, "port");
+    if (port) mc->port = (int)port->valuedouble;
+    cJSON* ka = cJSON_GetObjectItem(cfg, "keepalive");
+    if (ka) mc->keepalive = (int)ka->valuedouble;
+    mc->use_tls = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "use_tls")) ? 1 : 0;
+    mc->enabled = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "enabled")) ? 1 : 0;
+}
+
 static void apply_mqtt_config(cJSON* mqtt_json) {
     if (!mqtt_json) return;
     MQTT_Config mc;
     memset(&mc, 0, sizeof(mc));
-    const char* host = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_json, "host"));
-    snprintf(mc.host,      sizeof(mc.host),      "%s", host ? host : "");
-    const char* cid  = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_json, "client_id"));
-    snprintf(mc.client_id, sizeof(mc.client_id), "%s", cid  ? cid  : "acap_event_engine");
-    const char* user = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_json, "username"));
-    snprintf(mc.username,  sizeof(mc.username),  "%s", user ? user : "");
-
-    /* Password: if provided in the update, save it; otherwise use stored value */
-    const char* pass = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_json, "password"));
-    if (pass && pass[0]) {
-        save_mqtt_password(pass);
-        snprintf(mc.password, sizeof(mc.password), "%s", pass);
-        /* Strip from in-memory settings so GET /settings never returns it */
-        cJSON* pw_item = cJSON_GetObjectItem(mqtt_json, "password");
-        if (pw_item) cJSON_SetValuestring(pw_item, "");
-    } else {
-        load_mqtt_password(mc.password, sizeof(mc.password));
-    }
-
-    cJSON* port = cJSON_GetObjectItem(mqtt_json, "port");
-    mc.port = port ? (int)port->valuedouble : 1883;
-    cJSON* ka   = cJSON_GetObjectItem(mqtt_json, "keepalive");
-    mc.keepalive = ka ? (int)ka->valuedouble : 60;
-    mc.use_tls = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_json, "use_tls")) ? 1 : 0;
-    mc.enabled = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_json, "enabled")) ? 1 : 0;
+    fill_mqtt_config(mqtt_json, &mc);
     MQTT_Reconfigure(&mc);
     memset(mc.password, 0, sizeof(mc.password));
 }
@@ -467,13 +471,13 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 total++;
                 char error[256] = "";
                 
+                const char* rname = cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name"));
+
                 /* Validate rule before import */
                 if (!validate_rule_json(rule_item, error, sizeof(error))) {
                     cJSON* err_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(err_obj, "index", total - 1);
-                    cJSON_AddStringToObject(err_obj, "rule_name", 
-                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) ? 
-                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) : "unknown");
+                    cJSON_AddStringToObject(err_obj, "rule_name", rname ? rname : "unknown");
                     cJSON_AddStringToObject(err_obj, "error", error);
                     cJSON_AddItemToArray(errors_array, err_obj);
                     continue;
@@ -485,16 +489,13 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     cJSON* imported_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(imported_obj, "index", total - 1);
                     cJSON_AddStringToObject(imported_obj, "id", new_id);
-                    cJSON_AddStringToObject(imported_obj, "rule_name", 
-                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")));
+                    cJSON_AddStringToObject(imported_obj, "rule_name", rname ? rname : "");
                     cJSON_AddItemToArray(imported_array, imported_obj);
                     success++;
                 } else {
                     cJSON* err_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(err_obj, "index", total - 1);
-                    cJSON_AddStringToObject(err_obj, "rule_name", 
-                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) ? 
-                        cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name")) : "unknown");
+                    cJSON_AddStringToObject(err_obj, "rule_name", rname ? rname : "unknown");
                     cJSON_AddStringToObject(err_obj, "error", "Failed to add rule");
                     cJSON_AddItemToArray(errors_array, err_obj);
                 }
@@ -724,10 +725,11 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);
 
     cJSON* dev = cJSON_AddObjectToObject(obj, "device");
-    cJSON_AddStringToObject(dev, "serial",  ACAP_DEVICE_Prop("serial")   ? ACAP_DEVICE_Prop("serial")   : "");
-    cJSON_AddStringToObject(dev, "model",   ACAP_DEVICE_Prop("model")    ? ACAP_DEVICE_Prop("model")    : "");
-    cJSON_AddStringToObject(dev, "ip",      ACAP_DEVICE_Prop("IPv4")     ? ACAP_DEVICE_Prop("IPv4")     : "");
-    cJSON_AddStringToObject(dev, "firmware",ACAP_DEVICE_Prop("firmware") ? ACAP_DEVICE_Prop("firmware") : "");
+    const char* dp;
+    dp = ACAP_DEVICE_Prop("serial");   cJSON_AddStringToObject(dev, "serial",   dp ? dp : "");
+    dp = ACAP_DEVICE_Prop("model");    cJSON_AddStringToObject(dev, "model",    dp ? dp : "");
+    dp = ACAP_DEVICE_Prop("IPv4");     cJSON_AddStringToObject(dev, "ip",       dp ? dp : "");
+    dp = ACAP_DEVICE_Prop("firmware"); cJSON_AddStringToObject(dev, "firmware", dp ? dp : "");
 
     ACAP_HTTP_Respond_JSON(resp, obj);
     cJSON_Delete(obj);
@@ -915,34 +917,7 @@ int main(void) {
     {
         MQTT_Config mc;
         memset(&mc, 0, sizeof(mc));
-        cJSON* mqtt_cfg = cJSON_GetObjectItem(settings, "mqtt");
-        if (mqtt_cfg) {
-            const char* h = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_cfg, "host"));
-            snprintf(mc.host,      sizeof(mc.host),      "%s", h ? h : "");
-            const char* c = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_cfg, "client_id"));
-            snprintf(mc.client_id, sizeof(mc.client_id), "%s", c ? c : "acap_event_engine");
-            const char* u = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_cfg, "username"));
-            snprintf(mc.username,  sizeof(mc.username),  "%s", u ? u : "");
-            /* Password: migrate from settings to separate file if present */
-            const char* p = cJSON_GetStringValue(cJSON_GetObjectItem(mqtt_cfg, "password"));
-            if (p && p[0]) {
-                save_mqtt_password(p);
-                snprintf(mc.password, sizeof(mc.password), "%s", p);
-                cJSON* pw_item = cJSON_GetObjectItem(mqtt_cfg, "password");
-                if (pw_item) cJSON_SetValuestring(pw_item, "");
-            } else {
-                load_mqtt_password(mc.password, sizeof(mc.password));
-            }
-            cJSON* port = cJSON_GetObjectItem(mqtt_cfg, "port");
-            mc.port = port ? (int)port->valuedouble : 1883;
-            cJSON* ka   = cJSON_GetObjectItem(mqtt_cfg, "keepalive");
-            mc.keepalive = ka ? (int)ka->valuedouble : 60;
-            mc.use_tls = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_cfg, "use_tls")) ? 1 : 0;
-            mc.enabled = cJSON_IsTrue(cJSON_GetObjectItem(mqtt_cfg, "enabled")) ? 1 : 0;
-        } else {
-            mc.port = 1883; mc.keepalive = 60; mc.use_tls = 0;
-            snprintf(mc.client_id, sizeof(mc.client_id), "acap_event_engine");
-        }
+        fill_mqtt_config(cJSON_GetObjectItem(settings, "mqtt"), &mc);
         MQTT_Init(&mc, mqtt_message_cb, NULL);
     }
 

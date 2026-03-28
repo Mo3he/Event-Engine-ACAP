@@ -66,8 +66,8 @@
           <input type="text" id="rule-search" placeholder="Search rules…" oninput="renderRules()"
                  style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;width:160px;">
           <button class="btn btn-ghost btn-sm" onclick="exportRules()" title="Download all rules as JSON">Export</button>
-          <button class="btn btn-ghost btn-sm" onclick="this.nextElementSibling.click()" title="Import rules from JSON file">Import</button>
-          <input type="file" accept=".json" style="display:none;" onchange="importRules(this)">
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-rules-file').click()" title="Import rules from JSON file">Import</button>
+          <input type="file" id="import-rules-file" accept=".json" style="display:none;" onchange="importRules(this)">
           <button class="btn btn-template btn-sm" id="btn-template" onclick="openTemplateModal()" title="Create a rule from a starter template">Templates</button>
           <button class="btn btn-primary btn-sm" onclick="openRuleEditor(null)">+ New Rule</button>
         </div>
@@ -288,13 +288,11 @@
         </p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
-          <label class="btn btn-ghost" style="cursor:pointer;">
-            Import Rules<input type="file" accept=".json" style="display:none;" onchange="importRules(this)">
-          </label>
+          <button class="btn btn-ghost" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
+          <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
           <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
-          <label class="btn btn-ghost" style="cursor:pointer;">
-            Import Settings<input type="file" accept=".json" style="display:none;" onchange="importSettings(this)">
-          </label>
+          <button class="btn btn-ghost" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
+          <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
         </div>
       </div>
 

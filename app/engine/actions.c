@@ -411,6 +411,17 @@ static size_t curl_discard(void* p, size_t sz, size_t n, void* ud) {
     (void)p; (void)ud; return sz * n;
 }
 
+/* Common curl setup: timeout, discard-write, follow-redirects, proxy */
+static void curl_apply_base(CURL* curl, long timeout) {
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    if (g_socks5_proxy[0]) {
+        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
+        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
+    }
+}
+
 static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
     if (!url_tmpl || !url_tmpl[0]) { LOG_ACTION_ERR("http_request: no url"); return; }
@@ -450,17 +461,11 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     if (!curl) { free(url); free(body); return; }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_apply_base(curl, 10L);
     cJSON* allow_insecure_j = cJSON_GetObjectItem(cfg, "allow_insecure");
     if (allow_insecure_j && cJSON_IsTrue(allow_insecure_j)) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
-    if (g_socks5_proxy[0]) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
     }
 
     /* HTTP Basic/Digest authentication */
@@ -858,16 +863,10 @@ static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
     if (!curl) { free(json_str); return; }
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_apply_base(curl, 10L);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
-    if (g_socks5_proxy[0]) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
-    }
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) LOG_ACTION_ERR("slack_webhook failed: %s", curl_easy_strerror(res));
@@ -940,16 +939,10 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     if (!curl) { free(json_str); return; }
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_apply_base(curl, 10L);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
-    if (g_socks5_proxy[0]) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
-    }
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) LOG_ACTION_ERR("teams_webhook failed: %s", curl_easy_strerror(res));
@@ -1013,16 +1006,10 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
     }
 
     curl_easy_setopt(curl, CURLOPT_URL, write_url);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_apply_base(curl, 10L);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, line);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
-    if (g_socks5_proxy[0]) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
-    }
 
     /* v1 basic auth */
     if (is_v1) {
@@ -1250,13 +1237,7 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
 
     CURL* curl = curl_easy_init();
     if (!curl) { free(msg); return; }
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    if (g_socks5_proxy[0]) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
-    }
+    curl_apply_base(curl, 20L);
 
     const char* parse_mode = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "parse_mode"));
 
@@ -1377,7 +1358,6 @@ static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
         curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
     }
-
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) LOG_WARN("ftp_upload to %s failed: %s", url, curl_easy_strerror(res));
     curl_easy_cleanup(curl);
@@ -1547,13 +1527,7 @@ static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
     if (!curl) { free(url); free(snap_raw); return; }
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    if (g_socks5_proxy[0]) {
-        curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
-        curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
-    }
+    curl_apply_base(curl, 30L);
 
     const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
     const char* password = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));
