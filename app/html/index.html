@@ -48,11 +48,12 @@
     <button class="btn btn-ghost btn-sm btn-icon" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme" style="margin-left:auto;font-size:16px;"></button>
   </header>
 
-  <nav class="tabs">
+  <nav class="tabs" style="display:flex;align-items:center;">
     <button class="tab-btn active" data-tab="rules">Rules</button>
     <button class="tab-btn" data-tab="log">Event Log</button>
     <button class="tab-btn" data-tab="variables">Variables</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
+    <span style="flex:1;"></span>
     <a class="tab-btn" href="swagger.html" target="_blank" style="text-decoration:none;">API Docs</a>
     <a class="tab-btn" href="help.html" target="_blank" style="text-decoration:none;">Help</a>
   </nav>
