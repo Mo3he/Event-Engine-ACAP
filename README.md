@@ -4,11 +4,11 @@
 
 A powerful IFTTT (If This Then That)-style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
 
-Want to know why you need this ACAP, take a look at [Use Cases](../../blob/main/use-cases/USE_CASES.md)
-
 To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface.
 
-A full user manual is built in to the ACAP and available [Here](https://mo3he.github.io/Event-Engine-ACAP/help.html) | [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json)
+Want to know why you need this ACAP, take a look at [Use Cases](../../blob/main/use-cases/USE_CASES.md)  
+A full user manual is built in to the ACAP and available here [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)  
+API documentation can be found here [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json)
 
 ---
 
