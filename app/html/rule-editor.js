@@ -62,12 +62,12 @@ function buildRuleForm(rule) {
         <button class="logic-btn ${rule && rule.trigger_logic==='AND' ? 'active' : ''}" onclick="setLogic('trigger','AND',this)">AND</button>
         <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">OR = any trigger fires | AND = all must activate</span>
       </div>
-      <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'block' : 'none'};margin-top:8px;">
-        <div class="form-group">
-          <label>Correlation Window (s, 0 = off)</label>
-          <input id="f-trigger-window" type="number" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" placeholder="0 = no time limit">
-          <div class="form-hint">All triggers must happen within this time. 0 = no time limit.</div>
-        </div>
+    </div>
+    <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'flex' : 'none'};gap:16px;align-items:flex-start;margin-bottom:8px;">
+      <div class="form-group" style="flex:0 0 260px;">
+        <label>Correlation Window (s, 0 = off)</label>
+        <input id="f-trigger-window" type="number" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" placeholder="0 = no time limit">
+        <div class="form-hint">All triggers must happen within this time. 0 = no time limit.</div>
       </div>
     </div>
     <div id="trigger-list"></div>
@@ -105,7 +105,7 @@ function setLogic(which, val, btn) {
   if (which === 'trigger') {
     triggerLogic = val;
     const twRow = document.getElementById('trigger-window-row');
-    if (twRow) twRow.style.display = val === 'AND' ? 'block' : 'none';
+    if (twRow) twRow.style.display = val === 'AND' ? 'flex' : 'none';
   } else {
     conditionLogic = val;
   }
@@ -170,7 +170,7 @@ function triggerFields(t, rowIdx) {
     const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys : [];
 
     /* Determine current condition type from saved fields */
-    const condType  = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : 'none'));
+    const condType  = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
     const filterKey = t.filter_key || '';
     const filterVal = t.filter_value;
     const valueKey  = t.value_key  || (dataKeys[0] || '');
@@ -178,6 +178,8 @@ function triggerFields(t, rowIdx) {
     const valueThr  = t.value_threshold  !== undefined ? t.value_threshold  : '';
     const valueThr2 = t.value_threshold2 !== undefined ? t.value_threshold2 : '';
     const valueHold = t.value_hold_secs || 0;
+    const stringKey   = t.string_key   || (dataKeys[0] || '');
+    const stringValue = t.string_value || '';
 
     const condRow = dataKeys.length ? `
     <div class="form-row">
@@ -187,6 +189,7 @@ function triggerFields(t, rowIdx) {
           <option value="none"    ${condType==='none'    ?'selected':''}>Fire on every event</option>
           <option value="boolean" ${condType==='boolean' ?'selected':''}>Boolean match (true / false)</option>
           <option value="numeric" ${condType==='numeric' ?'selected':''}>Numeric threshold</option>
+          <option value="string"  ${condType==='string'  ?'selected':''}>String match</option>
         </select>
         ${condType === 'boolean' ? `
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -200,6 +203,18 @@ function triggerFields(t, rowIdx) {
             <option value="true"  ${filterVal===true ||filterVal==='true' ?'selected':''}>= true</option>
             <option value="false" ${filterVal===false||filterVal==='false'?'selected':''}>= false</option>
           </select>
+        </div>` : ''}
+        ${condType === 'string' ? `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-k="string_key">
+            <option value="">— pick field —</option>
+            ${dataKeys.map(k =>
+              `<option value="${escHtml(k)}" ${stringKey===k?'selected':''}>${escHtml(k)}</option>`
+            ).join('')}
+          </select>
+          <span style="opacity:.7;font-size:12px">contains</span>
+          <input type="text" data-k="string_value"
+                 value="${escHtml(stringValue)}" placeholder="match substring">
         </div>` : ''}
         ${condType === 'numeric' ? `
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -685,7 +700,14 @@ function conditionFields(c, rowIdx) {
         <input type="text" data-k="json_expected" value="${escHtml(c.json_expected || '')}" placeholder="ok">
         <div class="form-hint">Value at the JSON path must equal this (string comparison)</div>
       </div>
-    </div>`;
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="allow_insecure" ${c.allow_insecure ? 'checked' : ''}>
+        Allow untrusted certificate (skip SSL verification)
+      </label>
+      <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
+    </div></div>`;
   if (type === 'aoa_occupancy') {
     let scenarioControl;
     if (aoaScenarios === null) {
@@ -1136,6 +1158,13 @@ function actionFields(a) {
         Attach camera snapshot
       </label>
       <div class="form-hint">Fetches a JPEG from the camera and injects it as <b>{{trigger.snapshot_base64}}</b> — use in the body to send the image as base64.</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="allow_insecure" ${a.allow_insecure ? 'checked' : ''}>
+        Allow untrusted certificate (skip SSL verification)
+      </label>
+      <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
     </div></div>
     ${renderOnFailureFields(a)}`;
   if (type === 'recording') {
@@ -2098,7 +2127,7 @@ function normalizeTrigger(t) {
     if (t.topic1_val) out.topic1 = { [t.topic1_ns || '']: t.topic1_val };
     if (t.topic2_val) out.topic2 = { [t.topic2_ns || '']: t.topic2_val };
     if (t.topic3_val) out.topic3 = { [t.topic3_ns || '']: t.topic3_val };
-    const condType = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : 'none'));
+    const condType = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
     if (condType === 'boolean') {
       if (t.filter_key) out.filter_key = t.filter_key;
       if (t.filter_value === 'true' || t.filter_value === true)   out.filter_value = true;
@@ -2110,6 +2139,9 @@ function normalizeTrigger(t) {
       if (out.value_op === 'between') out.value_threshold2 = parseFloat(t.value_threshold2) || 0;
       const hold = parseInt(t.value_hold_secs) || 0;
       if (hold > 0) out.value_hold_secs = hold;
+    } else if (condType === 'string') {
+      if (t.string_key)   out.string_key   = t.string_key;
+      if (t.string_value) out.string_value = t.string_value;
     }
     if (t.type === 'io_input') {
       out.port = parseInt(t.port) || 1;
@@ -2165,6 +2197,7 @@ function normalizeCondition(c) {
     out.url = c.url; out.expected_status = parseInt(c.expected_status) || 200;
     if (c.expected_body) out.expected_body = c.expected_body;
     if (c.json_path) { out.json_path = c.json_path; out.json_expected = c.json_expected || ''; }
+    if (c.allow_insecure === true) out.allow_insecure = true;
   } else if (c.type === 'aoa_occupancy') {
     out.scenario_id = parseInt(c.scenario_id) || 1;
     out.object_class = c.object_class || 'any';
@@ -2268,6 +2301,7 @@ function normalizeAction(a) {
   }
   if (a.type === 'http_request') {
     out.attach_snapshot = a.attach_snapshot === true;
+    if (a.allow_insecure === true) out.allow_insecure = true;
     /* Fallback action chain */
     const fbType = a.on_failure_type || '';
     if (fbType === 'send_syslog') {

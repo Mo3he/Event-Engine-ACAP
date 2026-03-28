@@ -191,6 +191,11 @@ static int cond_http_check(cJSON* cfg) {
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    cJSON* allow_insecure = cJSON_GetObjectItem(cfg, "allow_insecure");
+    if (allow_insecure && cJSON_IsTrue(allow_insecure)) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
     if (g_socks5_proxy[0]) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
         curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);

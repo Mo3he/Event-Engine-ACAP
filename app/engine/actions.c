@@ -453,6 +453,11 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_discard);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    cJSON* allow_insecure_j = cJSON_GetObjectItem(cfg, "allow_insecure");
+    if (allow_insecure_j && cJSON_IsTrue(allow_insecure_j)) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
     if (g_socks5_proxy[0]) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
         curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);

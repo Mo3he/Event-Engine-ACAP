@@ -64,6 +64,10 @@ typedef struct {
     time_t value_since;        /* when hold condition first became true; 0 = not active */
     int    value_hysteresis;   /* 1 = fired for this activation; reset when cond drops */
 
+    /* String value filter (vapix_event only) */
+    char   string_key[64];     /* field name to match, e.g. "state" */
+    char   string_value[256];  /* expected substring */
+
     /* Passive subscription — caches data but never fires rules */
     int    passive;
     cJSON* cached_data;        /* last-seen event data; we own this */
@@ -270,6 +274,12 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             cJSON* vhold = cJSON_GetObjectItem(trig, "value_hold_secs");
             if (vhold) s->value_hold_secs = (int)vhold->valuedouble;
 
+            /* String value filter */
+            const char* skey = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "string_key"));
+            if (skey && skey[0]) snprintf(s->string_key, sizeof(s->string_key), "%s", skey);
+            const char* sval = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "string_value"));
+            if (sval && sval[0]) snprintf(s->string_value, sizeof(s->string_value), "%s", sval);
+
             if (s->type == TRIG_IO_INPUT) {
                 cJSON* port_j = cJSON_GetObjectItem(trig, "port");
                 s->io_port = port_j ? (int)port_j->valuedouble : 1;
@@ -423,11 +433,18 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
                 Actions_Stop_Active_Siren(s->rule_id);
                 continue;
             }
-        } else if (!s->value_key[0]) {
+        } else if (!s->value_key[0] && !s->string_key[0]) {
             /* No filter — stop siren if event carries active=false */
             cJSON* av = cJSON_GetObjectItem(event, "active");
             if (av && cJSON_IsBool(av) && !cJSON_IsTrue(av))
                 Actions_Stop_Active_Siren(s->rule_id);
+        }
+
+        /* String value filter */
+        if (s->string_key[0] && s->string_value[0]) {
+            cJSON* sv = cJSON_GetObjectItem(event, s->string_key);
+            const char* svstr = cJSON_GetStringValue(sv);
+            if (!svstr || strstr(svstr, s->string_value) == NULL) continue;
         }
 
         /* IO edge filter + hold duration */
