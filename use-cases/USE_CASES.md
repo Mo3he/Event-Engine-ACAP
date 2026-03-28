@@ -12,7 +12,7 @@ Push alerts to people and push data to systems. The camera becomes an edge senso
 
 ### 1.1 Environmental Sensor Data Transmission
 
-**Scenario:** An Axis camera with a connected environmental sensor (thermometry, air quality, humidity) periodically reads sensor values and transmits them to external systems. Two separate templates cover the two main approaches:
+**Scenario:** An Axis camera with a connected environmental sensor (thermometry, air quality, etc) periodically reads sensor values and transmits them to external systems. Two separate templates cover the two main approaches:
 
 #### 1.1a — Power BI Real-Time Dashboard
 
