@@ -1,0 +1,33 @@
+{
+  "name": "Sensor Data over MQTT — Home Assistant",
+  "description": "Every 60 seconds, read environmental sensor data (temperature, humidity, CO2) and publish as a structured JSON message over MQTT using Home Assistant's auto-discovery format — sensors appear automatically in HA with no manual YAML configuration.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval": 60
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tns1": "Environment" },
+      "topic1": { "tnsaxis": "AirQuality" }
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "homeassistant/sensor/{{camera.serial}}/environment/state",
+      "payload": "{\"temperature\":{{trigger.Temperature}},\"humidity\":{{trigger.Humidity}},\"co2\":{{trigger.CO2}}}",
+      "qos": 1,
+      "retain": true
+    }
+  ]
+}

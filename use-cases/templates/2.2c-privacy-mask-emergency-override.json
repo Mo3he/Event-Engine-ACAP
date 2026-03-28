@@ -1,0 +1,44 @@
+{
+  "name": "Emergency — Disable Privacy Masks",
+  "description": "When an emergency signal arrives (MQTT from fire alarm, access control, or building management system), immediately disable all privacy masks for full scene visibility and set the override variable so scheduled rules don't re-enable them.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 10,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "building/emergency/+",
+      "payload_filter": "active"
+    },
+    {
+      "type": "http_webhook",
+      "token": "emergency-override-token"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.privacy_mode",
+      "value": "override"
+    },
+    {
+      "type": "privacy_mask",
+      "mask_id": "Office Window",
+      "channel": 1,
+      "enabled": false
+    },
+    {
+      "type": "overlay_text",
+      "text": "⚠ EMERGENCY — PRIVACY MASKS DISABLED",
+      "channel": 1,
+      "position": "topLeft",
+      "text_color": "white",
+      "duration": 300
+    }
+  ]
+}

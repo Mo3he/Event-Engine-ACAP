@@ -14,16 +14,18 @@ Push alerts to people and push data to systems. The camera becomes an edge senso
 
 **Scenario:** An Axis camera with a connected environmental sensor (thermometry, air quality, humidity) periodically reads sensor values and transmits them to external systems. Two separate templates cover the two main approaches:
 
-#### 1.1a — MQTT Streaming (Home Assistant / Node-RED)
+#### 1.1a — Power BI Real-Time Dashboard
 
-Publish structured JSON sensor data over MQTT for real-time consumption by home automation platforms, Node-RED flows, or any MQTT subscriber.
+Push sensor data directly to a Power BI streaming dataset via its REST API — the camera feeds the dashboard with no gateway or middleware in between.
 
 **How it works:**
 - A **schedule** trigger fires every 60 seconds
 - A **Device Event Query** action fetches the latest cached sensor data (temperature, humidity, CO₂) and injects the values as `{{trigger.FIELD}}` variables
-- An **MQTT Publish** action sends a retained JSON payload to `sensors/<serial>/environment` — any subscriber gets the latest reading immediately on connect
+- An **HTTP Request** action POSTs a JSON array to the Power BI streaming dataset endpoint — data appears instantly on a real-time Power BI tile
 
-**Template:** [`templates/1.1a-sensor-data-mqtt.json`](templates/1.1a-sensor-data-mqtt.json)
+**Setup:** In Power BI, create a Streaming dataset (API type) with columns: `timestamp` (DateTime), `camera_serial` (Text), `camera_model` (Text), `temperature` (Number), `humidity` (Number), `co2` (Number). Copy the push URL into the template.
+
+**Template:** [`templates/1.1a-sensor-data-powerbi.json`](templates/1.1a-sensor-data-powerbi.json)
 
 #### 1.1b — Direct InfluxDB Ingestion (Grafana Dashboard)
 
@@ -36,9 +38,20 @@ Write time-series data points directly into InfluxDB with no middleware — the 
 
 **Template:** [`templates/1.1b-sensor-data-influxdb.json`](templates/1.1b-sensor-data-influxdb.json)
 
+#### 1.1c — MQTT to Home Assistant
+
+Publish sensor data over MQTT using Home Assistant's topic conventions — sensors appear in HA with retained state updates every 60 seconds.
+
+**How it works:**
+- A **schedule** trigger fires every 60 seconds
+- A **Device Event Query** action fetches the latest cached sensor data
+- An **MQTT Publish** action sends a retained JSON payload to `homeassistant/sensor/<serial>/environment/state` — HA picks up temperature, humidity, and CO₂ as sensor entities
+
+**Template:** [`templates/1.1c-sensor-data-mqtt-homeassistant.json`](templates/1.1c-sensor-data-mqtt-homeassistant.json)
+
 ---
 
-### 1.2 Multi-Channel Motion Alerts
+### 1.2 Multi-Platform Motion Alerts
 
 **Scenario:** When motion is detected during office hours, send an alert with a camera snapshot to Slack, Microsoft Teams, and email simultaneously — so that security staff receive the notification on whichever platform they monitor.
 
@@ -84,15 +97,30 @@ Automate camera hardware functions. The camera adjusts its own imaging, PTZ posi
 
 ### 2.2 Event-Driven Privacy Zones
 
-**Scenario:** A camera covers both a public area and a private office. During business hours (Mon–Fri 08:00–18:00), enable a privacy mask over the office window for GDPR compliance. Outside business hours, disable the mask so security can monitor the full scene.
+A camera covers both a public area and a private office. Privacy masks need to follow a schedule for GDPR compliance, but must be overridable instantly during emergencies.
+
+#### 2.2a/b — Scheduled Privacy (Business Hours)
+
+**Scenario:** During business hours (Mon–Fri 08:00–18:00), enable a privacy mask over the office window for GDPR compliance. Outside business hours, disable the mask so security can monitor the full scene.
 
 **How it works:**
 - Two rules with **schedule** triggers — one fires at 08:00 weekdays, the other at 18:00 weekdays
 - The morning rule runs a **Privacy Mask** action that enables the mask named `"Office Window"`
 - The evening rule disables the same mask
-- Both rules use a **Variable Compare** condition on `system.privacy_mode` to avoid toggling if an override has been set manually via MQTT
+- Both rules use a **Variable Compare** condition on `system.privacy_mode` to avoid toggling if an emergency override is active
 
 **Templates:** [`templates/2.2a-privacy-mask-enable.json`](templates/2.2a-privacy-mask-enable.json) and [`templates/2.2b-privacy-mask-disable.json`](templates/2.2b-privacy-mask-disable.json)
+
+#### 2.2c/d — Emergency Override
+
+**Scenario:** When a fire alarm, intrusion alarm, or building management system signals an emergency, immediately disable all privacy masks for full scene visibility — regardless of schedule. When the emergency is cleared, restore normal operation.
+
+**How it works:**
+- An **MQTT Message** trigger listens on `building/emergency/+` (payload `"active"` or `"cleared"`), with an **HTTP Webhook** as a fallback trigger for systems that can't publish MQTT
+- The emergency rule sets `system.privacy_mode` to `"override"` (which blocks the scheduled rules from re-enabling masks), disables the privacy mask, and displays a warning overlay
+- The clear rule sets `system.privacy_mode` back to `"normal"` and re-enables the mask — the next scheduled rule resumes normal cycling
+
+**Templates:** [`templates/2.2c-privacy-mask-emergency-override.json`](templates/2.2c-privacy-mask-emergency-override.json) and [`templates/2.2d-privacy-mask-emergency-clear.json`](templates/2.2d-privacy-mask-emergency-clear.json)
 
 ---
 
@@ -158,14 +186,17 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 
 | # | Template File | Use Case | Description |
 |---|---|---|---|
-| 1.1a | `1.1a-sensor-data-mqtt.json` | Data Transmission | Sensor → MQTT JSON for Home Assistant / Node-RED |
+| 1.1a | `1.1a-sensor-data-powerbi.json` | Data Transmission | Sensor → Power BI streaming dataset (real-time dashboard) |
 | 1.1b | `1.1b-sensor-data-influxdb.json` | Data Transmission | Sensor → InfluxDB for Grafana dashboards |
-| 1.2 | `1.2-multi-channel-motion-alerts.json` | Notifications | Motion → Slack + Teams + Email with snapshot |
+| 1.1c | `1.1c-sensor-data-mqtt-homeassistant.json` | Data Transmission | Sensor → MQTT to Home Assistant |
+| 1.2 | `1.2-multi-platform-motion-alerts.json` | Notifications | Motion → Slack + Teams + Email with snapshot |
 | 1.3 | `1.3-daily-activity-digest.json` | Notifications | Buffer events → daily email summary |
 | 2.1a | `2.1a-sunset-night-mode.json` | Device Control | Sunset → IR night + illuminator on |
 | 2.1b | `2.1b-sunrise-day-mode.json` | Device Control | Sunrise → IR day + illuminator off |
 | 2.2a | `2.2a-privacy-mask-enable.json` | Device Control | 08:00 weekdays → enable privacy mask |
 | 2.2b | `2.2b-privacy-mask-disable.json` | Device Control | 18:00 weekdays → disable privacy mask |
+| 2.2c | `2.2c-privacy-mask-emergency-override.json` | Device Control | Emergency signal → disable masks + set override |
+| 2.2d | `2.2d-privacy-mask-emergency-clear.json` | Device Control | Emergency cleared → restore masks + resume schedule |
 | 2.3 | `2.3-ptz-track-and-resume-tour.json` | Device Control | AOA human → stop tour → PTZ → resume |
 | 3.1 | `3.1-perimeter-intrusion-response.json` | Security | Human + armed + after-hours → full response |
 | 3.2a | `3.2a-access-control-business-hours.json` | Security | Card reader → door release + recording |

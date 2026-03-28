@@ -1,0 +1,36 @@
+{
+  "name": "Clear Emergency — Restore Privacy Masks",
+  "description": "When the emergency is cleared (MQTT or webhook), remove the override variable so the scheduled privacy mask rules resume normal operation, and re-enable the privacy mask immediately.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 10,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "building/emergency/+",
+      "payload_filter": "cleared"
+    },
+    {
+      "type": "http_webhook",
+      "token": "emergency-clear-token"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.privacy_mode",
+      "value": "normal"
+    },
+    {
+      "type": "privacy_mask",
+      "mask_id": "Office Window",
+      "channel": 1,
+      "enabled": true
+    }
+  ]
+}

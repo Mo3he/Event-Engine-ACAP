@@ -1,0 +1,33 @@
+{
+  "name": "Sensor Data to Power BI — Real-Time Dashboard",
+  "description": "Every 60 seconds, read environmental sensor data (temperature, humidity, CO2) and push it directly to a Power BI streaming dataset via its REST API — no gateway or middleware needed. The data appears instantly on a Power BI real-time dashboard.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval": 60
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tns1": "Environment" },
+      "topic1": { "tnsaxis": "AirQuality" }
+    },
+    {
+      "type": "http_request",
+      "url": "https://api.powerbi.com/beta/YOUR_TENANT_ID/datasets/YOUR_DATASET_ID/rows?key=YOUR_STREAMING_DATASET_KEY",
+      "method": "POST",
+      "body": "[{\"timestamp\":\"{{timestamp}}\",\"camera_serial\":\"{{camera.serial}}\",\"camera_model\":\"{{camera.model}}\",\"temperature\":{{trigger.Temperature}},\"humidity\":{{trigger.Humidity}},\"co2\":{{trigger.CO2}}}]",
+      "headers": "Content-Type: application/json"
+    }
+  ]
+}
