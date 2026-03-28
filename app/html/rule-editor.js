@@ -114,7 +114,7 @@ function setLogic(which, val, btn) {
 /* ===== Trigger rows ===== */
 const TRIGGER_GROUPS = [
   { label: 'Camera / Device', types: [
-    { value: 'vapix_event',       label: 'VAPIX Event' },
+    { value: 'vapix_event',       label: 'Device Event' },
     { value: 'io_input',          label: 'I/O Input' },
     { value: 'aoa_scenario',      label: 'AOA Scenario' },
   ]},
@@ -161,7 +161,7 @@ function triggerFields(t, rowIdx) {
     if (vapixEventCatalog === null) {
       return `${hiddenTopics}
       <div class="form-row"><div class="form-group">
-        <label>Camera Event</label>
+        <label>Device Event</label>
         <select disabled><option>Loading events from camera…</option></select>
       </div></div>`;
     }
@@ -257,7 +257,7 @@ function triggerFields(t, rowIdx) {
     return `${hiddenTopics}
     <div class="form-row">
       <div class="form-group">
-        <label>Camera Event</label>
+        <label>Device Event</label>
         <select onchange="applyVapixEvent(${rowIdx}, this.value)">
           <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
           ${vapixEventCatalog.map((ev, i) =>
@@ -265,8 +265,8 @@ function triggerFields(t, rowIdx) {
           ).join('')}
         </select>
         ${matchIdx < 0 && (t.topic0 || t.topic1)
-          ? `<div class="form-hint" style="color:var(--text-muted)">Saved event not found in this camera's catalog — it may still work if the camera supports it.</div>`
-          : `<div class="form-hint">Choose which camera event fires this rule.</div>`}
+          ? `<div class="form-hint" style="color:var(--text-muted)">Saved event not found in this device's catalog — it may still work if the device supports it.</div>`
+          : `<div class="form-hint">Choose which device event fires this rule.</div>`}
       </div>
     </div>
     ${condRow}`;
@@ -544,7 +544,7 @@ const CONDITION_GROUPS = [
     { value: 'day_night',         label: 'Day / Night' },
   ]},
   { label: 'Device State', types: [
-    { value: 'vapix_event_state', label: 'VAPIX Event State' },
+    { value: 'vapix_event_state', label: 'Device Event State' },
     { value: 'io_state',          label: 'I/O State' },
   ]},
   { label: 'Data', types: [
@@ -893,8 +893,8 @@ const ACTION_GROUPS = [
     { value: 'digest',            label: 'Notification Digest' },
   ]},
   { label: 'Advanced', types: [
-    { value: 'fire_vapix_event',  label: 'Fire VAPIX Event' },
-    { value: 'vapix_query',       label: 'VAPIX Event Query' },
+    { value: 'fire_vapix_event',  label: 'Fire ACAP Event' },
+    { value: 'vapix_query',       label: 'Device Event Query' },
     { value: 'set_device_param',  label: 'Set Device Parameter' },
     { value: 'acap_control',      label: 'ACAP Control' },
     { value: 'aoa_get_counts',    label: 'AOA Get Counts' },
@@ -1396,7 +1396,7 @@ function actionFields(a) {
     return `${hiddenTopics}
     <div class="form-row">
       <div class="form-group">
-        <label>Camera Event to Query</label>
+        <label>Device Event to Query</label>
         <select onchange="applyVapixEventAction(this)">
           <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
           ${(vapixEventCatalog || []).map((ev, i) =>
@@ -1464,7 +1464,7 @@ function actionFields(a) {
         </select>
       </div>
     </div>` : ''}
-    <div class="form-hint" style="margin-top:4px;">VAPIX events are visible to other Axis ACAP applications on this camera.</div>`
+    <div class="form-hint" style="margin-top:4px;">ACAP events are visible to other Axis ACAP applications on this device.</div>`
   }
   if (type === 'delay') return `
     <div class="form-row">

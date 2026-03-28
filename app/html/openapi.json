@@ -120,7 +120,7 @@
           { "$ref": "#/components/schemas/Trigger" },
           {
             "type": "object",
-            "description": "Fires when any matching VAPIX event is received from the camera event system. Topics are specified using the multi-level ONVIF namespace format.",
+            "description": "Fires when any matching device event is received from the event system. Topics are specified using the multi-level ONVIF namespace format.",
             "properties": {
               "type": { "type": "string", "enum": ["vapix_event"] },
               "topic0": {
@@ -662,7 +662,7 @@
           { "$ref": "#/components/schemas/Action" },
           {
             "type": "object",
-            "description": "Fetch the latest cached data from a VAPIX event and inject it as {{trigger.FIELD}} variables for subsequent actions. Useful for reading sensor values on a schedule trigger.",
+            "description": "Fetch the latest cached data from a device event and inject it as {{trigger.FIELD}} variables for subsequent actions. Useful for reading sensor values on a schedule trigger.",
             "properties": {
               "type":   { "type": "string", "enum": ["vapix_query"] },
               "topic0": { "type": "object", "additionalProperties": { "type": "string" } },
@@ -726,12 +726,12 @@
           { "$ref": "#/components/schemas/Action" },
           {
             "type": "object",
-            "description": "Fire a VAPIX event visible to other ACAP applications on this camera.",
+            "description": "Fire an ACAP event visible to other ACAP applications on this device.",
             "properties": {
               "type":     { "type": "string", "enum": ["fire_vapix_event"] },
               "event_id": {
                 "type": "string",
-                "description": "ID of the declared VAPIX event to fire (e.g. 'RuleFired', 'RuleError', 'EngineReady', or a custom event ID)",
+                "description": "ID of the declared ACAP event to fire (e.g. 'RuleFired', 'RuleError', 'EngineReady', or a custom event ID)",
                 "example": "RuleFired"
               },
               "state": {
@@ -1339,7 +1339,7 @@
                   }
                 },
                 "example": [
-                  { "type": "vapix_event",       "label": "VAPIX Event",        "description": "Fire on any Axis camera event" },
+                  { "type": "vapix_event",       "label": "Device Event",        "description": "Fire on any Axis device event" },
                   { "type": "http_webhook",       "label": "HTTP Webhook",       "description": "Fire via HTTP POST with a secret token" },
                   { "type": "schedule",           "label": "Schedule",           "description": "Cron, interval, daily time, or sunrise/sunset" },
                   { "type": "mqtt_message",       "label": "MQTT Message",       "description": "Fire when a matching MQTT message is received" },

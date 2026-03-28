@@ -27,7 +27,7 @@ Rules are built in a clean web UI and take effect immediately.
 
 | Type | Description |
 |------|-------------|
-| **VAPIX Event** | Any camera event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition - boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
+| **Device Event** | Any device event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition - boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token (max 120 characters). Requires admin-level camera credentials |
@@ -47,7 +47,7 @@ Rules are built in a clean web UI and take effect immediately.
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
 | **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count |
 | **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Location. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
-| **VAPIX Event State** | Check the current state of any VAPIX event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?) |
+| **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?) |
 
 ## Actions
 
@@ -107,8 +107,8 @@ Actions are grouped by category in the rule editor.
 
 | Type | Description |
 |------|-------------|
-| **Fire VAPIX Event** | Fire a custom VAPIX event visible to other Axis applications |
-| **VAPIX Event Query** | Fetch the latest cached data from a VAPIX event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
+| **Fire ACAP Event** | Fire an ACAP event visible to other Axis applications |
+| **Device Event Query** | Fetch the latest cached data from a device event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
 | **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only — incorrect values can disrupt camera operation** |
 | **ACAP Control** | Start, stop, or restart another installed ACAP application |
 

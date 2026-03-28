@@ -134,21 +134,21 @@ function fmtTime(ts) {
 
 const RULE_TYPE_LABELS = {
   trigger: {
-    vapix_event: 'Camera Event', schedule: 'Schedule', mqtt_message: 'MQTT',
+    vapix_event: 'Device Event', schedule: 'Schedule', mqtt_message: 'MQTT',
     http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
     rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario', manual: 'Manual'
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
     variable_compare: 'Variable', http_check: 'HTTP Check', aoa_occupancy: 'AOA Occupancy',
-    day_night: 'Day/Night', vapix_event_state: 'Event State'
+    day_night: 'Day/Night', vapix_event_state: 'Device Event State'
   },
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
     overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output',
     audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
     set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',
-    delay: 'Delay', fire_vapix_event: 'VAPIX Event', send_syslog: 'Syslog',
+    delay: 'Delay', fire_vapix_event: 'ACAP Event', send_syslog: 'Syslog',
     aoa_get_counts: 'AOA Counts', slack_webhook: 'Slack', teams_webhook: 'Teams',
     influxdb_write: 'InfluxDB', telegram: 'Telegram', email: 'Email',
     ftp_upload: 'FTP Upload', digest: 'Digest', snapshot_upload: 'Snapshot',
@@ -172,11 +172,11 @@ function escHtml(s) {
  * =================================================== */
 const RULE_TEMPLATES = [
   {
-    name: 'Camera Event → HTTP Webhook',
+    name: 'Device Event → HTTP Webhook',
     icon: '🌐',
-    desc: 'POST to a URL whenever a VAPIX camera event fires',
+    desc: 'POST to a URL whenever a device event fires',
     rule: {
-      name: 'Camera Event → HTTP Webhook',
+      name: 'Device Event → HTTP Webhook',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
@@ -199,11 +199,11 @@ const RULE_TEMPLATES = [
     }
   },
   {
-    name: 'Camera Event → Email Alert',
+    name: 'Device Event → Email Alert',
     icon: '✉️',
-    desc: 'Send an email when a camera event fires (configure SMTP in Settings first)',
+    desc: 'Send an email when a device event fires (configure SMTP in Settings first)',
     rule: {
-      name: 'Camera Event → Email Alert',
+      name: 'Device Event → Email Alert',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
@@ -213,11 +213,11 @@ const RULE_TEMPLATES = [
     }
   },
   {
-    name: 'Camera Event → Slack',
+    name: 'Device Event → Slack',
     icon: '💬',
-    desc: 'Post a Slack message when a camera event fires',
+    desc: 'Post a Slack message when a device event fires',
     rule: {
-      name: 'Camera Event → Slack',
+      name: 'Device Event → Slack',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
@@ -279,11 +279,11 @@ const RULE_TEMPLATES = [
     }
   },
   {
-    name: 'Camera Event → Telegram',
+    name: 'Device Event → Telegram',
     icon: '✈️',
-    desc: 'Send a Telegram message when a camera event fires',
+    desc: 'Send a Telegram message when a device event fires',
     rule: {
-      name: 'Camera Event → Telegram',
+      name: 'Device Event → Telegram',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
@@ -293,11 +293,11 @@ const RULE_TEMPLATES = [
     }
   },
   {
-    name: 'Camera Event → Microsoft Teams',
+    name: 'Device Event → Microsoft Teams',
     icon: '🏢',
     desc: 'Post an adaptive card to a Teams channel via Power Automate webhook',
     rule: {
-      name: 'Camera Event → Microsoft Teams',
+      name: 'Device Event → Microsoft Teams',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
@@ -398,7 +398,7 @@ const RULE_TEMPLATES = [
   {
     name: 'Schedule → InfluxDB Sensor Write',
     icon: '📈',
-    desc: 'Poll a VAPIX sensor value every 5 minutes and write it to InfluxDB',
+    desc: 'Poll a device sensor value every 5 minutes and write it to InfluxDB',
     rule: {
       name: 'Schedule → InfluxDB Sensor Write',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
@@ -416,11 +416,11 @@ const RULE_TEMPLATES = [
     }
   },
   {
-    name: 'Camera Event → Notification Digest',
+    name: 'Device Event → Notification Digest',
     icon: '📨',
     desc: 'Batch events and send one summary message every 5 minutes instead of one alert per event',
     rule: {
-      name: 'Camera Event → Notification Digest',
+      name: 'Device Event → Notification Digest',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
