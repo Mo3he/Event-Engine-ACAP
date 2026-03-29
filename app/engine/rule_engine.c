@@ -208,7 +208,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
 
     /* AND_ACTIVE — all triggers must be simultaneously in their active state */
     if (r->trigger_logic == 2 && r->trigger_count > 1) {
-        if (!Triggers_All_Currently_Active(r->id)) {
+        if (!Triggers_All_Currently_Active(r->id, trigger_index)) {
             EventLog_Append(r->id, r->name, 0, "trigger_and_pending", trigger_data, 0, 0);
             pthread_mutex_unlock(&store_lock);
             return;
@@ -616,7 +616,7 @@ void RuleEngine_Tick(void) {
          * re-fire when the window reopens (even if no new trigger event arrives
          * while the window is closed). */
         int has_active = (r->trigger_logic == 2)
-            ? Triggers_All_Currently_Active(r->id)
+            ? Triggers_All_Currently_Active(r->id, -1)
             : Triggers_Any_Active(r->id);
 
         if (prev == 1 && now_open == 0 && has_active)

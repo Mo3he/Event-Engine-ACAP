@@ -710,7 +710,7 @@ int Triggers_Any_Active(const char* rule_id) {
     return 0;
 }
 
-int Triggers_All_Currently_Active(const char* rule_id) {
+int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index) {
     int found = 0;
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
@@ -719,7 +719,10 @@ int Triggers_All_Currently_Active(const char* rule_id) {
 
         int active = 0;
 
-        if (s->type == TRIG_VAPIX_EVENT || s->type == TRIG_IO_INPUT) {
+        /* The trigger that just fired is always considered active */
+        if (fired_trigger_index >= 0 && s->trigger_index == fired_trigger_index) {
+            active = 1;
+        } else if (s->type == TRIG_VAPIX_EVENT || s->type == TRIG_IO_INPUT) {
             if (!s->cached_data) return 0;
             if (s->filter_key[0] && s->filter_value >= 0) {
                 cJSON* fv = cJSON_GetObjectItem(s->cached_data, s->filter_key);
@@ -741,8 +744,9 @@ int Triggers_All_Currently_Active(const char* rule_id) {
             active = Counter_Compare(s->counter_name, s->counter_op, s->counter_threshold);
         } else {
             /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual)
-             * have no persistent state — assumed active for AND_ACTIVE. */
-            active = 1;
+             * have no persistent state. They are only active if they are the
+             * trigger that just fired (already handled above); otherwise 0. */
+            active = 0;
         }
 
         if (!active) return 0;

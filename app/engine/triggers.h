@@ -66,8 +66,10 @@ cJSON* Triggers_Get_Cached(cJSON* topic_cfg);
 int Triggers_Any_Active(const char* rule_id);
 
 /* Returns 1 if ALL triggers for rule_id are currently in their active state.
- * Used for AND_ACTIVE trigger logic (simultaneous active). */
-int Triggers_All_Currently_Active(const char* rule_id);
+ * fired_trigger_index is the index of the trigger that just fired (counts as
+ * active regardless of type); momentary triggers at other indices return 0.
+ * Pass -1 for fired_trigger_index when no specific trigger initiated the call. */
+int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index);
 
 /* Returns catalog of subscribable trigger types for /triggers API */
 cJSON* Triggers_Catalog(void);
