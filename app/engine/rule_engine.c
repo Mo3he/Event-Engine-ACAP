@@ -29,7 +29,7 @@ typedef struct {
     cJSON*  triggers_json;    /* retained ref */
     cJSON*  conditions_json;  /* retained ref */
     cJSON*  actions_json;     /* retained ref */
-    int     trigger_logic;    /* 0=OR, 1=AND */
+    int     trigger_logic;    /* 0=OR, 1=AND, 2=AND_ACTIVE */
     int     condition_logic;  /* 0=AND, 1=OR */
     int     cooldown;
     int     max_executions;
@@ -92,7 +92,7 @@ static void rules_save_locked(void) {
         if (r->triggers_json)   cJSON_AddItemToObject(obj, "triggers",   cJSON_Duplicate(r->triggers_json,   1));
         if (r->conditions_json) cJSON_AddItemToObject(obj, "conditions", cJSON_Duplicate(r->conditions_json, 1));
         if (r->actions_json)    cJSON_AddItemToObject(obj, "actions",    cJSON_Duplicate(r->actions_json,    1));
-        cJSON_AddStringToObject(obj, "trigger_logic",   r->trigger_logic   == 0 ? "OR"  : "AND");
+        cJSON_AddStringToObject(obj, "trigger_logic",   r->trigger_logic == 0 ? "OR" : r->trigger_logic == 1 ? "AND" : "AND_ACTIVE");
         cJSON_AddStringToObject(obj, "condition_logic", r->condition_logic == 0 ? "AND" : "OR");
         cJSON_AddNumberToObject(obj, "cooldown",        r->cooldown);
         cJSON_AddNumberToObject(obj, "max_executions",  r->max_executions);
@@ -122,7 +122,8 @@ static void rule_from_json(Rule* r, cJSON* obj) {
     if (!r->actions_json)    r->actions_json    = cJSON_CreateArray();
 
     const char* tl = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "trigger_logic"));
-    r->trigger_logic = (tl && strcmp(tl, "AND") == 0) ? 1 : 0;
+    r->trigger_logic = (tl && strcmp(tl, "AND") == 0) ? 1 :
+                       (tl && strcmp(tl, "AND_ACTIVE") == 0) ? 2 : 0;
 
     const char* cl = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "condition_logic"));
     r->condition_logic = (cl && strcmp(cl, "OR") == 0) ? 1 : 0;
@@ -199,6 +200,15 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
             }
         }
         if (!all_fired) {
+            EventLog_Append(r->id, r->name, 0, "trigger_and_pending", trigger_data, 0, 0);
+            pthread_mutex_unlock(&store_lock);
+            return;
+        }
+    }
+
+    /* AND_ACTIVE — all triggers must be simultaneously in their active state */
+    if (r->trigger_logic == 2 && r->trigger_count > 1) {
+        if (!Triggers_All_Currently_Active(r->id)) {
             EventLog_Append(r->id, r->name, 0, "trigger_and_pending", trigger_data, 0, 0);
             pthread_mutex_unlock(&store_lock);
             return;
@@ -442,7 +452,7 @@ cJSON* RuleEngine_Get(const char* id) {
             if (r->triggers_json)   cJSON_AddItemToObject(result, "triggers",   cJSON_Duplicate(r->triggers_json,   1));
             if (r->conditions_json) cJSON_AddItemToObject(result, "conditions", cJSON_Duplicate(r->conditions_json, 1));
             if (r->actions_json)    cJSON_AddItemToObject(result, "actions",    cJSON_Duplicate(r->actions_json,    1));
-            cJSON_AddStringToObject(result, "trigger_logic",   r->trigger_logic   == 0 ? "OR"  : "AND");
+            cJSON_AddStringToObject(result, "trigger_logic",   r->trigger_logic == 0 ? "OR" : r->trigger_logic == 1 ? "AND" : "AND_ACTIVE");
             cJSON_AddStringToObject(result, "condition_logic", r->condition_logic == 0 ? "AND" : "OR");
             cJSON_AddNumberToObject(result, "cooldown",        r->cooldown);
             cJSON_AddNumberToObject(result, "max_executions",  r->max_executions);
@@ -605,11 +615,15 @@ void RuleEngine_Tick(void) {
         /* Window just closed — remember if a trigger is still active so we can
          * re-fire when the window reopens (even if no new trigger event arrives
          * while the window is closed). */
-        if (prev == 1 && now_open == 0 && Triggers_Any_Active(r->id))
+        int has_active = (r->trigger_logic == 2)
+            ? Triggers_All_Currently_Active(r->id)
+            : Triggers_Any_Active(r->id);
+
+        if (prev == 1 && now_open == 0 && has_active)
             r->trigger_pending = 1;
 
         if (refire_ids && prev == 0 && now_open == 1 && r->trigger_pending &&
-            Triggers_Any_Active(r->id))
+            has_active)
             snprintf(refire_ids[refire_count++], 37, "%s", r->id);
     }
     pthread_mutex_unlock(&store_lock);

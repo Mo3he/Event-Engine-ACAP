@@ -47,9 +47,9 @@
           "enabled": { "type": "boolean", "default": true },
           "trigger_logic": {
             "type": "string",
-            "enum": ["OR", "AND"],
+            "enum": ["OR", "AND", "AND_ACTIVE"],
             "default": "OR",
-            "description": "How multiple triggers are combined. AND = all triggers must fire within trigger_window seconds."
+            "description": "How multiple triggers are combined. AND = all triggers must fire within trigger_window seconds. AND_ACTIVE = all triggers must be in their active state simultaneously."
           },
           "trigger_window": {
             "type": "integer",

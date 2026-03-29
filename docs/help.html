@@ -429,7 +429,7 @@
       <table>
         <tr><th>Setting</th><th>Description</th></tr>
         <tr><td><strong>Enabled</strong></td><td>Toggle to enable or disable a rule without deleting it.</td></tr>
-        <tr><td><strong>Trigger logic</strong></td><td><strong>OR</strong> (default) — fires when any trigger activates. <strong>AND</strong> — fires only when all triggers have activated. In AND mode, an optional <strong>correlation window</strong> (seconds) requires all triggers to activate within that time frame; set to 0 for no time limit.</td></tr>
+        <tr><td><strong>Trigger logic</strong></td><td><strong>OR</strong> (default) — fires when any trigger activates. <strong>AND</strong> has two modes: <strong>All active simultaneously</strong> (default) — fires only when all triggers are in their active state at the same time; <strong>Correlation window</strong> — all triggers must fire within a configurable time window (seconds), set to 0 for no time limit.</td></tr>
         <tr><td><strong>Condition logic</strong></td><td><strong>AND</strong> (default) — all conditions must pass. <strong>OR</strong> — any single passing condition allows execution.</td></tr>
         <tr><td><strong>Cooldown</strong></td><td>Minimum seconds between firings. Prevents alert floods when a trigger fires repeatedly.</td></tr>
         <tr><td><strong>Max Executions</strong></td><td>Limit how many times the rule can fire within a period: per minute, per hour, per day, or lifetime total. The period counter auto-resets; the lifetime counter resets when the rule is saved.</td></tr>

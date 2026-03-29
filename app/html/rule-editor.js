@@ -2,6 +2,8 @@
 
 function openRuleEditor(rule) {
   editingRule = rule;
+  triggerLogic = rule && rule.trigger_logic ? rule.trigger_logic : 'OR';
+  conditionLogic = rule && rule.condition_logic ? rule.condition_logic : 'AND';
   triggerRows = rule ? (rule.triggers || []).map(t => ({ ...t })) : [];
   conditionRows = rule ? (rule.conditions || []).map(c => ({ ...c })) : [];
   actionRows = rule ? (rule.actions || []).map(a => ({ ...a })) : [];
@@ -59,15 +61,28 @@ function buildRuleForm(rule) {
       <span class="section-title">Triggers (IF)</span>
       <div class="logic-toggle">
         <button class="logic-btn ${!rule || (rule.trigger_logic||'OR')==='OR' ? 'active' : ''}" onclick="setLogic('trigger','OR',this)">OR</button>
-        <button class="logic-btn ${rule && rule.trigger_logic==='AND' ? 'active' : ''}" onclick="setLogic('trigger','AND',this)">AND</button>
+        <button class="logic-btn ${rule && (rule.trigger_logic==='AND' || rule.trigger_logic==='AND_ACTIVE') ? 'active' : ''}" onclick="setLogic('trigger','AND',this)">AND</button>
         <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">OR = any trigger fires | AND = all must activate</span>
       </div>
     </div>
-    <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'flex' : 'none'};gap:16px;align-items:flex-start;margin-bottom:8px;">
-      <div class="form-group" style="flex:0 0 260px;">
-        <label>Correlation Window (s, 0 = off)</label>
-        <input id="f-trigger-window" type="number" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" placeholder="0 = no time limit">
-        <div class="form-hint">All triggers must happen within this time. 0 = no time limit.</div>
+    <div id="trigger-and-options" style="display:${rule && (rule.trigger_logic==='AND' || rule.trigger_logic==='AND_ACTIVE') ? 'block' : 'none'};">
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="and-mode" value="AND_ACTIVE" ${!rule || rule.trigger_logic !== 'AND' ? 'checked' : ''} onchange="setAndMode(this.value)">
+          All active simultaneously
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="and-mode" value="AND" ${rule && rule.trigger_logic === 'AND' ? 'checked' : ''} onchange="setAndMode(this.value)">
+          Correlation window
+        </label>
+      </div>
+      <div class="form-hint" style="margin-bottom:8px;">Simultaneous = all triggers in their active state at the same time. Correlation = all must fire within a time window.</div>
+      <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'flex' : 'none'};gap:16px;align-items:flex-start;margin-bottom:8px;">
+        <div class="form-group" style="flex:0 0 260px;">
+          <label>Correlation Window (s, 0 = no time limit)</label>
+          <input id="f-trigger-window" type="number" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" placeholder="0 = no time limit">
+          <div class="form-hint">All triggers must fire within this time. 0 = no time limit.</div>
+        </div>
       </div>
     </div>
     <div id="trigger-list"></div>
@@ -103,12 +118,27 @@ function setLogic(which, val, btn) {
   container.querySelectorAll('.logic-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   if (which === 'trigger') {
-    triggerLogic = val;
-    const twRow = document.getElementById('trigger-window-row');
-    if (twRow) twRow.style.display = val === 'AND' ? 'flex' : 'none';
+    const andOpts = document.getElementById('trigger-and-options');
+    if (val === 'AND') {
+      triggerLogic = 'AND_ACTIVE';
+      if (andOpts) andOpts.style.display = 'block';
+      const activeRadio = document.querySelector('input[name="and-mode"][value="AND_ACTIVE"]');
+      if (activeRadio) activeRadio.checked = true;
+      const twRow = document.getElementById('trigger-window-row');
+      if (twRow) twRow.style.display = 'none';
+    } else {
+      triggerLogic = 'OR';
+      if (andOpts) andOpts.style.display = 'none';
+    }
   } else {
     conditionLogic = val;
   }
+}
+
+function setAndMode(val) {
+  triggerLogic = val;
+  const twRow = document.getElementById('trigger-window-row');
+  if (twRow) twRow.style.display = val === 'AND' ? 'flex' : 'none';
 }
 
 /* ===== Trigger rows ===== */

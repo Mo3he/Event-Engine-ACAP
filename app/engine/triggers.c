@@ -710,6 +710,46 @@ int Triggers_Any_Active(const char* rule_id) {
     return 0;
 }
 
+int Triggers_All_Currently_Active(const char* rule_id) {
+    int found = 0;
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->passive || strcmp(s->rule_id, rule_id) != 0) continue;
+        found = 1;
+
+        int active = 0;
+
+        if (s->type == TRIG_VAPIX_EVENT || s->type == TRIG_IO_INPUT) {
+            if (!s->cached_data) return 0;
+            if (s->filter_key[0] && s->filter_value >= 0) {
+                cJSON* fv = cJSON_GetObjectItem(s->cached_data, s->filter_key);
+                active = fv && (cJSON_IsTrue(fv) ? 1 : 0) == s->filter_value;
+            } else if (s->value_key[0] && s->value_op[0]) {
+                cJSON* vi = cJSON_GetObjectItem(s->cached_data, s->value_key);
+                active = vi && cJSON_IsNumber(vi) &&
+                         value_passes(vi->valuedouble, s->value_op,
+                                      s->value_threshold, s->value_threshold2);
+            } else {
+                cJSON* av = cJSON_GetObjectItem(s->cached_data, "active");
+                active = !av || cJSON_IsTrue(av);
+            }
+        } else if (s->type == TRIG_AOA_SCENARIO) {
+            if (!s->cached_data) return 0;
+            cJSON* av = cJSON_GetObjectItem(s->cached_data, "active");
+            active = av && cJSON_IsTrue(av);
+        } else if (s->type == TRIG_COUNTER_THRESHOLD) {
+            active = Counter_Compare(s->counter_name, s->counter_op, s->counter_threshold);
+        } else {
+            /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual)
+             * have no persistent state — assumed active for AND_ACTIVE. */
+            active = 1;
+        }
+
+        if (!active) return 0;
+    }
+    return found;
+}
+
 cJSON* Triggers_Catalog(void) {
     cJSON* arr = cJSON_CreateArray();
 

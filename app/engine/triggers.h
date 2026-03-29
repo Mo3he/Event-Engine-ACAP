@@ -65,6 +65,10 @@ cJSON* Triggers_Get_Cached(cJSON* topic_cfg);
  * (e.g. a VAPIX threshold that has been crossed and not yet reset). */
 int Triggers_Any_Active(const char* rule_id);
 
+/* Returns 1 if ALL triggers for rule_id are currently in their active state.
+ * Used for AND_ACTIVE trigger logic (simultaneous active). */
+int Triggers_All_Currently_Active(const char* rule_id);
+
 /* Returns catalog of subscribable trigger types for /triggers API */
 cJSON* Triggers_Catalog(void);
 
