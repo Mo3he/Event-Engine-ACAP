@@ -770,13 +770,15 @@ static void action_send_syslog(cJSON* cfg, cJSON* trigger_data) {
 /* fire_vapix_event */
 static void action_fire_vapix_event(cJSON* cfg) {
     const char* id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "event_id"));
-    if (!id) return;
+    if (!id || !*id) { LOG_ACTION_ERR("fire_vapix_event: no event_id specified"); return; }
     cJSON* state = cJSON_GetObjectItem(cfg, "state");
+    int ok;
     if (state) {
-        ACAP_EVENTS_Fire_State(id, cJSON_IsTrue(state) ? 1 : 0);
+        ok = ACAP_EVENTS_Fire_State(id, cJSON_IsTrue(state) ? 1 : 0);
     } else {
-        ACAP_EVENTS_Fire(id);
+        ok = ACAP_EVENTS_Fire(id);
     }
+    if (!ok) LOG_ACTION_ERR("fire_vapix_event: event '%s' not registered or failed to send", id);
 }
 
 /* set_variable */
@@ -1983,7 +1985,8 @@ int Actions_Test(const char* type, cJSON* config) {
     /* Only allow safe/notification action types for testing */
     const char* testable[] = {
         "http_request", "mqtt_publish", "slack_webhook", "teams_webhook",
-        "telegram", "email", "send_syslog", "influxdb_write", NULL
+        "telegram", "email", "send_syslog", "influxdb_write",
+        "fire_vapix_event", NULL
     };
     int allowed = 0;
     for (int i = 0; testable[i]; i++) {

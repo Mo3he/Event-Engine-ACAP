@@ -4,6 +4,7 @@
     "name": "Event Engine: Rule Fired",
     "state": false,
     "show": true,
+    "system": true,
     "data": [
       {"name": "rule_id",   "type": "STRING"},
       {"name": "rule_name", "type": "STRING"}
@@ -14,6 +15,7 @@
     "name": "Event Engine: Rule Error",
     "state": false,
     "show": true,
+    "system": true,
     "data": [
       {"name": "rule_id",  "type": "STRING"},
       {"name": "message",  "type": "STRING"}
@@ -24,6 +26,7 @@
     "name": "Event Engine: Ready",
     "state": true,
     "show": true,
+    "system": true,
     "data": []
   }
 ]

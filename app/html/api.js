@@ -46,4 +46,8 @@ const API = {
   getVariables:  ()      => API.get('variables'),
   setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
   deleteVariable: name   => API.delete(`variables?name=${encodeURIComponent(name)}`),
+
+  getAcapEvents:   ()   => API.get('acapevents'),
+  addAcapEvent:    ev   => API.post('acapevents', ev).then(r => r.json()),
+  deleteAcapEvent: id   => API.delete(`acapevents?id=${encodeURIComponent(id)}`),
 };

@@ -18,6 +18,7 @@ let privacyMasks = null;      /* null=loading, []=none,   [{name},...] */
 let deviceParams = null;      /* null=loading, []=none,   ['root.X.Y.Z',...] */
 let guardTours = null;        /* null=loading, []=none,   [{id,name},...] */
 let aoaScenarios = null;      /* null=loading, []=none or not available, [{id,name,type},...] */
+let acapEvents = null;        /* null=loading, []=none, [{id,name,state,system},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 let engineLat = 0;            /* engine settings latitude — used as default for astronomical triggers */
@@ -90,6 +91,10 @@ if (typeof API === 'undefined') {
     getVariables:  ()      => API.get('variables'),
     setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
     deleteVariable: name   => API.delete(`variables?name=${encodeURIComponent(name)}`),
+
+    getAcapEvents:   ()   => API.get('acapevents'),
+    addAcapEvent:    ev   => API.post('acapevents', ev).then(r => r.json()),
+    deleteAcapEvent: id   => API.delete(`acapevents?id=${encodeURIComponent(id)}`),
   };
 }
 
@@ -844,6 +849,17 @@ async function deleteVariable(name) {
 }
 
 /* ===================================================
+ * ACAP Events — custom event declarations
+ * =================================================== */
+async function loadAcapEvents() {
+  try {
+    acapEvents = await API.getAcapEvents();
+  } catch(e) {
+    acapEvents = [];
+  }
+}
+
+/* ===================================================
  * Status Tab
  * =================================================== */
 function downloadJSON(filename, data) {
@@ -976,6 +992,7 @@ window.addEventListener('DOMContentLoaded', () => {
     loadStatus();
     startPoll();
     loadVapixEventCatalog();
+    loadAcapEvents();
     Promise.all([
       loadPtzPresets(),
       loadAudioClips(),

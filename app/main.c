@@ -693,6 +693,193 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 }
 
 /*=====================================================
+ * GET/POST/DELETE /local/acap_event_engine/acapevents
+ *
+ * GET    /acapevents         - List all declared ACAP events
+ * POST   /acapevents         - Add a new user-defined ACAP event
+ * DELETE /acapevents?id=X    - Remove a user-defined ACAP event
+ *=====================================================*/
+
+#define ACAP_EVENTS_FILE     "settings/events.json"   /* bundled system events — read only */
+#define ACAP_USER_EVENTS_FILE "localdata/events.json"  /* user-created events — persists across reinstalls */
+
+static int acap_event_is_system(const char* id) {
+    return id && (strcmp(id, "RuleFired") == 0 ||
+                  strcmp(id, "RuleError") == 0  ||
+                  strcmp(id, "EngineReady") == 0);
+}
+
+static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    const char* method = get_method(req);
+
+    if (strcmp(method, "GET") == 0) {
+        /* Merge system events + user events into one array */
+        cJSON* system_evs = ACAP_FILE_Read(ACAP_EVENTS_FILE);
+        cJSON* user_evs   = ACAP_FILE_Read(ACAP_USER_EVENTS_FILE);
+        cJSON* merged = cJSON_CreateArray();
+        if (system_evs) {
+            cJSON* e; cJSON_ArrayForEach(e, system_evs) cJSON_AddItemToArray(merged, cJSON_Duplicate(e, 1));
+            cJSON_Delete(system_evs);
+        }
+        if (user_evs) {
+            cJSON* e; cJSON_ArrayForEach(e, user_evs) cJSON_AddItemToArray(merged, cJSON_Duplicate(e, 1));
+            cJSON_Delete(user_evs);
+        }
+        ACAP_HTTP_Respond_JSON(resp, merged);
+        cJSON_Delete(merged);
+        return;
+    }
+
+    if (strcmp(method, "POST") == 0) {
+        cJSON* body = get_body_json(req);
+        if (!body) { ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON body"); return; }
+
+        const char* id   = cJSON_GetStringValue(cJSON_GetObjectItem(body, "id"));
+        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(body, "name"));
+
+        if (!id || !*id) {
+            cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, "Missing 'id'");
+            return;
+        }
+
+        /* Validate: letters, digits, underscore only */
+        for (const char* p = id; *p; p++) {
+            if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                  (*p >= '0' && *p <= '9') || *p == '_')) {
+                cJSON_Delete(body);
+                ACAP_HTTP_Respond_Error(resp, 400, "Event id must contain only letters, digits, and underscores");
+                return;
+            }
+        }
+
+        if (acap_event_is_system(id)) {
+            cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 409, "Cannot overwrite a system event");
+            return;
+        }
+
+        cJSON* events = ACAP_FILE_Read(ACAP_USER_EVENTS_FILE);
+        if (!events) events = cJSON_CreateArray();
+
+        /* Check for duplicate across both system and user events */
+        cJSON* system_evs = ACAP_FILE_Read(ACAP_EVENTS_FILE);
+        if (system_evs) {
+            cJSON* existing;
+            cJSON_ArrayForEach(existing, system_evs) {
+                const char* eid = cJSON_GetStringValue(cJSON_GetObjectItem(existing, "id"));
+                if (eid && strcmp(eid, id) == 0) {
+                    cJSON_Delete(system_evs); cJSON_Delete(events); cJSON_Delete(body);
+                    ACAP_HTTP_Respond_Error(resp, 409, "Event id already exists");
+                    return;
+                }
+            }
+            cJSON_Delete(system_evs);
+        }
+        {
+            cJSON* existing;
+            cJSON_ArrayForEach(existing, events) {
+                const char* eid = cJSON_GetStringValue(cJSON_GetObjectItem(existing, "id"));
+                if (eid && strcmp(eid, id) == 0) {
+                    cJSON_Delete(events); cJSON_Delete(body);
+                    ACAP_HTTP_Respond_Error(resp, 409, "Event id already exists");
+                    return;
+                }
+            }
+        }
+
+        /* Build event entry — always prefix the display name */
+        int is_stateful = cJSON_IsTrue(cJSON_GetObjectItem(body, "state"));
+        cJSON* entry = cJSON_CreateObject();
+        cJSON_AddStringToObject(entry, "id",   id);
+        char prefixed_name[256];
+        if (name && *name) {
+            if (strncmp(name, "Event Engine: ", 14) == 0)
+                snprintf(prefixed_name, sizeof(prefixed_name), "%s", name);
+            else
+                snprintf(prefixed_name, sizeof(prefixed_name), "Event Engine: %s", name);
+        } else {
+            snprintf(prefixed_name, sizeof(prefixed_name), "Event Engine: %s", id);
+        }
+        cJSON_AddStringToObject(entry, "name", prefixed_name);
+        cJSON_AddBoolToObject(entry, "state", is_stateful);
+        cJSON_AddBoolToObject(entry, "show",  1);
+
+        cJSON* data_in = cJSON_GetObjectItem(body, "data");
+        if (data_in && cJSON_IsArray(data_in))
+            cJSON_AddItemToObject(entry, "data", cJSON_Duplicate(data_in, 1));
+        else
+            cJSON_AddItemToObject(entry, "data", cJSON_CreateArray());
+
+        /* Register with ACAP SDK */
+        if (!ACAP_EVENTS_Add_Event_JSON(entry)) {
+            cJSON_Delete(entry);
+            cJSON_Delete(events);
+            cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 500, "Failed to register event with ACAP SDK");
+            return;
+        }
+
+        /* Persist */
+        cJSON* response_entry = cJSON_Duplicate(entry, 1);
+        cJSON_AddItemToArray(events, entry);
+        ACAP_FILE_Write(ACAP_USER_EVENTS_FILE, events);
+        cJSON_Delete(events);
+        cJSON_Delete(body);
+
+        ACAP_HTTP_Respond_JSON(resp, response_entry);
+        cJSON_Delete(response_entry);
+        return;
+    }
+
+    if (strcmp(method, "DELETE") == 0) {
+        char* id = ACAP_HTTP_Request_Param(req, "id");
+        if (!id || !*id) {
+            if (id) free(id);
+            ACAP_HTTP_Respond_Error(resp, 400, "Missing 'id' parameter");
+            return;
+        }
+        if (acap_event_is_system(id)) {
+            free(id);
+            ACAP_HTTP_Respond_Error(resp, 403, "Cannot delete a system event");
+            return;
+        }
+
+        cJSON* events = ACAP_FILE_Read(ACAP_USER_EVENTS_FILE);
+        if (!events) {
+            free(id);
+            ACAP_HTTP_Respond_Error(resp, 404, "Event not found");
+            return;
+        }
+
+        int found = 0, idx = 0;
+        cJSON* item;
+        cJSON_ArrayForEach(item, events) {
+            const char* eid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+            if (eid && strcmp(eid, id) == 0) { found = 1; break; }
+            idx++;
+        }
+
+        if (!found) {
+            free(id);
+            cJSON_Delete(events);
+            ACAP_HTTP_Respond_Error(resp, 404, "Event not found");
+            return;
+        }
+
+        cJSON_DeleteItemFromArray(events, idx);
+        ACAP_EVENTS_Remove_Event(id);
+        ACAP_FILE_Write(ACAP_USER_EVENTS_FILE, events);
+        free(id);
+        cJSON_Delete(events);
+        ACAP_HTTP_Respond_Text(resp, "OK");
+        return;
+    }
+
+    ACAP_HTTP_Respond_Error(resp, 405, "Method not allowed");
+}
+
+/*=====================================================
  * GET /local/acap_event_engine/events
  *=====================================================*/
 static void HTTP_Events(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
@@ -944,6 +1131,16 @@ int main(void) {
 
     RuleEngine_Init();
 
+    /* Re-register any user-created ACAP events saved in localdata */
+    {
+        cJSON* user_evs = ACAP_FILE_Read(ACAP_USER_EVENTS_FILE);
+        if (user_evs) {
+            cJSON* ev;
+            cJSON_ArrayForEach(ev, user_evs) ACAP_EVENTS_Add_Event_JSON(ev);
+            cJSON_Delete(user_evs);
+        }
+    }
+
     /* Set status */
     ACAP_STATUS_SetString("app", "status", "Running");
     ACAP_STATUS_SetNumber("app", "rules",  RuleEngine_Count());
@@ -956,6 +1153,7 @@ int main(void) {
     ACAP_HTTP_Node("rules",     HTTP_Rules);
     ACAP_HTTP_Node("triggers",  HTTP_Triggers);
     ACAP_HTTP_Node("actions",   HTTP_Actions);
+    ACAP_HTTP_Node("acapevents", HTTP_AcapEvents);
     ACAP_HTTP_Node("events",    HTTP_Events);
     ACAP_HTTP_Node("fire",      HTTP_Fire);
     ACAP_HTTP_Node("variables", HTTP_Variables);

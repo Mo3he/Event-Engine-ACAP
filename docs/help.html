@@ -843,14 +843,21 @@ Content-Type: application/json
       <p>Immediately trigger another named rule. Useful for shared action sequences or conditional branching via variable state.</p>
 
       <h3 id="act-fire-event">Fire ACAP Event</h3>
-      <p>Fire an ACAP event visible to other Axis applications and built-in action rules on the device.</p>
+      <p>Fire an ACAP event that is visible to other Axis applications and to the camera's built-in Action Rules system. Events you create here appear as trigger conditions in the camera's native event handler, letting you chain Event Engine rules into built-in camera automations.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><strong>Event</strong></td><td>Choose a preset event (<em>RuleFired</em>, <em>RuleError</em>, <em>EngineReady</em>) or define a <em>Custom</em> event.</td></tr>
-        <tr><td><strong>Event ID</strong></td><td>(Custom only) Unique event identifier string.</td></tr>
-        <tr><td><strong>Type</strong></td><td>(Custom only) <em>Stateless</em> (one-shot) or <em>Stateful</em> (has active/inactive state).</td></tr>
-        <tr><td><strong>State</strong></td><td>(Stateful only) <em>High</em> (active) or <em>Low</em> (inactive).</td></tr>
+        <tr><td><strong>Event</strong></td><td>Select from all declared events. System events (<em>RuleFired</em>, <em>RuleError</em>, <em>EngineReady</em>) are always available. Custom events you create appear here too.</td></tr>
+        <tr><td><strong>＋ New</strong></td><td>Opens the inline event creator. Fill in an ID, display name, and type, then click <em>Create</em> to register the event immediately and select it.</td></tr>
+        <tr><td><strong>Event ID</strong></td><td>(New event) Unique identifier — letters, digits, and underscores only (e.g. <code>DoorOpenAlert</code>).</td></tr>
+        <tr><td><strong>Display Name</strong></td><td>(New event) Human-readable label shown in the Axis event system.</td></tr>
+        <tr><td><strong>Type</strong></td><td>(New event) <em>Stateless</em> fires a one-shot pulse. <em>Stateful</em> maintains a High/Low state that other apps and built-in rules can subscribe to.</td></tr>
+        <tr><td><strong>State</strong></td><td>(Stateful events only) Set the event <em>High</em> (active) or <em>Low</em> (inactive).</td></tr>
+        <tr><td><strong>Remove Event</strong></td><td>Permanently removes a custom event. System events cannot be removed. Rules that fire the deleted event must be updated manually.</td></tr>
       </table>
+      <div class="callout info">
+        <span class="callout-icon">ℹ️</span>
+        <div>Custom events are registered at startup from <code>settings/events.json</code>. They persist across reboots and appear immediately in the Axis camera's built-in Action Rules under <b>CameraApplicationPlatform / Event Engine</b>.</div>
+      </div>
 
       <h3 id="act-vapix-query">Device Event Query</h3>
       <p>Fetch the latest cached data from any device event and inject it as <span class="var">{{trigger.FIELD}}</span> variables for subsequent actions. Used for polling sensor values on a schedule trigger.</p>

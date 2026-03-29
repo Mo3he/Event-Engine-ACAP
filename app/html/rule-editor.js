@@ -1438,53 +1438,27 @@ function actionFields(a) {
     </div>`;
   }
   if (type === 'fire_vapix_event') {
-    const knownIds = ['RuleFired', 'RuleError', 'EngineReady'];
-    const preset = a._event_preset || '';
-    const isCustom = preset === 'custom' || (!preset && !knownIds.includes(a.event_id || 'RuleFired'));
-    const evId = isCustom ? (a.event_id || '') : (knownIds.includes(preset) ? preset : (a.event_id || 'RuleFired'));
-    const isStateful = evId === 'EngineReady' || (isCustom && a._custom_stateful === 'true');
-    const selectVal = isCustom ? 'custom' : evId;
+    const events = Array.isArray(acapEvents) ? acapEvents : [];
+    const selId = a.event_id || (events.length > 0 ? events[0].id : '');
+    const selEvent = events.find(e => e.id === selId) || null;
+    const isStateful = selEvent ? !!selEvent.state : false;
+    const isAdding = a._adding === 'true';
     return `
     <div class="form-row">
       <div class="form-group">
         <label>Event</label>
-        <select data-k="_event_preset" onchange="rerenderAction(this)">
-          <option value="RuleFired"   ${selectVal === 'RuleFired'   ? 'selected' : ''}>Rule Fired</option>
-          <option value="RuleError"   ${selectVal === 'RuleError'   ? 'selected' : ''}>Rule Error</option>
-          <option value="EngineReady" ${selectVal === 'EngineReady' ? 'selected' : ''}>Engine Ready</option>
-          <option value="custom"      ${selectVal === 'custom'      ? 'selected' : ''}>Custom…</option>
-        </select>
-        ${!isCustom ? `<div class="form-hint">${
-          evId === 'RuleFired'   ? 'Signals other ACAP apps that a rule fired. Fired automatically — use this to fire it manually from another rule.' :
-          evId === 'RuleError'   ? 'Signals other ACAP apps that a rule encountered an error.' :
-          evId === 'EngineReady' ? 'Stateful on/off signal. Set High when the system is active, Low when inactive. Other apps can subscribe to this state.' : ''
-        }</div>` : ''}
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select data-k="event_id" onchange="rerenderAction(this)" style="flex:1;">
+            ${events.length === 0 ? '<option value="">— No events declared —</option>' : ''}
+            ${events.map(e => `<option value="${escHtml(e.id)}" ${e.id === selId ? 'selected' : ''}>${escHtml(e.name || e.id)}${e.state ? ' (stateful)' : ''}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventStartAdd(this)" title="Create a new custom ACAP event">＋ New</button>
+        </div>
+        ${selEvent ? `<div class="form-hint">${escHtml(selEvent.name || selEvent.id)} · ${selEvent.system ? 'System event' : 'Custom event'} · ${selEvent.state ? 'Stateful (High/Low)' : 'Stateless (pulse)'}</div>` : '<div class="form-hint">No events available — use ＋ New to create one.</div>'}
+        ${selEvent && !selEvent.system ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--danger,#e05252);" onclick="acapEventDelete('${escHtml(selId)}')">Remove Event</button>` : ''}
       </div>
     </div>
-    ${isCustom ? `
-    <div class="form-row">
-      <div class="form-group">
-        <label>Event ID</label>
-        <input type="text" data-k="event_id" value="${escHtml(knownIds.includes(evId) ? '' : evId)}" placeholder="e.g. MyCustomEvent">
-        <div class="form-hint">Must match an event declared by an ACAP application on this camera.</div>
-      </div>
-      <div class="form-group" style="flex:0 0 160px;">
-        <label>Type</label>
-        <select data-k="_custom_stateful" onchange="rerenderAction(this)">
-          <option value=""     ${!isStateful ? 'selected' : ''}>Stateless (pulse)</option>
-          <option value="true" ${isStateful  ? 'selected' : ''}>Stateful (High/Low)</option>
-        </select>
-      </div>
-      ${isStateful ? `
-      <div class="form-group" style="flex:0 0 120px;">
-        <label>State</label>
-        <select data-k="state">
-          <option value="true"  ${a.state === true || a.state === 'true'  ? 'selected' : ''}>High (on)</option>
-          <option value="false" ${a.state === false || a.state === 'false' ? 'selected' : ''}>Low (off)</option>
-        </select>
-      </div>` : ''}
-    </div>` : ''}
-    ${evId === 'EngineReady' ? `
+    ${isStateful ? `
     <div class="form-row">
       <div class="form-group" style="flex:0 0 140px;">
         <label>State</label>
@@ -1494,7 +1468,30 @@ function actionFields(a) {
         </select>
       </div>
     </div>` : ''}
-    <div class="form-hint" style="margin-top:4px;">ACAP events are visible to other Axis ACAP applications on this device.</div>`
+    ${isAdding ? `
+    <div class="form-row" style="background:var(--bg-2,#1e2230);border-radius:6px;padding:12px;gap:8px;flex-wrap:wrap;">
+      <div class="form-group" style="min-width:140px;">
+        <label>Event ID</label>
+        <input type="text" data-k="_new_id" value="${escHtml(a._new_id || '')}" placeholder="e.g. DoorOpenAlert" autocomplete="off">
+        <div class="form-hint">Letters, digits and underscores only.</div>
+      </div>
+      <div class="form-group" style="min-width:160px;">
+        <label>Display Name</label>
+        <input type="text" data-k="_new_name" value="${escHtml(a._new_name !== undefined ? a._new_name : 'Event Engine: ')}" placeholder="e.g. Event Engine: Door Open" autocomplete="off">
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Type</label>
+        <select data-k="_new_stateful">
+          <option value=""     ${!a._new_stateful ? 'selected' : ''}>Stateless (pulse)</option>
+          <option value="true" ${a._new_stateful === 'true' ? 'selected' : ''}>Stateful (High/Low)</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;align-self:flex-end;display:flex;gap:6px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="acapEventSaveNew(this)">Create</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventCancelAdd(this)">Cancel</button>
+      </div>
+    </div>` : ''}
+    <div class="form-hint" style="margin-top:4px;">ACAP events appear in the camera's built-in Action Rules and are visible to other ACAP applications on this device.</div>`
   }
   if (type === 'delay') return `
     <div class="form-row">
@@ -2266,16 +2263,17 @@ function normalizeAction(a) {
   if (out.value    !== undefined && a.type === 'increment_counter')
     out.delta = parseFloat(out.value) || 0;
   if (a.type === 'fire_vapix_event') {
-    const preset = a._event_preset || a.event_id || 'RuleFired';
-    if (preset === 'custom') {
-      out.event_id = a.event_id || '';
-      const isStateful = a._custom_stateful === 'true';
-      if (isStateful) out.state = a.state === 'true' || a.state === true;
-    } else {
-      out.event_id = preset;
-      if (preset === 'EngineReady') out.state = a.state === 'true' || a.state === true;
-      /* RuleFired and RuleError are stateless — no state field */
+    const events = Array.isArray(acapEvents) ? acapEvents : [];
+    out.event_id = a.event_id || (events[0] ? events[0].id : 'RuleFired');
+    const selEvent = events.find(e => e.id === out.event_id);
+    if (selEvent && selEvent.state) {
+      out.state = a.state === 'true' || a.state === true;
     }
+    /* Drop internal UI-only keys */
+    delete out._adding;
+    delete out._new_id;
+    delete out._new_name;
+    delete out._new_stateful;
   }
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
@@ -2401,5 +2399,91 @@ async function saveRule() {
     loadRules();
   } catch(e) {
     toast('Failed to save rule: ' + e.message, 'error');
+  }
+}
+
+/* ===================================================
+ * ACAP Event helpers — called from fire_vapix_event action rows
+ * =================================================== */
+
+function _acapEventRowIndex(btn) {
+  const row = btn.closest('.tca-row');
+  if (!row) return -1;
+  return parseInt(row.id.replace('arow-', ''));
+}
+
+function _acapEventSyncRow(i) {
+  const el = document.getElementById('arow-' + i);
+  if (!el) return;
+  const d = { type: actionRows[i].type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    d[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[i] = d;
+}
+
+function acapEventStartAdd(btn) {
+  const i = _acapEventRowIndex(btn);
+  if (i < 0) return;
+  _acapEventSyncRow(i);
+  actionRows[i]._adding = 'true';
+  renderActionList();
+}
+
+function acapEventCancelAdd(btn) {
+  const i = _acapEventRowIndex(btn);
+  if (i < 0) return;
+  _acapEventSyncRow(i);
+  const a = actionRows[i];
+  delete a._adding;
+  delete a._new_id;
+  delete a._new_name;
+  delete a._new_stateful;
+  renderActionList();
+}
+
+async function acapEventSaveNew(btn) {
+  const i = _acapEventRowIndex(btn);
+  if (i < 0) return;
+  _acapEventSyncRow(i);
+  const a = actionRows[i];
+
+  const id   = (a._new_id   || '').trim();
+  const name = (a._new_name || '').trim();
+
+  if (!id) { toast('Event ID is required', 'error'); return; }
+  if (!/^[A-Za-z0-9_]+$/.test(id)) {
+    toast('Event ID must contain only letters, digits, and underscores', 'error');
+    return;
+  }
+
+  try {
+    const created = await API.addAcapEvent({
+      id,
+      name: name || id,
+      state: a._new_stateful === 'true',
+    });
+    await loadAcapEvents();
+    delete a._adding;
+    delete a._new_id;
+    delete a._new_name;
+    delete a._new_stateful;
+    a.event_id = created.id;
+    renderActionList();
+    toast(`Event "${created.id}" created`, 'success');
+  } catch(e) {
+    toast('Failed to create event: ' + e.message, 'error');
+  }
+}
+
+async function acapEventDelete(id) {
+  if (!confirm(`Remove custom event "${id}"? Rules that fire this event will need to be updated.`)) return;
+  try {
+    await API.deleteAcapEvent(id);
+    await loadAcapEvents();
+    toast(`Event "${id}" removed`, 'success');
+    renderActionList();
+  } catch(e) {
+    toast('Failed to remove event: ' + e.message, 'error');
   }
 }
