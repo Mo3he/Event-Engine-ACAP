@@ -14,10 +14,12 @@ API documentation can be found here [API Docs](https://petstore.swagger.io/?url=
 
 ## What It Does
 
-Event Engine replaces and extends the built-in Axis event system with a flexible **If This Then That** rule engine. Each rule has:
+Event Engine replaces and extends the built-in Axis event system with a flexible **If This Then That** rule engine. 
+
+Each rule has:
 
 - **Triggers** - what starts the rule (one or more, evaluated as OR or AND)
-- **Conditions** - optional checks that must pass before actions run
+- **Conditions** - optional checks that must pass before actions run (one or more, evaluated as AND or OR)
 - **Actions** - what happens when the rule fires (one or more, run in sequence)
 
 Rules are built in a clean web UI and take effect immediately.
@@ -111,9 +113,9 @@ Actions are grouped by category in the rule editor.
 
 | Type | Description |
 |------|-------------|
-| **Fire ACAP Event** | Fire an ACAP event visible to other Axis applications |
+| **Fire ACAP Event** | Fire an ACAP event visible to the built in event system and other Axis applications |
 | **Device Event Query** | Fetch the latest cached data from a device event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
-| **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only — incorrect values can disrupt camera operation** |
+| **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only - incorrect values can disrupt camera operation** |
 | **ACAP Control** | Start, stop, or restart another installed ACAP application |
 
 ### Data
