@@ -15,6 +15,7 @@
 #include "engine/actions.h"
 #include "engine/conditions.h"
 #include "engine/mqtt_client.h"
+#include "engine/alert_stream.h"
 
 #define APP_PACKAGE "acap_event_engine"
 
@@ -923,6 +924,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_total",    RuleEngine_Count());
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
+    cJSON_AddNumberToObject(obj, "stream_clients", AlertStream_Client_Count());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
     cJSON_AddStringToObject(obj, "engine_version", app_version());
 
@@ -1131,6 +1133,9 @@ int main(void) {
 
     RuleEngine_Init();
 
+    /* Alert stream — HTTP multipart event stream */
+    AlertStream_Init();
+
     /* Re-register any user-created ACAP events saved in localdata */
     {
         cJSON* user_evs = ACAP_FILE_Read(ACAP_USER_EVENTS_FILE);
@@ -1179,6 +1184,7 @@ int main(void) {
 
     LOG("Shutting down %s", APP_PACKAGE);
     ACAP_EVENTS_Fire_State("EngineReady", 0);
+    AlertStream_Cleanup();
     RuleEngine_Cleanup();
     MQTT_Cleanup();
     EventLog_Cleanup();

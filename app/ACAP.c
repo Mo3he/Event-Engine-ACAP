@@ -50,6 +50,7 @@ struct ACAP_HTTP_Request_T {
 
 struct ACAP_HTTP_Response_T {
     FCGX_Request*   fcgi;
+    int             hijacked;
 };
 
 /*-----------------------------------------------------
@@ -412,8 +413,27 @@ size_t ACAP_HTTP_Get_Body_Length(const ACAP_HTTP_Request request) {
  * HTTP Request Processing
  *-----------------------------------------------------*/
 
+int ACAP_HTTP_Get_Socket(void) {
+    if (fcgi_sock != -1)
+        return fcgi_sock;
+    const char* socket_path = getenv("FCGI_SOCKET_NAME");
+    if (!socket_path)
+        return -1;
+    fcgi_sock = FCGX_OpenSocket(socket_path, 5);
+    if (fcgi_sock >= 0)
+        chmod(socket_path, 0777);
+    return fcgi_sock;
+}
+
+FCGX_Request* ACAP_HTTP_Hijack(ACAP_HTTP_Response response) {
+    if (!response) return NULL;
+    response->hijacked = 1;
+    return response->fcgi;
+}
+
 void ACAP_HTTP_Process(void) {
-    FCGX_Request fcgi_request;
+    FCGX_Request* fcgi_request = calloc(1, sizeof(*fcgi_request));
+    if (!fcgi_request) return;
     struct ACAP_HTTP_Request_T  requestData  = {0};
     struct ACAP_HTTP_Response_T responseData  = {0};
     char* socket_path = NULL;
@@ -428,29 +448,30 @@ void ACAP_HTTP_Process(void) {
     }
 
     if (fcgi_sock == -1) {
-        fcgi_sock = FCGX_OpenSocket(socket_path, 5);
+        fcgi_sock = ACAP_HTTP_Get_Socket();
         if (fcgi_sock < 0) {
             LOG_WARN("Failed to open FCGI socket\n");
             return;
         }
-        chmod(socket_path, 0777);
     }
 
-    if (FCGX_InitRequest(&fcgi_request, fcgi_sock, 0) != 0) {
+    if (FCGX_InitRequest(fcgi_request, fcgi_sock, 0) != 0) {
         LOG_WARN("FCGX_InitRequest failed\n");
+        free(fcgi_request);
         return;
     }
 
-    if (FCGX_Accept_r(&fcgi_request) != 0) {
-        FCGX_Free(&fcgi_request, 1);
+    if (FCGX_Accept_r(fcgi_request) != 0) {
+        FCGX_Free(fcgi_request, 1);
+        free(fcgi_request);
         return;
     }
 
     /* Wire up opaque types to the FCGI request */
-    requestData.fcgi = &fcgi_request;
-    requestData.method = FCGX_GetParam("REQUEST_METHOD", fcgi_request.envp);
-    requestData.contentType = FCGX_GetParam("CONTENT_TYPE", fcgi_request.envp);
-    responseData.fcgi = &fcgi_request;
+    requestData.fcgi = fcgi_request;
+    requestData.method = FCGX_GetParam("REQUEST_METHOD", fcgi_request->envp);
+    requestData.contentType = FCGX_GetParam("CONTENT_TYPE", fcgi_request->envp);
+    responseData.fcgi = fcgi_request;
 
     /* Read POST body */
     if (requestData.method && strcmp(requestData.method, "POST") == 0) {
@@ -458,7 +479,7 @@ void ACAP_HTTP_Process(void) {
         if (contentLength > 0 && contentLength < ACAP_MAX_BUFFER_SIZE) {
             char* postData = malloc(contentLength + 1);
             if (postData) {
-                size_t bytesRead = FCGX_GetStr(postData, contentLength, fcgi_request.in);
+                size_t bytesRead = FCGX_GetStr(postData, contentLength, fcgi_request->in);
                 if (bytesRead < contentLength) {
                     free(postData);
                     goto cleanup;
@@ -471,7 +492,7 @@ void ACAP_HTTP_Process(void) {
     }
 
     /* Route to handler */
-    const char* uriString = FCGX_GetParam("REQUEST_URI", fcgi_request.envp);
+    const char* uriString = FCGX_GetParam("REQUEST_URI", fcgi_request->envp);
     if (!uriString) {
         ACAP_HTTP_Respond_Error(&responseData, 400, "Invalid URI");
         goto cleanup;
@@ -498,7 +519,10 @@ cleanup:
     if (requestData.postData) {
         free(requestData.postData);
     }
-    FCGX_Finish_r(&fcgi_request);
+    if (!responseData.hijacked) {
+        FCGX_Finish_r(fcgi_request);
+        free(fcgi_request);
+    }
 }
 
 /*-----------------------------------------------------

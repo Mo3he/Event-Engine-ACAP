@@ -14,6 +14,7 @@
 #include "actions.h"
 #include "event_log.h"
 #include "variables.h"
+#include "alert_stream.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "rule_engine: " fmt, ## args)
@@ -280,6 +281,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     pthread_mutex_unlock(&store_lock);
 
     EventLog_Append(rid_copy, rname_copy, 1, NULL, trigger_data, 0, 0);
+    AlertStream_Broadcast(rid_copy, rname_copy, trigger_data);
     cJSON* fired_data = cJSON_CreateObject();
     cJSON_AddStringToObject(fired_data, "rule_id",   rid_copy);
     cJSON_AddStringToObject(fired_data, "rule_name", rname_copy);
@@ -652,6 +654,7 @@ int RuleEngine_Fire(const char* id, cJSON* trigger_data) {
 
     cJSON* tdata = trigger_data ? trigger_data : cJSON_CreateObject();
     EventLog_Append(rid, rname, 1, "manual", tdata, 0, 0);
+    AlertStream_Broadcast(rid, rname, tdata);
     Actions_Execute(rid, actions_dup, tdata);
     if (!trigger_data) cJSON_Delete(tdata);
     cJSON_Delete(actions_dup);

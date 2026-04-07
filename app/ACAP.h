@@ -25,6 +25,7 @@
 
 #include <glib.h>
 #include "fcgi_stdio.h"
+#include <fcgiapp.h>
 #include "cJSON.h"
 
 #ifdef __cplusplus
@@ -203,6 +204,15 @@ void ACAP_Cleanup(void);
  * @endcode
  */
 int ACAP_HTTP_Node(const char* nodename, ACAP_HTTP_Callback callback);
+
+/**
+ * @brief Hijack the current FCGI connection for long-lived streaming.
+ *        After calling this, ACAP will not close the connection automatically.
+ *        The caller is responsible for calling FCGX_Finish_r() and free() on
+ *        the returned pointer when done.
+ * @return heap-allocated FCGX_Request* or NULL
+ */
+FCGX_Request* ACAP_HTTP_Hijack(ACAP_HTTP_Response response);
 
 /**
  * @brief Get the HTTP request method.

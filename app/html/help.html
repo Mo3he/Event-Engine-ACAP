@@ -356,6 +356,7 @@
       <a href="#variables-tab">Variables Tab</a>
       <a href="#backup-restore">Backup &amp; Restore</a>
       <a href="#api">REST API</a>
+      <a href="#alert-stream" class="sub">Alert Stream</a>
     </nav>
 
     <!-- Main content -->
@@ -1084,8 +1085,35 @@ Content-Type: application/json
         <tr><td>GET</td><td><code>/engine</code></td><td>Engine status, MQTT status, device info.</td></tr>
         <tr><td>GET</td><td><code>/aoa</code></td><td>List configured AOA scenarios (id, name, type).</td></tr>
         <tr><td>GET / POST</td><td><code>/settings</code></td><td>Engine, MQTT, SMTP, and device configuration.</td></tr>
+        <tr><td>GET</td><td><code>/alertStream</code></td><td>Real-time multipart event stream. See below.</td></tr>
       </table>
       <p>For interactive documentation, open <a href="swagger.html" target="_blank">API Docs</a>.</p>
+
+      <h3 id="alert-stream">Alert Stream</h3>
+      <p>A long-lived HTTP endpoint that streams rule-fire events in real-time as <code>multipart/mixed</code> JSON chunks. External software connects with Digest Auth and receives a new chunk every time a rule fires — with no polling required.</p>
+      <pre><code>GET http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code></pre>
+      <p>The connection stays open indefinitely. The first chunk is sent immediately on connect:</p>
+      <pre><code>--AxisEventBoundary
+Content-Type: application/json
+Content-Length: 18
+
+{"connected":true}</code></pre>
+      <p>Each subsequent chunk is a JSON object with the following fields:</p>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        <tr><td><code>ipAddress</code></td><td>string</td><td>Camera IP address</td></tr>
+        <tr><td><code>macAddress</code></td><td>string</td><td>Camera serial number</td></tr>
+        <tr><td><code>dateTime</code></td><td>string</td><td>ISO 8601 UTC timestamp</td></tr>
+        <tr><td><code>eventType</code></td><td>string</td><td>Always <code>RuleFired</code></td></tr>
+        <tr><td><code>eventState</code></td><td>string</td><td>Always <code>active</code></td></tr>
+        <tr><td><code>eventDescription</code></td><td>string</td><td>Rule name</td></tr>
+        <tr><td><code>rule_id</code></td><td>string</td><td>Rule UUID</td></tr>
+        <tr><td><code>rule_name</code></td><td>string</td><td>Rule display name</td></tr>
+        <tr><td><code>trigger_data</code></td><td>object</td><td>Raw trigger event data (fields vary by trigger type)</td></tr>
+      </table>
+      <p>Up to 8 clients may be connected simultaneously. Connect with:</p>
+      <pre><code>curl --digest -u admin:pass -N \
+  "http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream"</code></pre>
 
       <p style="margin-top:40px;font-size:12px;color:var(--text-dim);">Event Engine — MIT License</p>
 

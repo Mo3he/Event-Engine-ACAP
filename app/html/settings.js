@@ -32,6 +32,7 @@ async function loadStatus() {
 
     /* Update MQTT status badge (non-destructive — doesn't touch the form) */
     updateMqttStatusBadge(s.mqtt || {});
+    updateStreamStatusBadge(s);
     renderDeviceCapabilities();
   } catch(e) {
     toast('Failed to load status', 'error');
@@ -127,6 +128,25 @@ function updateMqttStatusBadge(mq) {
   } else {
     dot.style.background = 'var(--text-dim, #555)';
     text.textContent = 'Disabled';
+  }
+}
+
+function updateStreamStatusBadge(status) {
+  const dot  = document.getElementById('stream-dot');
+  const text = document.getElementById('stream-status-text');
+  const urlEl = document.getElementById('stream-url');
+  if (!dot || !text) return;
+  const clients = status.stream_clients || 0;
+  if (clients > 0) {
+    dot.style.background = 'var(--accent-success)';
+    text.textContent = `${clients} client${clients !== 1 ? 's' : ''} connected`;
+  } else {
+    dot.style.background = 'var(--text-dim, #555)';
+    text.textContent = 'No clients';
+  }
+  /* Fill in the actual camera IP in the URL display */
+  if (urlEl && status.device && status.device.ip) {
+    urlEl.textContent = `http://${status.device.ip}/local/acap_event_engine/alertStream`;
   }
 }
 

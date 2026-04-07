@@ -266,6 +266,28 @@
         </form>
       </div>
 
+      <!-- Alert Stream -->
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">ALERT STREAM</h3>
+          <div id="stream-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+            <span id="stream-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
+            <span id="stream-status-text">Loading…</span>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+          A long-lived HTTP endpoint that streams rule-fire events in real-time as multipart JSON.
+          External software connects with Digest Auth to receive events instantly as multipart/mixed JSON chunks.
+        </p>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-bottom:14px;">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">Endpoint URL:</div>
+          <code id="stream-url" style="font-size:13px;word-break:break-all;">http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);">
+          <strong>Usage:</strong> <code>curl --digest -u root:pass http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code>
+        </div>
+      </div>
+
       <!-- SOCKS5 Proxy Settings -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">SOCKS5 PROXY</h3>

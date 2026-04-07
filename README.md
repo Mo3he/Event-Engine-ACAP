@@ -203,7 +203,7 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 
 ## Requirements
 
-- Axis camera running **AXIS OS 11.0 or later**
+- Axis camera running **AXIS OS 11.8 or later** (required for `reverseProxy` manifest feature used by alert stream)
 - [Docker](https://www.docker.com/) - only needed if building from source
 
 ---
@@ -250,9 +250,33 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 | GET | `/engine` | Engine status, MQTT status, device info |
 | GET | `/aoa` | List configured Axis Object Analytics scenarios (id, name, type) |
 | GET / POST | `/settings` | Engine, MQTT, SMTP, and device configuration |
+| GET | `/alertStream` | Real-time multipart/mixed event stream — see [Alert Stream](#alert-stream) |
 
 Full spec: `app/html/openapi.json`
 Interactive docs: `http://<camera-ip>/local/acap_event_engine/swagger.html`
+
+### Alert Stream
+
+A long-lived HTTP endpoint that pushes rule-fire events in real-time as `multipart/mixed` JSON chunks — no polling required. Digest Auth is handled by the camera's Apache proxy.
+
+```bash
+curl --digest -u admin:pass -N \
+  "http://<camera-ip>/local/acap_event_engine/alertStream"
+```
+
+The first chunk arrives immediately on connect (`{"connected":true}`). Each subsequent chunk fires when a rule executes and includes:
+
+| Field | Description |
+|-------|-------------|
+| `ipAddress` | Camera IP |
+| `macAddress` | Camera serial number |
+| `dateTime` | ISO 8601 UTC timestamp |
+| `eventType` | Always `RuleFired` |
+| `eventDescription` | Rule name |
+| `rule_id` / `rule_name` | Rule identity |
+| `trigger_data` | Raw trigger event fields (vary by trigger type) |
+
+Up to 8 clients can be connected simultaneously. The stream URL is shown in the Settings tab of the web UI.
 
 ### Webhook Example
 
@@ -280,7 +304,7 @@ app/
 ├── main.c                  # HTTP endpoints, initialisation, event dispatch
 ├── ACAP.c / ACAP.h         # Axis SDK wrapper (HTTP, events, files, device info, VAPIX)
 ├── cJSON.c / cJSON.h       # Bundled JSON library
-├── manifest.json           # ACAP package manifest (schemaVersion 1.4.0)
+├── manifest.json           # ACAP package manifest (schemaVersion 1.5.0)
 ├── Makefile
 ├── engine/
 │   ├── rule_engine.c       # Rule store, trigger dispatch, cooldown, rate limiting
@@ -290,7 +314,8 @@ app/
 │   ├── scheduler.c         # Cron, interval, and daily-time scheduler
 │   ├── mqtt_client.c       # MQTT 3.1.1 client over raw POSIX sockets
 │   ├── variables.c         # Named variables and counters (persistent)
-│   └── event_log.c         # In-memory ring-buffer event log
+│   ├── event_log.c         # In-memory ring-buffer event log
+│   └── alert_stream.c      # Real-time multipart HTTP event stream (TCP server on localhost:8888)
 ├── html/
 │   ├── index.html          # Web UI shell
 │   ├── api.js              # API client layer

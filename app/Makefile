@@ -7,7 +7,8 @@ OBJS1 = main.c ACAP.c cJSON.c \
         engine/scheduler.c \
         engine/variables.c \
         engine/event_log.c \
-        engine/mqtt_client.c
+        engine/mqtt_client.c \
+        engine/alert_stream.c
 PROGS = $(PROG1)
 
 PKGS = glib-2.0 gio-2.0 axevent fcgi
