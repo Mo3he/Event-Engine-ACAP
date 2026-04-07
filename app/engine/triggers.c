@@ -346,9 +346,9 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             char scen_name[32];
             snprintf(scen_name, sizeof(scen_name), "Device1Scenario%d", s->aoa_scenario_id);
             cJSON* tf = cJSON_CreateObject();
-            cJSON* t0 = cJSON_CreateObject(); cJSON_AddStringToObject(t0, "axis", "CameraApplicationPlatform");
-            cJSON* t1 = cJSON_CreateObject(); cJSON_AddStringToObject(t1, "axis", "ObjectAnalytics");
-            cJSON* t2 = cJSON_CreateObject(); cJSON_AddStringToObject(t2, "axis", scen_name);
+            cJSON* t0 = cJSON_CreateObject(); cJSON_AddStringToObject(t0, "tnsaxis", "CameraApplicationPlatform");
+            cJSON* t1 = cJSON_CreateObject(); cJSON_AddStringToObject(t1, "tnsaxis", "ObjectAnalytics");
+            cJSON* t2 = cJSON_CreateObject(); cJSON_AddStringToObject(t2, "tnsaxis", scen_name);
             cJSON_AddItemToObject(tf, "topic0", t0);
             cJSON_AddItemToObject(tf, "topic1", t1);
             cJSON_AddItemToObject(tf, "topic2", t2);
