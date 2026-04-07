@@ -203,8 +203,16 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 
 ## Requirements
 
-- Axis camera running **AXIS OS 11.8 or later** (required for `reverseProxy` manifest feature used by alert stream)
-- [Docker](https://www.docker.com/) - only needed if building from source
+- Axis camera running **AXIS OS 11.8 or later**
+- [Docker](https://www.docker.com/) — only needed if building from source
+
+### Firmware Compatibility
+
+| Feature | Minimum AXIS OS |
+|---------|----------------|
+| Core rule engine, all triggers/actions | 11.0 |
+| `reverseProxy` manifest (alertStream) | 11.8 |
+| Tested LTS release | **11.11** (recommended) |
 
 ---
 
