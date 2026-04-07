@@ -168,7 +168,9 @@ static int event_topic_matches(Subscription* s, cJSON* event) {
         cJSON* t = cJSON_GetObjectItem(s->topic_filter, keys[i]);
         if (!t || !t->child || !t->child->valuestring || !t->child->valuestring[0]) continue;
         if (pos > 0 && pos < (int)sizeof(expected) - 1) expected[pos++] = '/';
-        const char* val = t->child->valuestring;
+        /* Mirror ACAP_EVENTS_Parse: topic0 "CameraApplicationPlatform" is encoded as "acap" */
+        const char* val = (i == 0 && strcmp(t->child->valuestring, "CameraApplicationPlatform") == 0)
+                          ? "acap" : t->child->valuestring;
         while (*val && pos < (int)sizeof(expected) - 1) expected[pos++] = *val++;
     }
     expected[pos] = '\0';
