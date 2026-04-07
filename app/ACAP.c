@@ -2385,7 +2385,11 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body) {
     long response_code;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     if (response_code >= 300) {
-        LOG_WARN("%s: Code %ld\n", __func__, response_code);
+        /* 404 = app/CGI not installed — expected, log at INFO not WARNING */
+        if (response_code == 404)
+            syslog(LOG_INFO, "%s: Code %ld (not installed)\n", __func__, response_code);
+        else
+            LOG_WARN("%s: Code %ld\n", __func__, response_code);
         free(response);
         return NULL;
     }

@@ -625,7 +625,10 @@ function renderRules() {
         <span class="toggle-slider"></span>
       </label>
       <div class="rule-meta">
-        <div class="rule-name">${escHtml(r.name)}</div>
+        <div class="rule-name-row">
+          <div class="rule-name">${escHtml(r.name)}</div>
+          <code class="rule-uuid" onclick="copyRuleId('${r.id}')" title="${r.id}">UUID: ${r.id.slice(0, 8)}</code>
+        </div>
         <div class="rule-badges">
           ${(r.trigger_types||[]).map(t => `<span class="badge badge-trigger">${escHtml(ruleTypeLabel('trigger',t))}</span>`).join('')}
           ${(r.condition_types||[]).map(t => `<span class="badge badge-cond">${escHtml(ruleTypeLabel('condition',t))}</span>`).join('')}
@@ -758,9 +761,15 @@ function renderEventLog(events) {
     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted);">No events yet</td></tr>';
     return;
   }
+  /* Preserve which rows are currently expanded before rebuilding */
+  const openIds = new Set();
+  tbody.querySelectorAll('tr[id^="log-detail-"]').forEach(tr => {
+    if (tr.style.display !== 'none') openIds.add(tr.id);
+  });
+
   /* Sort by timestamp descending (newest first) to ensure chronological order */
   events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-  tbody.innerHTML = events.map((e, idx) => {
+  tbody.innerHTML = events.map((e) => {
     const d = new Date(e.timestamp * 1000);
     const time = d.toLocaleTimeString([], { hour12: false }) + ' ' +
                  d.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -770,7 +779,9 @@ function renderEventLog(events) {
     const detailObj = e.trigger_data || null;
     const detailStr = detailObj ? JSON.stringify(detailObj, null, 2) : '';
     const hasError = e.actions_failed > 0 && e.action_error;
-    const expandId = `log-detail-${idx}`;
+    /* Use a stable ID based on timestamp + rule so expand state survives refreshes */
+    const stableKey = `${e.timestamp}-${(e.rule_id || '').replace(/[^a-z0-9]/gi, '')}`;
+    const expandId = `log-detail-${stableKey}`;
     const hasDetail = !!(detailStr || hasError);
     // Short summary shown inline
     let shortDetail = '';
@@ -792,6 +803,12 @@ function renderEventLog(events) {
       </td>
     </tr>` : ''}`;
   }).join('');
+
+  /* Re-open any rows that were expanded before the refresh */
+  openIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = '';
+  });
 }
 
 function toggleLogDetail(id) {
@@ -926,6 +943,22 @@ async function importSettings(input) {
  * =================================================== */
 function generateToken() {
   return Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+}
+
+function copyRuleId(id) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(id).then(() => toast('Rule ID copied', 'success')).catch(() => _copyFallback(id));
+  } else {
+    _copyFallback(id);
+  }
+}
+function _copyFallback(id) {
+  const ta = document.createElement('textarea');
+  ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  toast('Rule ID copied', 'success');
 }
 
 /* ===================================================

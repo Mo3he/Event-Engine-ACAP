@@ -182,6 +182,9 @@ header .subtitle {
 .rule-card.disabled { opacity: .55; }
 
 .rule-meta { flex: 1; min-width: 0; }
+.rule-name-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rule-uuid { font-size: 10px; color: var(--text-muted); opacity: 0.55; cursor: pointer; user-select: all; white-space: nowrap; }
+.rule-uuid:hover { opacity: 1; color: var(--accent); }
 .rule-name {
   font-weight: 600;
   font-size: 14px;

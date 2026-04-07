@@ -1006,7 +1006,8 @@ static void HTTP_AOA(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     const char* body = "{\"apiVersion\":\"1.0\",\"method\":\"getConfiguration\"}";
     char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
     if (!raw) {
-        ACAP_HTTP_Respond_Error(resp, 502, "AOA not available");
+        /* AOA not installed — return empty list, not an error */
+        ACAP_HTTP_Respond_JSON(resp, cJSON_CreateArray());
         return;
     }
     cJSON* root = cJSON_Parse(raw);
