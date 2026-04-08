@@ -488,7 +488,8 @@
               "set_variable", "increment_counter", "fire_rule",
               "fire_vapix_event", "send_syslog", "delay",
               "guard_tour", "set_device_param", "snapshot_upload",
-              "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control"
+              "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control",
+              "speaker_display"
             ]
           }
         }
@@ -899,6 +900,29 @@
               "operation": { "type": "string", "enum": ["start", "stop", "restart"], "default": "start" }
             },
             "required": ["package"]
+          }
+        ]
+      },
+
+      "ActionSpeakerDisplay": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "description": "Show a text notification on an Axis speaker-display device, or stop an ongoing one. Uses the VAPIX Speaker Display Notification API (AXIS OS 11.11+).",
+            "properties": {
+              "type":            { "type": "string", "enum": ["speaker_display"] },
+              "operation":       { "type": "string", "enum": ["show", "stop"], "default": "show", "description": "show: send a notification; stop: cancel the current notification." },
+              "message":         { "type": "string", "maxLength": 1000, "description": "Display message. Supports template variables. Required when operation is show." },
+              "textColor":       { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "default": "#FFFFFF", "description": "Text color in #RRGGBB format." },
+              "backgroundColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$", "description": "Background color in #RRGGBB format." },
+              "textSize":        { "type": "string", "enum": ["small", "medium", "large"], "default": "medium" },
+              "scrollDirection": { "type": "string", "enum": ["fromRightToLeft", "fromBottomToTop"], "description": "Scroll direction. Omit for static text (scrollSpeed 0)." },
+              "scrollSpeed":     { "type": "integer", "minimum": 0, "maximum": 10, "default": 5, "description": "0 = static (no scroll). 1 = slowest, 10 = fastest." },
+              "duration_type":   { "type": "string", "enum": ["repetitions", "time", "timeCompleteMessage"], "description": "Duration mode. Omit for indefinite display." },
+              "duration_value":  { "type": "integer", "minimum": 1, "description": "Number of repetitions, or milliseconds, depending on duration_type." },
+              "while_active":    { "type": "boolean", "default": false, "description": "Only valid when duration_type is omitted. If true, automatically stops the display when the triggering condition clears." }
+            },
+            "required": []
           }
         ]
       },

@@ -23,7 +23,8 @@ extern "C" {
  *   - Thread-safe publish (mutex protected)
  *
  * Limitations:
- *   - No QoS 1 retransmit (message sent once; PUBACK acknowledged but not enforced)
+ *   - No QoS 1 retransmit (message sent once; PUBACK received by worker thread but not enforced)
+ *   - on_failure fires on socket/connection failure only, not on QoS 1 delivery timeout
  *   - Single broker
  */
 

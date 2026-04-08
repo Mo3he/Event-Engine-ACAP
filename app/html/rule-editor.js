@@ -197,19 +197,35 @@ function triggerFields(t, rowIdx) {
     }
 
     const matchIdx  = findCatalogMatch(t);
-    const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys : [];
+    const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys  : [];
+    const dataTypes = matchIdx >= 0 ? (vapixEventCatalog[matchIdx].dataTypes || t._dataTypes || {}) : (t._dataTypes || {});
+
+    /* Partition keys by type for filtered dropdowns */
+    const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
+    const numericKeys = dataKeys.filter(k => dataTypes[k] === 'numeric');
+    const stringKeys  = dataKeys.filter(k => dataTypes[k] === 'string');
+    /* Fall back: if type info is missing for a key, show it in all lists */
+    const unknownKeys = dataKeys.filter(k => !dataTypes[k]);
+    const boolOpts    = [...boolKeys,    ...unknownKeys];
+    const numericOpts = [...numericKeys, ...unknownKeys];
+    const stringOpts  = [...stringKeys,  ...unknownKeys];
 
     /* Determine current condition type from saved fields */
     const condType  = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
-    const filterKey = t.filter_key || '';
+    const filterKey = t.filter_key || (boolOpts[0] || '');
     const filterVal = t.filter_value;
-    const valueKey  = t.value_key  || (dataKeys[0] || '');
+    const valueKey  = t.value_key  || (numericOpts[0] || dataKeys[0] || '');
     const valueOp   = t.value_op   || 'gt';
     const valueThr  = t.value_threshold  !== undefined ? t.value_threshold  : '';
     const valueThr2 = t.value_threshold2 !== undefined ? t.value_threshold2 : '';
     const valueHold = t.value_hold_secs || 0;
-    const stringKey   = t.string_key   || (dataKeys[0] || '');
+    const stringKey   = t.string_key   || (stringOpts[0] || dataKeys[0] || '');
     const stringValue = t.string_value || '';
+
+    /* Only show condition types that have matching fields (or no type info available) */
+    const showBoolean = boolOpts.length > 0;
+    const showNumeric = numericOpts.length > 0;
+    const showString  = stringOpts.length > 0;
 
     const condRow = dataKeys.length ? `
     <div class="form-row">
@@ -217,15 +233,15 @@ function triggerFields(t, rowIdx) {
         <label>Value Condition <span style="opacity:.6">(optional — only fire when…)</span></label>
         <select data-k="cond_type" onchange="rerenderTrigger(this)" style="margin-bottom:8px">
           <option value="none"    ${condType==='none'    ?'selected':''}>Fire on every event</option>
-          <option value="boolean" ${condType==='boolean' ?'selected':''}>Boolean match (true / false)</option>
-          <option value="numeric" ${condType==='numeric' ?'selected':''}>Numeric threshold</option>
-          <option value="string"  ${condType==='string'  ?'selected':''}>String match</option>
+          ${showBoolean ? `<option value="boolean" ${condType==='boolean' ?'selected':''}>Boolean match (true / false)</option>` : ''}
+          ${showNumeric ? `<option value="numeric" ${condType==='numeric' ?'selected':''}>Numeric threshold</option>` : ''}
+          ${showString  ? `<option value="string"  ${condType==='string'  ?'selected':''}>String match</option>` : ''}
         </select>
         ${condType === 'boolean' ? `
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select data-k="filter_key">
             <option value="">— pick field —</option>
-            ${dataKeys.map(k =>
+            ${boolOpts.map(k =>
               `<option value="${escHtml(k)}" ${filterKey===k?'selected':''}>${escHtml(k)}</option>`
             ).join('')}
           </select>
@@ -238,7 +254,7 @@ function triggerFields(t, rowIdx) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select data-k="string_key">
             <option value="">— pick field —</option>
-            ${dataKeys.map(k =>
+            ${stringOpts.map(k =>
               `<option value="${escHtml(k)}" ${stringKey===k?'selected':''}>${escHtml(k)}</option>`
             ).join('')}
           </select>
@@ -249,7 +265,7 @@ function triggerFields(t, rowIdx) {
         ${condType === 'numeric' ? `
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <select data-k="value_key">
-            ${dataKeys.map(k =>
+            ${numericOpts.map(k =>
               `<option value="${escHtml(k)}" ${valueKey===k?'selected':''}>${escHtml(k)}</option>`
             ).join('')}
           </select>
@@ -911,6 +927,7 @@ const ACTION_GROUPS = [
     { value: 'light_control',     label: 'Light Control' },
     { value: 'audio_clip',        label: 'Audio Clip' },
     { value: 'siren_light',       label: 'Siren / Light' },
+    { value: 'speaker_display',   label: 'Speaker Display' },
   ]},
   { label: 'I/O', types: [
     { value: 'io_output',         label: 'I/O Output' },
@@ -1098,11 +1115,12 @@ function getTokenInsertWidget() {
   </div>`;
 }
 
-function renderOnFailureFields(a) {
+function renderOnFailureFields(a, hint) {
   /* on_failure is stored as array; for UI we support one fallback action.
    * Also handle the flat form fields used during re-render after collectRows. */
   const fb = (a.on_failure && a.on_failure[0]) || {};
   const fbType = a.on_failure_type || fb.type || '';
+  const hintText = hint || 'Executed when the action fails (non-2xx response or network error).';
   return `
   <div class="form-row" style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px;">
     <div class="form-group">
@@ -1113,7 +1131,7 @@ function renderOnFailureFields(a) {
         <option value="mqtt_publish" ${fbType==='mqtt_publish' ? 'selected' : ''}>MQTT publish</option>
         <option value="http_request" ${fbType==='http_request' ? 'selected' : ''}>HTTP request</option>
       </select>
-      <div class="form-hint">Executed when the HTTP request fails (non-2xx or network error)</div>
+      <div class="form-hint">${hintText}</div>
     </div>
   </div>
   ${fbType === 'send_syslog' ? `
@@ -1567,7 +1585,8 @@ function actionFields(a) {
           Include snapshot as {{trigger.snapshot_base64}}
         </label>
       </div>
-    </div>`;
+    </div>
+    ${renderOnFailureFields(a, 'Executed when the broker is unreachable or the connection is broken. Does not fire on QoS\u00a01 delivery timeout.')}`;
   if (type === 'slack_webhook') return `
     <div class="form-row"><div class="form-group">
       <label>Webhook URL</label>
@@ -1613,8 +1632,14 @@ function actionFields(a) {
       </label>
     </div></div>
     <div class="form-row"><div class="form-group">
-      <label>Theme Colour <span style="color:var(--text-muted);font-weight:400;">(optional hex)</span></label>
-      <input type="text" data-k="theme_color" value="${escHtml(a.theme_color || '')}" placeholder="FF0000" style="max-width:140px;">
+      <label>Theme Colour <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input type="color" value="#${escHtml(a.theme_color || 'FF0000')}"
+          oninput="this.nextElementSibling.value=this.value.slice(1)"
+          style="width:36px;height:32px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:none;">
+        <input type="text" data-k="theme_color" value="${escHtml(a.theme_color || '')}" placeholder="FF0000" maxlength="6" style="width:80px;"
+          oninput="if(/^[0-9a-fA-F]{6}$/.test(this.value))this.previousElementSibling.value='#'+this.value">
+      </div>
     </div></div>`;
   if (type === 'influxdb_write') return `
     <div class="form-row">
@@ -2061,6 +2086,100 @@ function actionFields(a) {
       </div>
     </div>`;
   }
+  if (type === 'speaker_display') {
+    const op = a.operation || 'show';
+    const speed = (a.scrollSpeed !== undefined && a.scrollSpeed !== '') ? a.scrollSpeed : 5;
+    const durType = a.duration_type || '';
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="show" ${op === 'show' ? 'selected' : ''}>Show</option>
+          <option value="stop" ${op === 'stop' ? 'selected' : ''}>Stop</option>
+        </select>
+      </div>
+      ${op === 'show' ? `
+      <div class="form-group">
+        <label>Message</label>
+        <textarea data-k="message" rows="2" style="width:100%;resize:vertical;font-family:inherit;">${escHtml(a.message || '')}</textarea>
+        ${hint}
+      </div>` : `
+      <div class="form-group">
+        <div class="form-hint" style="margin-top:18px;">Stops any ongoing notification on the display immediately.</div>
+      </div>`}
+    </div>
+    ${op === 'show' ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Text Size</label>
+        <select data-k="textSize">
+          <option value="small"  ${(a.textSize||'medium')==='small'  ? 'selected':''}>Small</option>
+          <option value="medium" ${(a.textSize||'medium')==='medium' ? 'selected':''}>Medium</option>
+          <option value="large"  ${(a.textSize||'medium')==='large'  ? 'selected':''}>Large</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Text Color</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="color" value="${escHtml(a.textColor || '#FFFFFF')}"
+            oninput="this.nextElementSibling.value=this.value"
+            style="width:36px;height:32px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:none;">
+          <input type="text" data-k="textColor" value="${escHtml(a.textColor || '#FFFFFF')}" placeholder="#FFFFFF" maxlength="7"
+            oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))this.previousElementSibling.value=this.value"
+            style="width:80px;">
+        </div>
+      </div>
+      <div class="form-group" style="flex:0 0 180px;">
+        <label>Background Color</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="color" value="${escHtml(a.backgroundColor || '#000000')}"
+            oninput="this.nextElementSibling.value=this.value"
+            style="width:36px;height:32px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:none;">
+          <input type="text" data-k="backgroundColor" value="${escHtml(a.backgroundColor || '')}" placeholder="#000000 (optional)" maxlength="7"
+            oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))this.previousElementSibling.value=this.value"
+            style="width:80px;">
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 170px;">
+        <label>Scroll Direction</label>
+        <select data-k="scrollDirection">
+          <option value=""               ${!a.scrollDirection                    ? 'selected':''}>None (static)</option>
+          <option value="fromRightToLeft" ${a.scrollDirection==='fromRightToLeft' ? 'selected':''}>Right → Left</option>
+          <option value="fromBottomToTop" ${a.scrollDirection==='fromBottomToTop' ? 'selected':''}>Bottom → Top</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Scroll Speed (0–10)</label>
+        <input type="number" data-k="scrollSpeed" value="${speed}" min="0" max="10">
+        <div class="form-hint">0 = static, 10 = fastest.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Duration</label>
+        <select data-k="duration_type" onchange="rerenderAction(this)">
+          <option value=""                   ${durType===''                   ? 'selected':''}>Indefinite</option>
+          <option value="repetitions"         ${durType==='repetitions'         ? 'selected':''}>Repetitions</option>
+          <option value="time"                ${durType==='time'                ? 'selected':''}>Time (ms)</option>
+          <option value="timeCompleteMessage" ${durType==='timeCompleteMessage' ? 'selected':''}>Time + complete scroll</option>
+        </select>
+        <div class="form-hint">Stays on screen until replaced or stopped.</div>
+      </div>
+      ${durType ? `
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>${durType === 'repetitions' ? 'Repetitions' : 'Milliseconds'}</label>
+        <input type="number" data-k="duration_value" value="${a.duration_value || (durType==='repetitions' ? 3 : 5000)}" min="1">
+      </div>` : ''}
+    </div>
+    ${!durType ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically stop the display when the triggering condition clears
+      </label>
+    </div></div>` : ''}` : ''}`;
+  }
   return '';
 }
 
@@ -2279,6 +2398,15 @@ function normalizeAction(a) {
     out.retain = a.retain === 'true' || a.retain === true;
     out.qos    = parseInt(a.qos) || 0;
     out.attach_snapshot = a.attach_snapshot === true;
+    /* Fallback action chain */
+    const fbType = a.on_failure_type || '';
+    if (fbType === 'send_syslog') {
+      out.on_failure = [{ type: 'send_syslog', message: a.on_failure_message || 'MQTT publish failed' }];
+    } else if (fbType === 'mqtt_publish') {
+      out.on_failure = [{ type: 'mqtt_publish', topic: a.on_failure_topic || '', payload: a.on_failure_payload || 'mqtt_publish_failed', qos: 0, retain: false }];
+    } else if (fbType === 'http_request') {
+      out.on_failure = [{ type: 'http_request', url: a.on_failure_url || '', method: 'GET' }];
+    }
   }
   if (a.type === 'vapix_query') {
     /* Reconstruct topic0-3 objects from the hidden _ns / _val fields */
@@ -2309,6 +2437,18 @@ function normalizeAction(a) {
   if (a.type === 'aoa_get_counts') {
     out.scenario_id = parseInt(a.scenario_id) || 1;
     out.reset_after = a.reset_after === true;
+  }
+  if (a.type === 'speaker_display') {
+    out.operation = a.operation || 'show';
+    if (out.operation === 'show') {
+      out.scrollSpeed = parseInt(a.scrollSpeed) || 0;
+      if (a.duration_type) {
+        out.duration_type  = a.duration_type;
+        out.duration_value = parseInt(a.duration_value) || 1;
+      } else {
+        out.while_active = a.while_active === true;
+      }
+    }
   }
   if (a.type === 'influxdb_write') {
     out.version = a.version || 'v2';

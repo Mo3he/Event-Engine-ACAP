@@ -332,6 +332,7 @@
       <a href="#act-light" class="sub">Light Control</a>
       <a href="#act-audio" class="sub">Audio Clip</a>
       <a href="#act-siren" class="sub">Siren / Light</a>
+      <a href="#act-speaker-display" class="sub">Speaker Display</a>
       <a href="#act-io-output" class="sub">I/O Output</a>
       <a href="#act-digest" class="sub">Notification Digest</a>
       <a href="#act-delay" class="sub">Delay</a>
@@ -800,6 +801,22 @@ Content-Type: application/json
         <tr><td><strong>While active</strong></td><td>Automatically stop the siren/light when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
       </table>
 
+      <h3 id="act-speaker-display">Speaker Display</h3>
+      <p>Send a text notification to the built-in display on Axis speaker-display devices (e.g. Axis D3110). Requires AXIS OS 11.11 or later.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Show</em> sends a new notification; <em>Stop</em> cancels the current one immediately.</td></tr>
+        <tr><td><strong>Message</strong></td><td>Text to display (max 1000 characters). Template variables such as <code>{{camera.name}}</code> and <code>{{timestamp}}</code> are supported.</td></tr>
+        <tr><td><strong>Text Size</strong></td><td><em>Small</em>, <em>Medium</em> (default), or <em>Large</em>.</td></tr>
+        <tr><td><strong>Text Color</strong></td><td>Hex color for the message text, e.g. <code>#FFFFFF</code>.</td></tr>
+        <tr><td><strong>Background Color</strong></td><td>Optional hex background color, e.g. <code>#000000</code>.</td></tr>
+        <tr><td><strong>Scroll Direction</strong></td><td><em>Right→Left</em> (horizontal) or <em>Bottom→Top</em> (vertical). Leave as <em>None</em> for static text.</td></tr>
+        <tr><td><strong>Scroll Speed</strong></td><td>0–10. 0 = static text, 1 = slowest scroll, 10 = fastest.</td></tr>
+        <tr><td><strong>Duration Type</strong></td><td><em>Indefinite</em> (stays until another request or Stop), <em>Repetitions</em> (scroll N times), <em>Time (ms)</em> (display for N milliseconds), or <em>Time + complete msg</em> (at least N ms, rounded up to a full scroll).</td></tr>
+        <tr><td><strong>Duration Value</strong></td><td>The repetition count or millisecond value for the chosen duration type.</td></tr>
+        <tr><td><strong>While active</strong></td><td>Only shown when Duration is <em>Indefinite</em>. Automatically sends a Stop command when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+
       <h3 id="act-io-output">I/O Output</h3>
       <p>Set a digital output port high or low.</p>
       <table>
@@ -918,7 +935,7 @@ Content-Type: application/json
       <!-- ═══════════════════════════════════════════ WHILE-ACTIVE -->
       <hr class="section-rule">
       <h2 id="while-active">While-Active Actions</h2>
-      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, and I/O Output. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output) when the triggering condition clears.</p>
+      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, I/O Output, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops the display) when the triggering condition clears.</p>
       <p>This is useful for scenarios like "record while motion is detected" or "activate siren while I/O port 1 is high". The rule must use a stateful trigger (e.g. a Device Event that has active/inactive states) for while-active to function correctly.</p>
       <div class="callout tip">
         <span class="callout-icon">💡</span>

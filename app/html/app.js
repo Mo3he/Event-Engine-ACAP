@@ -161,7 +161,8 @@ const RULE_TYPE_LABELS = {
     ftp_upload: 'FTP Upload', digest: 'Digest', snapshot_upload: 'Snapshot',
     guard_tour: 'Guard Tour', ir_cut_filter: 'IR Cut', light_control: 'Light',
     privacy_mask: 'Privacy Mask', wiper: 'Wiper', set_device_param: 'Device Param',
-    acap_control: 'ACAP Control'
+    acap_control: 'ACAP Control',
+    speaker_display: 'Speaker Display'
   }
 };
 function ruleTypeLabel(group, type) {
@@ -493,6 +494,48 @@ const RULE_TEMPLATES = [
       ],
     }
   },
+  {
+    name: 'Device Event → Speaker Display',
+    icon: '🖥️',
+    desc: 'Show a message on an Axis speaker-display screen while the event is active — clears automatically when the event ends',
+    rule: {
+      name: 'Device Event → Speaker Display',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{
+        type: 'speaker_display', operation: 'show',
+        message: 'Alert from {{camera.name}} — {{time}}',
+        textColor: '#FFFFFF', backgroundColor: '#CC0000',
+        textSize: 'large', scrollSpeed: 0, while_active: true
+      }],
+    }
+  },
+  {
+    name: 'I/O Input → Audio Clip',
+    icon: '🔊',
+    desc: 'Play an audio clip when an input port activates — e.g. doorbell or alarm',
+    rule: {
+      name: 'I/O Input → Audio Clip',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'io_input', port: 1, edge: 'rising', hold_secs: 0 }],
+      conditions: [],
+      actions: [{ type: 'audio_clip', clip_name: '' }],
+      cooldown: 5,
+    }
+  },
+  {
+    name: 'Schedule → Wiper',
+    icon: '🌧️',
+    desc: 'Run the camera wiper every morning to clear condensation or debris',
+    rule: {
+      name: 'Schedule → Wiper',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'daily_time', time: '07:00', days: [1,2,3,4,5,6,0] }],
+      conditions: [],
+      actions: [{ type: 'wiper', operation: 'start', id: 1 }],
+    }
+  },
 ];
 
 function openTemplateModal() {
@@ -517,6 +560,7 @@ function openTemplateModal() {
     manual: '<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg>',
     aoa_scenario: '<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M480-120q-75 0-140.5-28.5t-114-77q-48.5-48.5-77-114T120-480q0-75 28.5-140.5t77-114q48.5-48.5 114-77T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm0-80q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-117 0-198.5 81.5T200-480q0 117 81.5 198.5T480-200Zm0-120q67 0 113.5-46.5T640-480q0-67-46.5-113.5T480-640q-67 0-113.5 46.5T320-480q0 67 46.5 113.5T480-320Z"/></svg>',
     counter_threshold: '<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M280-200h160v-80H280v80Zm0-160h400v-80H280v80Zm0-160h400v-80H280v80ZM200-80q-33 0-56.5-23.5T120-160v-640q0-33 23.5-56.5T200-880h560q33 0 56.5 23.5T840-800v640q0 33-23.5 56.5T760-80H200Z"/></svg>',
+    speaker_display: '<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80h640v-480H160v480Zm160-80h320v-80H320v80Zm-80-160h480v-80H240v80Zm0-160h480v-80H240v80Zm-80 400v-480 480Z"/></svg>',
     default: '<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80Zm0-160h200v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Zm280-520v-200H240v640h480v-440H520Z"/></svg>'
   };
 

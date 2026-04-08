@@ -248,10 +248,26 @@ function parseVapixEventCatalog(xmlText) {
                   .map(d => d.getAttribute('Name')).filter(Boolean)
               : [];
           };
-          const dataKeys = [...getKeys('Source'), ...getKeys('Data')];
+          const getTypes = tag => {
+            const el = child.getElementsByTagNameNS(SCHEMA, tag)[0];
+            if (!el) return {};
+            const map = {};
+            for (const d of el.getElementsByTagNameNS(SCHEMA, 'SimpleItemDescription')) {
+              const name = d.getAttribute('Name');
+              const raw  = d.getAttribute('Type') || '';
+              if (!name) continue;
+              if (raw.includes('boolean'))                          map[name] = 'boolean';
+              else if (raw.includes('int') || raw.includes('float') ||
+                       raw.includes('double') || raw.includes('decimal')) map[name] = 'numeric';
+              else                                                  map[name] = 'string';
+            }
+            return map;
+          };
+          const dataKeys  = [...getKeys('Source'),  ...getKeys('Data')];
+          const dataTypes = { ...getTypes('Source'), ...getTypes('Data') };
           const topics = {};
           newPath.slice(0, 4).forEach((p, i) => { topics[`topic${i}`] = { [p.ns]: p.name }; });
-          events.push({ label: newPath.map(p => p.name).join(' / '), topics, dataKeys });
+          events.push({ label: newPath.map(p => p.name).join(' / '), topics, dataKeys, dataTypes });
         }
         traverse(child, newPath);
       }
@@ -311,8 +327,7 @@ function applyVapixEventAction(sel) {
 function applyVapixEvent(rowIdx, idx) {
   const ev = vapixEventCatalog && vapixEventCatalog[parseInt(idx)];
   if (!ev) return;
-  const row = { type: 'vapix_event', ...ev.topics };
-  if (ev.dataKeys.length === 1) row.filter_key = ev.dataKeys[0];
+  const row = { type: 'vapix_event', ...ev.topics, _dataTypes: ev.dataTypes || {} };
   triggerRows[rowIdx] = row;
   renderTriggerList();
 }

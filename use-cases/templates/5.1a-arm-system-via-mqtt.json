@@ -1,0 +1,31 @@
+{
+  "name": "Arm System via MQTT",
+  "description": "Set system.armed = true when an MQTT 'arm' command arrives on the camera's control topic. Other rules that check system.armed will activate immediately. Also logs the arm event to syslog.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "cameras/{{camera.serial}}/arm",
+      "payload_filter": "arm"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.armed",
+      "value": "true"
+    },
+    {
+      "type": "send_syslog",
+      "message": "System ARMED via MQTT at {{timestamp}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

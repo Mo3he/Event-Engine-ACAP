@@ -1,0 +1,27 @@
+{
+  "name": "Motion → Audio Clip",
+  "description": "Play an audio clip when motion is detected — useful as a deterrent or to alert staff on-site. A 10-second cooldown prevents the clip looping on sustained motion.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 10,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "audio_clip",
+      "clip_name": ""
+    }
+  ]
+}

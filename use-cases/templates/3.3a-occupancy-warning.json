@@ -12,7 +12,7 @@
     {
       "type": "schedule",
       "schedule_type": "interval",
-      "interval": 30
+      "interval_seconds": 30
     }
   ],
   "conditions": [

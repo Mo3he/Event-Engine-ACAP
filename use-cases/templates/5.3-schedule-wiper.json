@@ -1,0 +1,27 @@
+{
+  "name": "Schedule → Wiper",
+  "description": "Run the camera wiper every morning at 07:00 to clear condensation, rain, or debris from the lens cover. Suitable for outdoor cameras with a built-in wiper (e.g. Axis Q6135-LE, Q6100 series).",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "daily_time",
+      "time": "07:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "wiper",
+      "operation": "start",
+      "id": 1
+    }
+  ]
+}

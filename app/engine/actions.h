@@ -39,6 +39,7 @@ extern "C" {
  *   wiper             — trigger the windshield wiper
  *   light_control     — control an Axis illuminator (white/IR LED)
  *   acap_control      — start/stop/restart another ACAP application
+ *   speaker_display   — show/stop a text notification on an Axis speaker-display device
  */
 
 void  Actions_Init(void);

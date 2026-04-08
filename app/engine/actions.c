@@ -58,7 +58,7 @@ static void overlay_remove(int identity);
 #define MAX_WHILE_ACTIVE 64
 typedef struct {
     char rule_id[64];
-    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output" */
+    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output", "speaker_display" */
     char siren_profile[128];
     int  overlay_channel;
     int  io_port;
@@ -115,6 +115,11 @@ static void while_active_undo(WhileActiveEntry* e) {
         snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s", e->io_port, e->io_restore);
         char* resp = ACAP_VAPIX_Get(req); if (resp) free(resp);
         LOG("while_active: restored I/O port %d to %s for rule %s", e->io_port, e->io_restore, e->rule_id);
+    } else if (strcmp(e->atype, "speaker_display") == 0) {
+        char* resp = ACAP_VAPIX_Post_Path(
+            "/config/rest/speaker-display-notification/v1/stop", "{\"data\":{}}");
+        if (resp) free(resp);
+        LOG("while_active: stopped speaker display for rule %s", e->rule_id);
     }
 }
 
@@ -809,7 +814,7 @@ static void action_increment_counter(cJSON* cfg) {
 }
 
 /* mqtt_publish */
-static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
+static void action_mqtt_publish(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     const char* topic_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "topic"));
     if (!topic_tmpl) return;
 
@@ -829,8 +834,14 @@ static void action_mqtt_publish(cJSON* cfg, cJSON* trigger_data) {
     int qos = qos_j ? (int)qos_j->valuedouble : 0;
     if (qos < 0 || qos > 1) qos = 0;
 
-    if (!MQTT_Publish(topic, payload, retain, qos))
+    if (!MQTT_Publish(topic, payload, retain, qos)) {
         LOG_ACTION_ERR("mqtt_publish failed (not connected?)");
+        cJSON* on_failure = cJSON_GetObjectItem(cfg, "on_failure");
+        if (on_failure && cJSON_IsArray(on_failure) && cJSON_GetArraySize(on_failure) > 0) {
+            LOG("mqtt_publish failed — running on_failure actions for rule %s", rule_id ? rule_id : "");
+            execute_from(rule_id, on_failure, 0, trigger_data);
+        }
+    }
 
     if (td_with_snap) cJSON_Delete(td_with_snap);
     free(topic);
@@ -1641,6 +1652,93 @@ static void action_privacy_mask(cJSON* cfg) {
     LOG_WARN("privacy_mask: mask '%s' not found on channel %d", mask_name, idx + 1);
 }
 
+/* speaker_display — send or stop a notification on an Axis speaker-display device.
+ * Uses the VAPIX Speaker Display Notification REST API:
+ *   POST /config/rest/speaker-display-notification/v1/simple
+ *   POST /config/rest/speaker-display-notification/v1/stop
+ *
+ * Config fields:
+ *   operation       "show" (default) or "stop"
+ *   message         Display text (template-expanded); max 1000 chars
+ *   textColor       "#RRGGBB" (default #FFFFFF)
+ *   backgroundColor "#RRGGBB" (optional)
+ *   textSize        "small", "medium" (default), or "large"
+ *   scrollDirection "fromRightToLeft" or "fromBottomToTop" (optional)
+ *   scrollSpeed     0–10 (0 = static, default 5)
+ *   duration_type   "repetitions", "time", or "timeCompleteMessage" (optional)
+ *   duration_value  integer — repetitions count OR milliseconds
+ */
+static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
+    const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
+    if (!op) op = "show";
+
+    if (strcmp(op, "stop") == 0) {
+        char* resp = ACAP_VAPIX_Post_Path(
+            "/config/rest/speaker-display-notification/v1/stop",
+            "{\"data\":{}}");
+        if (resp) free(resp);
+        return;
+    }
+
+    /* Build the data object */
+    cJSON* data = cJSON_CreateObject();
+
+    const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
+    if (!msg_tmpl) msg_tmpl = "";
+    char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
+    cJSON_AddStringToObject(data, "message", msg);
+    free(msg);
+
+    const char* text_color = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "textColor"));
+    if (text_color && text_color[0])
+        cJSON_AddStringToObject(data, "textColor", text_color);
+
+    const char* bg_color = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "backgroundColor"));
+    if (bg_color && bg_color[0])
+        cJSON_AddStringToObject(data, "backgroundColor", bg_color);
+
+    const char* text_size = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "textSize"));
+    if (text_size && text_size[0])
+        cJSON_AddStringToObject(data, "textSize", text_size);
+
+    const char* scroll_dir = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "scrollDirection"));
+    if (scroll_dir && scroll_dir[0])
+        cJSON_AddStringToObject(data, "scrollDirection", scroll_dir);
+
+    cJSON* speed_j = cJSON_GetObjectItem(cfg, "scrollSpeed");
+    if (speed_j && cJSON_IsNumber(speed_j))
+        cJSON_AddNumberToObject(data, "scrollSpeed", speed_j->valuedouble);
+
+    const char* dur_type = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "duration_type"));
+    cJSON* dur_val_j = cJSON_GetObjectItem(cfg, "duration_value");
+    if (dur_type && dur_type[0] && dur_val_j && cJSON_IsNumber(dur_val_j)) {
+        cJSON* dur_obj = cJSON_AddObjectToObject(data, "duration");
+        cJSON_AddStringToObject(dur_obj, "type",  dur_type);
+        cJSON_AddNumberToObject(dur_obj,  "value", dur_val_j->valuedouble);
+    }
+
+    cJSON* req = cJSON_CreateObject();
+    cJSON_AddItemToObject(req, "data", data);
+
+    char* body = cJSON_PrintUnformatted(req);
+    cJSON_Delete(req);
+
+    char* resp = ACAP_VAPIX_Post_Path(
+        "/config/rest/speaker-display-notification/v1/simple", body);
+    free(body);
+    if (resp) free(resp);
+
+    if (rule_id) {
+        cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+        if (wa && cJSON_IsTrue(wa)) {
+            WhileActiveEntry e = {0};
+            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+            snprintf(e.atype,   sizeof(e.atype),   "speaker_display");
+            while_active_register(&e);
+        }
+    }
+}
+
 /* wiper — trigger the camera clear view (wiper/speed dry) via clearviewcontrol.cgi */
 static void action_wiper(cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
@@ -1880,7 +1978,7 @@ static void digest_flush(DigestBuf* d) {
     else if (strcmp(d->deliver_via, "email") == 0)
         action_email(payload, empty_td);
     else if (strcmp(d->deliver_via, "mqtt") == 0)
-        action_mqtt_publish(payload, empty_td);
+        action_mqtt_publish(NULL, payload, empty_td);
     else if (strcmp(d->deliver_via, "telegram") == 0)
         action_telegram(payload, empty_td);
     cJSON_Delete(payload);
@@ -1952,7 +2050,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action);
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);
         else if (strcmp(type, "increment_counter") == 0) action_increment_counter(action);
-        else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(action, trigger_data);
+        else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(rule_id, action, trigger_data);
         else if (strcmp(type, "slack_webhook")    == 0) action_slack_webhook(action, trigger_data);
         else if (strcmp(type, "teams_webhook")    == 0) action_teams_webhook(action, trigger_data);
         else if (strcmp(type, "influxdb_write")   == 0) action_influxdb_write(action, trigger_data);
@@ -1971,6 +2069,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "light_control")     == 0) action_light_control(action);
         else if (strcmp(type, "acap_control")      == 0) action_acap_control(action);
         else if (strcmp(type, "aoa_get_counts")    == 0) action_aoa_get_counts(action, trigger_data);
+        else if (strcmp(type, "speaker_display")    == 0) action_speaker_display(rule_id, action, trigger_data);
         else LOG_WARN("unknown action type '%s'", type);
     }
 }

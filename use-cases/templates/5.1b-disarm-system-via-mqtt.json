@@ -1,0 +1,31 @@
+{
+  "name": "Disarm System via MQTT",
+  "description": "Set system.armed = false when an MQTT 'disarm' command arrives on the camera's control topic. Rules that check system.armed will stop firing immediately. Also logs the disarm event to syslog.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "cameras/{{camera.serial}}/arm",
+      "payload_filter": "disarm"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.armed",
+      "value": "false"
+    },
+    {
+      "type": "send_syslog",
+      "message": "System DISARMED via MQTT at {{timestamp}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

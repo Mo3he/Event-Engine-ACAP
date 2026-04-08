@@ -61,7 +61,7 @@ Publish sensor data over MQTT using Home Assistant's topic conventions - sensors
 - Three actions run in sequence: **Slack webhook**, **Teams webhook**, and **Email** - each with a template that includes the camera name, timestamp, and a snapshot attachment
 - A **30-second cooldown** prevents alert floods from sustained motion
 
-**Template:** [`templates/1.2-multi-channel-motion-alerts.json`](templates/1.2-multi-channel-motion-alerts.json)
+**Template:** [`templates/1.2-multi-platform-motion-alerts.json`](templates/1.2-multi-platform-motion-alerts.json)
 
 ---
 
@@ -182,6 +182,91 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 
 ---
 
+## Use Case 4: Speaker Display
+
+Drive the built-in screen on Axis speaker-display devices (e.g. D3110) directly from rules — no VMS or middleware required. Requires AXIS OS 11.11 or later on the device.
+
+### 4.1 Automated Display Messages
+
+#### 4.1a - Motion Alert (While Active)
+
+**Scenario:** When motion is detected, show a red alert message on the speaker-display screen immediately. The message stays on screen for as long as motion continues and clears automatically when motion stops — no fixed timer needed.
+
+**How it works:**
+- A **Device Event** trigger subscribes to Motion Detection (active = true)
+- A **Speaker Display** action shows the message with `while_active` enabled, using a red background and large text
+- When the same camera's Motion Detection event fires with active = false, the engine calls the `/v1/stop` endpoint automatically
+
+**Template:** [`templates/4.1a-speaker-display-motion-alert.json`](templates/4.1a-speaker-display-motion-alert.json)
+
+#### 4.1b - Visitor Greeting
+
+**Scenario:** A reception camera monitors a doorbell button or card reader. When the input is pressed, the display shows a greeting message for 10 seconds so the visitor knows their ring was received — before a staff member responds.
+
+**How it works:**
+- An **IO Input** trigger on port 1 (rising edge) fires when the button is pressed
+- A **Speaker Display** action shows a blue greeting message with a fixed 10-second duration (`time` mode, 10 000 ms)
+- A 12-second cooldown prevents re-triggering while the message is still on screen
+
+**Template:** [`templates/4.1b-speaker-display-visitor-greeting.json`](templates/4.1b-speaker-display-visitor-greeting.json)
+
+#### 4.1c - Occupancy Capacity Warning
+
+**Scenario:** A retail space uses AOA to count people. When occupancy exceeds the limit, show a scrolling capacity warning on the speaker-display screen. The message clears automatically when the space drops back below threshold — no manual intervention needed.
+
+**How it works:**
+- A **schedule** trigger fires every 30 seconds
+- An **AOA Occupancy** condition (`human >= 20`) gates execution
+- An **AOA Get Counts** action injects the live count as `{{aoa_human}}`
+- A **Speaker Display** action shows a scrolling orange warning with `while_active` enabled — clears when the next tick finds occupancy below 20
+
+**Template:** [`templates/4.1c-speaker-display-occupancy-warning.json`](templates/4.1c-speaker-display-occupancy-warning.json)
+
+---
+
+## Use Case 5: System Management
+
+Control and observe the engine itself. These templates provide the building blocks needed by other rules: arm/disarm state via MQTT, audio deterrents, and routine hardware maintenance.
+
+### 5.1 Arm / Disarm via MQTT
+
+**Scenario:** A central security panel, Home Assistant automation, or Node-RED flow sends an MQTT command to arm or disarm the camera. Other rules (e.g. 3.1 Perimeter Intrusion Response) gate their actions on `system.armed = true` — so a single MQTT publish instantly activates or deactivates all guarded rules across the camera.
+
+**How it works:**
+- Two rules listen on `cameras/{{camera.serial}}/arm` — one for payload `arm`, one for `disarm`
+- Each rule runs a **Set Variable** action (`system.armed = true` or `false`) and optionally a **Syslog** entry for the audit trail
+- Publish the topic from any MQTT client — the camera updates its state within the next event cycle
+
+**Templates:** [`templates/5.1a-arm-system-via-mqtt.json`](templates/5.1a-arm-system-via-mqtt.json) and [`templates/5.1b-disarm-system-via-mqtt.json`](templates/5.1b-disarm-system-via-mqtt.json)
+
+---
+
+### 5.2 Motion → Audio Clip
+
+**Scenario:** When motion is detected, play a pre-uploaded audio clip through the camera speaker — useful as a deterrent (warning tone or voice message) or to alert on-site staff without sending a notification to a remote system.
+
+**How it works:**
+- A **Device Event** trigger subscribes to Motion Detection (active = true)
+- An **Audio Clip** action plays the selected clip by name or ID (clips are uploaded via the camera's Audio section)
+- A 10-second cooldown prevents the clip repeating on sustained motion
+
+**Template:** [`templates/5.2-motion-audio-clip.json`](templates/5.2-motion-audio-clip.json)
+
+---
+
+### 5.3 Schedule → Wiper
+
+**Scenario:** An outdoor camera accumulates condensation or debris on its lens cover overnight. Run the wiper automatically every morning at 07:00 to restore a clear view before the working day begins — no manual intervention required.
+
+**How it works:**
+- A **schedule** trigger fires daily at 07:00, every day of the week
+- A **Wiper** action starts wiper run 1 (the primary wiper service)
+- Adjust the time or restrict to weekdays only by changing the `days` array
+
+**Template:** [`templates/5.3-schedule-wiper.json`](templates/5.3-schedule-wiper.json)
+
+---
+
 ## Template Summary
 
 | # | Template File | Use Case | Description |
@@ -203,6 +288,13 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 | 3.2b | `3.2b-access-control-after-hours-alert.json` | Security | Card reader after hours → Telegram alert |
 | 3.3a | `3.3a-occupancy-warning.json` | Security | Occupancy ≥ 20 → warning overlay |
 | 3.3b | `3.3b-occupancy-critical.json` | Security | Occupancy ≥ 30 → Slack + IO output |
+| 4.1a | `4.1a-speaker-display-motion-alert.json` | Speaker Display | Motion → display alert while active, auto-clear when motion stops |
+| 4.1b | `4.1b-speaker-display-visitor-greeting.json` | Speaker Display | Doorbell/button press → greeting message for 10 s |
+| 4.1c | `4.1c-speaker-display-occupancy-warning.json` | Speaker Display | Occupancy ≥ 20 → capacity warning while active, auto-clear when clear |
+| 5.1a | `5.1a-arm-system-via-mqtt.json` | System Management | MQTT "arm" → set system.armed = true + syslog |
+| 5.1b | `5.1b-disarm-system-via-mqtt.json` | System Management | MQTT "disarm" → set system.armed = false + syslog |
+| 5.2 | `5.2-motion-audio-clip.json` | System Management | Motion → play audio clip (deterrent or on-site alert) |
+| 5.3 | `5.3-schedule-wiper.json` | System Management | Daily 07:00 → run camera wiper |
 
 ---
 

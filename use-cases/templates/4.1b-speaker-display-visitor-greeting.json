@@ -1,0 +1,33 @@
+{
+  "name": "Speaker Display — Visitor Greeting",
+  "description": "When a doorbell button or access-control input is pressed (I/O port 1 rising edge), show a greeting message on the display for 10 seconds. Useful at reception desks or staff entrances — the visitor sees confirmation that their ring was received.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 12,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "rising"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "Welcome! Someone will be with you shortly.\n{{time}}",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#005580",
+      "textSize": "medium",
+      "scrollDirection": "",
+      "scrollSpeed": 0,
+      "duration_type": "time",
+      "duration_value": 10000
+    }
+  ]
+}
