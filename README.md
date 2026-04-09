@@ -57,6 +57,20 @@ Rules are built in a clean web UI and take effect immediately.
 | **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Location. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
 | **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?). Supports **remote device** target; use Load to fetch the full event catalog from the remote device |
 
+## Cross-Device Automation
+
+Conditions and actions marked **remote device** can target any reachable Axis device on the network instead of the local camera. Supply an IP/hostname, username, and password in the condition or action block. This enables rules that detect on one device, verify state on a second, and act on a third — no server or middleware required.
+
+| Component | Remote device support |
+|-----------|----------------------|
+| I/O State condition | Yes |
+| AOA Occupancy condition | Yes — Load button fetches scenarios from remote |
+| Device Event State condition | Yes — Load button fetches event catalog from remote |
+| Speaker Display action | Yes |
+| I/O Output action | Yes |
+
+---
+
 ## Actions
 
 Actions are grouped by category in the rule editor.
@@ -94,12 +108,13 @@ Actions are grouped by category in the rule editor.
 |------|-------------|
 | **Audio Clip** | Play a named media clip on the camera |
 | **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
+| **Speaker Display** | Show text or a scrolling message on an Axis speaker display (e.g. Axis C1710). Configurable foreground/background colour, text size, scroll speed, and duration (indefinite, time, or repetitions). Supports `{{variable}}` substitution and `while_active` auto-clear. Supports **remote device** target |
 
 ### I/O
 
 | Type | Description |
 |------|-------------|
-| **I/O Output** | Set a digital output port high or low with an optional duration |
+| **I/O Output** | Set a digital output port high or low with an optional duration. Supports **remote device** target |
 
 ### Logic
 
