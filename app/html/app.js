@@ -397,7 +397,7 @@ const RULE_TEMPLATES = [
       actions: [{
         type: 'mqtt_publish',
         topic: 'cameras/{{camera.serial}}/aoa',
-        payload: '{"scenario":"{{trigger.scenario_id}}","class":"{{trigger.object_class}}","time":"{{timestamp}}"}',
+        payload: '{"scenario":"{{trigger.scenario_id}}","class":"{{trigger.reason}}","time":"{{timestamp}}"}',
         qos: 0, retain: false
       }],
       cooldown: 5,
@@ -534,6 +534,59 @@ const RULE_TEMPLATES = [
       triggers: [{ type: 'schedule', schedule_type: 'daily_time', time: '07:00', days: [1,2,3,4,5,6,0] }],
       conditions: [],
       actions: [{ type: 'wiper', operation: 'start', id: 1 }],
+    }
+  },
+  {
+    name: 'Cross-Device: I/O Input → Remote I/O Condition → Speaker Display',
+    icon: '🔗',
+    desc: 'I/O rising edge + remote I/O state check → alert on a remote speaker display',
+    rule: {
+      name: 'Cross-Device: I/O Input → Remote I/O Condition → Speaker Display',
+      enabled: false, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'io_input', port: 1, edge: 'rising', hold_secs: 0 }],
+      conditions: [{
+        type: 'io_state', port: 1, state: 'active',
+        remote_host: '192.168.1.101', remote_user: 'root', remote_pass: 'pass'
+      }],
+      actions: [{
+        type: 'speaker_display', operation: 'show',
+        message: 'ALERT: Door opened on {{camera.name}} at {{time}}',
+        textSize: 'large', textColor: '#FFFFFF', backgroundColor: '#C43C3C',
+        scrollDirection: 'fromRightToLeft', scrollSpeed: 5,
+        duration_type: 'time', duration_value: 15000,
+        remote_host: '192.168.1.102', remote_user: 'root', remote_pass: 'pass'
+      }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'Cross-Device: AOA Detection → Remote AOA Occupancy → Alert',
+    icon: '🔗',
+    desc: 'AOA object trigger + remote AOA occupancy condition → speaker display + MQTT alert',
+    rule: {
+      name: 'Cross-Device: AOA Detection → Remote AOA Occupancy → Alert',
+      enabled: false, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'aoa_scenario', scenario_id: 1, object_class: 'any' }],
+      conditions: [{
+        type: 'aoa_occupancy', scenario_id: 1, object_class: 'human', op: 'gt', value: 0,
+        remote_host: '192.168.1.101', remote_user: 'root', remote_pass: 'pass'
+      }],
+      actions: [
+        {
+          type: 'speaker_display', operation: 'show',
+          message: 'Motion detected — {{camera.name}} at {{time}}',
+          textSize: 'medium', textColor: '#FFFFFF', backgroundColor: '#D9A24B',
+          duration_type: 'time', duration_value: 10000,
+          remote_host: '192.168.1.102', remote_user: 'root', remote_pass: 'pass'
+        },
+        {
+          type: 'mqtt_publish',
+          topic: 'cameras/{{camera.serial}}/cross-device-alert',
+          payload: '{"camera":"{{camera.serial}}","event":"aoa_scenario","time":"{{timestamp}}"}',
+          qos: 0, retain: false
+        }
+      ],
+      cooldown: 60,
     }
   },
 ];

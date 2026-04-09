@@ -1,0 +1,43 @@
+{
+  "name": "Cross-Device — I/O Input → Remote I/O State Condition → Speaker Display",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "condition_logic": "AND",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "rising"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "io_state",
+      "port": 1,
+      "state": "active",
+      "remote_host": "192.168.1.101",
+      "remote_user": "root",
+      "remote_pass": "pass"
+    }
+  ],
+  "actions": [
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "ALERT: Door opened on {{camera.name}} at {{time}}",
+      "textSize": "large",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#C43C3C",
+      "scrollDirection": "fromRightToLeft",
+      "scrollSpeed": 5,
+      "duration_type": "time",
+      "duration_value": 15000,
+      "remote_host": "192.168.1.102",
+      "remote_user": "root",
+      "remote_pass": "pass"
+    }
+  ],
+  "cooldown": 30,
+  "max_executions": 0,
+  "max_exec_period": ""
+}

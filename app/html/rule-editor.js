@@ -760,8 +760,23 @@ function conditionFields(c, rowIdx) {
       <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
     </div></div>`;
   if (type === 'aoa_occupancy') {
+    const isRemote = c.remote_host_toggle === 'remote'
+      || (c.remote_host && c.remote_host_toggle !== 'local');
     let scenarioControl;
-    if (aoaScenarios === null) {
+    if (isRemote) {
+      const host = (c.remote_host || '').trim();
+      const cached = host ? remoteCapCache[`${host}:::aoa`] : null;
+      const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="aoa" onclick="loadRemoteCondCap('${rowIdx}','aoa')" style="white-space:nowrap;margin-left:6px" title="Fetch scenarios from the remote device">Load</button>`;
+      if (cached && cached.length) {
+        const opts = cached.map(s => {
+          const sel = (c.scenario_id !== undefined ? parseInt(c.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+          return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+        }).join('');
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id">${opts}</select>${loadBtn}</div>`;
+      } else {
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1" style="flex:1">${loadBtn}</div>`;
+      }
+    } else if (aoaScenarios === null) {
       scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1" placeholder="Loading…">`;
     } else if (!aoaScenarios.length) {
       scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1">`;
@@ -838,7 +853,57 @@ function conditionFields(c, rowIdx) {
     </div>`;
   }
   if (type === 'vapix_event_state') {
-    /* Build catalog quick-select if available */
+    const isRemote = c.remote_host_toggle === 'remote'
+      || (c.remote_host && c.remote_host_toggle !== 'local');
+
+    if (isRemote) {
+      /* Remote: show Load button + topic dropdown from cached results */
+      const host = (c.remote_host || '').trim();
+      const cachedEvents = host ? remoteCapCache[`${host}:::vapix_events`] : null;
+      const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="vapix_events" onclick="loadRemoteCondCap('${rowIdx}','vapix_events')" style="white-space:nowrap;margin-left:6px" title="Fetch event instances from the remote device">Load</button>`;
+      let topicCtrl, dataKeyCtrl;
+      if (cachedEvents && cachedEvents.length) {
+        const topicOpts = cachedEvents.map(ev => {
+          const sel = c.event_key && ev.topic && ev.topic.includes(c.event_key) ? 'selected' : '';
+          return `<option value="${escHtml(ev.topic)}" ${sel}>${escHtml(ev.topic)}</option>`;
+        }).join('');
+        topicCtrl = `<div style="display:flex;align-items:center;gap:4px">
+          <select data-k="event_key" onchange="rerenderCondition(this)" style="flex:1">
+            <option value="">— select event —</option>
+            ${topicOpts}
+          </select>${loadBtn}</div>`;
+        /* Populate data key dropdown from matched event */
+        const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic.includes(c.event_key));
+        const dks = matchedEv && matchedEv.dataKeys && matchedEv.dataKeys.length ? matchedEv.dataKeys : [];
+        dataKeyCtrl = dks.length
+          ? `<select data-k="data_key">${dks.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
+          : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
+      } else {
+        topicCtrl = `<div style="display:flex;align-items:center;gap:4px">
+          <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput" style="flex:1">${loadBtn}</div>`;
+        dataKeyCtrl = `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
+      }
+      return `
+      <div class="form-row">
+        <div class="form-group" style="flex:1">
+          <label>Event Topic (partial match)</label>
+          ${topicCtrl}
+          <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Data Key</label>
+          ${dataKeyCtrl}
+        </div>
+        <div class="form-group">
+          <label>Expected Value</label>
+          <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1 or true">
+        </div>
+      </div>`;
+    }
+
+    /* Local device: show catalog quick-select if available */
     const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
       ? vapixEventCatalog.map((ev, i) => {
           const path = vapixCatalogTopicPath(ev);
@@ -846,7 +911,6 @@ function conditionFields(c, rowIdx) {
           return `<option value="${i}" ${sel}>${escHtml(ev.label)}</option>`;
         }).join('')
       : '';
-    /* Find data keys for currently matched catalog entry */
     const matchIdx = vapixEventCatalog
       ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p.includes(c.event_key); })
       : -1;
@@ -898,7 +962,7 @@ function renderConditionList() {
         </select>
         <button class="tca-remove" onclick="removeConditionRow(${i})">&times;</button>
       </div>
-      <div class="tca-fields">${conditionFields(c, i)}</div>
+      <div class="tca-fields">${conditionRemoteDeviceFields(c)}${conditionFields(c, i)}</div>
     </div>
   `).join('');
 }
@@ -906,6 +970,25 @@ function renderConditionList() {
 function addConditionRow() { conditionRows.push({ type: 'time_window' }); renderConditionList(); }
 function removeConditionRow(i) { conditionRows.splice(i, 1); renderConditionList(); }
 function changeConditionType(i, type) { conditionRows[i] = { type }; renderConditionList(); }
+
+function collectConditionRow(i) {
+  const el = document.getElementById('crow-' + i);
+  if (!el) return;
+  const type = conditionRows[i] ? conditionRows[i].type : 'time_window';
+  const data = { type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    if (inp.type === 'checkbox') data[inp.dataset.k] = inp.checked;
+    else data[inp.dataset.k] = inp.value;
+  });
+  conditionRows[i] = data;
+}
+
+function rerenderCondition(sel) {
+  const row = sel.closest('.tca-row');
+  const i = parseInt(row.id.replace('crow-', ''));
+  collectConditionRow(i);
+  renderConditionList();
+}
 
 /* ===== Action rows ===== */
 const ACTION_GROUPS = [
@@ -967,22 +1050,23 @@ function getTriggerTokens() {
   const tokens = ['{{trigger_json}}'];  /* always available — full trigger data as JSON */
   for (const t of triggerRows) {
     if (t.type === 'vapix_event') {
+      tokens.push('{{trigger.active}}');  /* present in most VAPIX events */
       const idx = findCatalogMatch(t);
       if (idx >= 0 && vapixEventCatalog[idx].dataKeys.length) {
         for (const k of vapixEventCatalog[idx].dataKeys) tokens.push(`{{trigger.${k}}}`);
-      } else {
-        tokens.push('{{trigger.active}}');
       }
     } else if (t.type === 'mqtt_message') {
       tokens.push('{{trigger.topic}}', '{{trigger.payload}}');
     } else if (t.type === 'http_webhook') {
-      tokens.push('{{trigger.source}}');
+      tokens.push('{{trigger.payload}}', '{{trigger.<field>}}');
     } else if (t.type === 'counter_threshold') {
       tokens.push('{{trigger.counter_name}}', '{{trigger.counter_value}}');
     } else if (t.type === 'io_input') {
       tokens.push('{{trigger.port}}', '{{trigger.state}}');
     } else if (t.type === 'aoa_scenario') {
-      tokens.push('{{trigger.scenario_id}}', '{{trigger.object_class}}');
+      tokens.push('{{trigger.scenario_id}}', '{{trigger.active}}', '{{trigger.reason}}');
+    } else if (t.type === 'rule_fired') {
+      tokens.push('{{trigger.fired_rule_id}}');
     }
   }
   return [...new Set(tokens)];
@@ -1162,7 +1246,131 @@ function renderOnFailureFields(a, hint) {
   </div></div>` : ''}`;
 }
 
-function actionFields(a) {
+const REMOTE_CAPABLE_ACTIONS = new Set([
+  'recording', 'overlay_text', 'ptz_preset', 'io_output',
+  'audio_clip', 'siren_light', 'guard_tour', 'set_device_param',
+  'ir_cut_filter', 'privacy_mask', 'wiper', 'light_control',
+  'acap_control', 'speaker_display'
+]);
+
+/* Reusable remote device section for triggers and conditions (uses rerenderFn callback name) */
+function remoteDeviceSection(obj, rerenderFn) {
+  const isRemote = obj.remote_host_toggle === 'remote'
+    || (obj.remote_host && obj.remote_host_toggle !== 'local');
+  return `
+  <div class="form-row" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+    <div class="form-group" style="flex:0 0 160px;">
+      <label>Target Device</label>
+      <select data-k="remote_host_toggle" onchange="${rerenderFn}(this)">
+        <option value="local"  ${!isRemote ? 'selected' : ''}>Local (this camera)</option>
+        <option value="remote" ${isRemote  ? 'selected' : ''}>Remote device</option>
+      </select>
+    </div>
+    ${isRemote ? `
+    <div class="form-group" style="flex:1;min-width:120px;">
+      <label>IP / Hostname</label>
+      <input type="text" data-k="remote_host" value="${escHtml(obj.remote_host || '')}" placeholder="192.168.1.100">
+    </div>
+    <div class="form-group" style="flex:0 0 110px;">
+      <label>Username</label>
+      <input type="text" data-k="remote_user" value="${escHtml(obj.remote_user || '')}" placeholder="root" autocomplete="off">
+    </div>
+    <div class="form-group" style="flex:0 0 130px;">
+      <label>Password</label>
+      <input type="password" data-k="remote_pass" value="${escHtml(obj.remote_pass || '')}" autocomplete="new-password">
+    </div>
+    ` : ''}
+  </div>`;
+}
+
+const REMOTE_CAPABLE_CONDITIONS  = new Set(['io_state', 'vapix_event_state', 'aoa_occupancy']);
+
+function conditionRemoteDeviceFields(c) {
+  if (!REMOTE_CAPABLE_CONDITIONS.has(c.type)) return '';
+  return remoteDeviceSection(c, 'rerenderCondition');
+}
+
+function remoteDeviceFields(a) {
+  if (!REMOTE_CAPABLE_ACTIONS.has(a.type)) return '';
+  /* Show remote inputs if toggle is 'remote' OR if there's a saved remote_host (and not explicitly set to local) */
+  const isRemote = a.remote_host_toggle === 'remote'
+    || (a.remote_host && a.remote_host_toggle !== 'local');
+  return `
+  <div class="form-row" style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:4px;">
+    <div class="form-group" style="flex:0 0 160px;">
+      <label>Target Device</label>
+      <select data-k="remote_host_toggle" onchange="rerenderAction(this)">
+        <option value="local" ${!isRemote ? 'selected' : ''}>Local (this camera)</option>
+        <option value="remote" ${isRemote ? 'selected' : ''}>Remote device</option>
+      </select>
+    </div>
+    ${isRemote ? `
+    <div class="form-group" style="flex:1;min-width:120px;">
+      <label>IP / Hostname</label>
+      <input type="text" data-k="remote_host" value="${escHtml(a.remote_host || '')}" placeholder="192.168.1.100" onchange="rerenderAction(this)">
+    </div>
+    <div class="form-group" style="flex:0 0 110px;">
+      <label>Username</label>
+      <input type="text" data-k="remote_user" value="${escHtml(a.remote_user || '')}" placeholder="root" autocomplete="off">
+    </div>
+    <div class="form-group" style="flex:0 0 130px;">
+      <label>Password</label>
+      <input type="password" data-k="remote_pass" value="${escHtml(a.remote_pass || '')}" placeholder="" autocomplete="new-password">
+    </div>
+    ` : ''}
+  </div>`;
+}
+
+/* Returns a capability control HTML string for a remote-device action, or null if not remote.
+ * query: "ptz"|"audio"|"siren"|"privacy"|"guardtour"|"acap"
+ * dataKey: the data-k attribute for the resulting input/select
+ * currentVal: the currently saved value for that field */
+function remoteCapControl(a, rowIdx, query, dataKey, currentVal, placeholder) {
+  const isRemote = a.remote_host_toggle === 'remote'
+    || (a.remote_host && a.remote_host_toggle !== 'local');
+  if (!isRemote) return null;
+  const host = (a.remote_host || '').trim();
+  const key = `${host}:::${query}`;
+  const cached = host && (typeof remoteCapCache !== 'undefined') ? remoteCapCache[key] : null;
+  const btn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="${query}" onclick="loadRemoteCap('${rowIdx}','${query}')" style="white-space:nowrap;margin-left:6px" title="Fetch available options from the remote device">Load</button>`;
+  if (cached && cached.length) {
+    const isPtz = query === 'ptz';
+    const items = isPtz
+      ? cached.flatMap(c => (c.presets || []).map(n => ({ value: `${c.channel}:${n}`, label: `[Ch${c.channel}] ${n}` })))
+      : query === 'audio'
+        ? cached.map(it => ({ value: it.id || '', label: it.name || it.id || '' }))
+        : cached.map(it => ({ value: it.name || it.id || it.package || '', label: it.niceName || it.name || it.id || '' }));
+    let opts = `<option value="">— select —</option>`;
+    const matchVal = isPtz ? `${a.channel || 1}:${currentVal || ''}` : (currentVal || '');
+    for (const it of items) {
+      opts += `<option value="${escHtml(it.value)}" ${matchVal === it.value ? 'selected' : ''}>${escHtml(it.label)}</option>`;
+    }
+    if (isPtz) {
+      return `<div style="display:flex;align-items:center;gap:4px;flex:1;">
+        <select onchange="applyRemotePtzPreset(this,${rowIdx})" style="flex:1">${opts}</select>
+        <input type="hidden" data-k="preset"  value="${escHtml(currentVal || '')}">
+        <input type="hidden" data-k="channel" value="${a.channel || 1}">
+        ${btn}
+      </div>`;
+    }
+    return `<div style="display:flex;align-items:center;gap:4px;flex:1;"><select data-k="${dataKey}" style="flex:1">${opts}</select>${btn}</div>`;
+  }
+  return `<div style="display:flex;align-items:center;gap:4px;flex:1;"><input type="text" data-k="${dataKey}" value="${escHtml(currentVal || '')}" placeholder="${placeholder}" style="flex:1">${btn}</div>`;
+}
+
+function applyRemotePtzPreset(sel, rowIdx) {
+  const val = sel.value;
+  const colon = val.indexOf(':');
+  if (colon < 0) return;
+  const row = document.getElementById('arow-' + rowIdx);
+  if (!row) return;
+  const chInput = row.querySelector('[data-k="channel"]');
+  const presetInput = row.querySelector('[data-k="preset"]');
+  if (chInput) chInput.value = val.slice(0, colon);
+  if (presetInput) presetInput.value = val.slice(colon + 1);
+}
+
+function actionFields(a, rowIdx) {
   const type = a.type || 'http_request';
   const hint = getTokenInsertWidget();
   if (type === 'http_request') return `
@@ -1298,6 +1506,13 @@ function actionFields(a) {
       </label>
     </div></div>` : ''}`;
   if (type === 'ptz_preset') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'ptz', 'preset', a.preset || '', 'HomePosition');
+    if (remoteCtrl) {
+      return `
+    <div class="form-row">
+      <div class="form-group"><label>Preset</label>${remoteCtrl}</div>
+    </div>`;
+    }
     let presetControl, channelControl = '';
     if (ptzPresets === null) {
       presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="Loading presets…" disabled>`;
@@ -1354,6 +1569,11 @@ function actionFields(a) {
     </div></div>` : ''}`;
   }
   if (type === 'audio_clip') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'audio', 'clip_name', a.clip_name || '', 'Clip name or ID');
+    if (remoteCtrl) return `
+    <div class="form-row">
+      <div class="form-group"><label>Audio Clip</label>${remoteCtrl}</div>
+    </div>`;
     let clipControl;
     if (audioClips === null) {
       clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Loading clips…" disabled>`;
@@ -1373,8 +1593,11 @@ function actionFields(a) {
     </div>`;
   }
   if (type === 'siren_light') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'siren', 'profile', a.profile || '', 'Profile name (e.g. Green)');
     let profileControl;
-    if (sirenProfiles === null) {
+    if (remoteCtrl) {
+      profileControl = remoteCtrl;
+    } else if (sirenProfiles === null) {
       profileControl = `<input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Loading profiles..." disabled>`;
     } else if (!sirenProfiles.length) {
       profileControl = `<input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Profile name (e.g. Green)">`;
@@ -1398,7 +1621,7 @@ function actionFields(a) {
       </div>
       <div class="form-group">
         <label>Profile</label>${profileControl}
-        <div class="form-hint">Profile names are configured in the camera's Siren and Light settings.</div>
+        <div class="form-hint">Profile names are configured in the ${a.remote_host ? 'remote device' : "camera's"} Siren and Light settings.</div>
       </div>
     </div>
     ${isStart ? `
@@ -1844,7 +2067,10 @@ function actionFields(a) {
     const isStart = (a.operation || 'start') === 'start';
     let tourControl = '';
     if (isStart) {
-      if (guardTours === null) {
+      const remoteCtrl = remoteCapControl(a, rowIdx, 'guardtour', 'tour_id', a.tour_id || '', 'e.g. Guard Tour 1');
+      if (remoteCtrl) {
+        tourControl = remoteCtrl;
+      } else if (guardTours === null) {
         tourControl = `<input type="text" data-k="tour_id" value="${escHtml(a.tour_id || '')}" placeholder="Loading tours…" disabled>`;
       } else if (!guardTours.length) {
         tourControl = `<input type="text" data-k="tour_id" value="${escHtml(a.tour_id || '')}" placeholder="e.g. Guard Tour 1">`;
@@ -1877,12 +2103,26 @@ function actionFields(a) {
     </div>`;
   }
   if (type === 'set_device_param') {
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
     const paramListId = `param-list-${Math.random().toString(36).slice(2)}`;
     const valListId   = `val-list-${Math.random().toString(36).slice(2)}`;
-    const paramDl = deviceParams && deviceParams.length
-      ? `<datalist id="${paramListId}">${deviceParams.map(p => `<option value="${escHtml(p)}">`).join('')}</datalist>`
-      : '';
-    const placeholder = deviceParams === null ? 'Loading params…' : 'e.g. root.ImageSource.I0.Sensor.Sharpness';
+    const remoteHost  = (a.remote_host || '').trim();
+    const cachedAllParams = isRemote && remoteHost && (typeof remoteCapCache !== 'undefined')
+      ? remoteCapCache[`${remoteHost}:::allparams`] : null;
+    let paramDl = '';
+    let listAttr = '';
+    if (!isRemote && deviceParams && deviceParams.length) {
+      paramDl   = `<datalist id="${paramListId}">${deviceParams.map(p => `<option value="${escHtml(p)}">`).join('')}</datalist>`;
+      listAttr  = `list="${paramListId}"`;
+    } else if (cachedAllParams && cachedAllParams.length) {
+      paramDl   = `<datalist id="${paramListId}">${cachedAllParams.map(p => `<option value="${escHtml(p.name || '')}">`).join('')}</datalist>`;
+      listAttr  = `list="${paramListId}"`;
+    }
+    const placeholder = 'e.g. root.ImageSource.I0.Sensor.Sharpness';
+    const hintText = isRemote
+      ? 'The <code>root.</code> prefix is added automatically if omitted. Tab out to look up the current value and allowed values on the remote device.'
+      : 'The <code>root.</code> prefix is added automatically if omitted. Tab out of this field to look up allowed values.';
     return `${paramDl}<datalist class="param-val-list" id="${valListId}"></datalist>
     <div class="form-row">
       <div class="form-group" style="width:100%">
@@ -1894,14 +2134,22 @@ function actionFields(a) {
     <div class="form-row">
       <div class="form-group">
         <label>Parameter</label>
-        <input type="text" data-k="parameter" value="${escHtml(a.parameter || '')}" placeholder="${placeholder}" list="${paramListId}" ${deviceParams === null ? 'disabled' : ''}
-               onblur="fetchParamValues(this)">
-        <div class="form-hint">The <code>root.</code> prefix is added automatically if omitted. Tab out of this field to look up allowed values.</div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input type="text" data-k="parameter" value="${escHtml(a.parameter || '')}" placeholder="${placeholder}" ${listAttr} ${!isRemote && deviceParams === null ? 'disabled' : ''}
+                 onblur="fetchParamValues(this)" style="flex:1">
+          ${isRemote
+            ? `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="allparams" onclick="loadRemoteCap('${rowIdx}','allparams')" style="white-space:nowrap" title="Load all parameter names from the remote device">Load</button>`
+            : ''}
+          <button type="button" class="btn btn-ghost btn-sm" style="white-space:nowrap"
+                  onclick="fetchParamValues(this.closest('.form-group').querySelector('[data-k=parameter]'))"
+                  title="Look up current value and allowed values for the typed parameter">Look up</button>
+        </div>
+        <div class="form-hint">${hintText}</div>
       </div>
       <div class="form-group" style="flex:0 0 200px;">
         <label>Value</label>
         <input type="text" data-k="value" value="${escHtml(a.value || '')}" list="${valListId}">
-        <div class="form-hint param-val-hint">${a.parameter ? 'Tab the parameter field to look up values.' : ''}</div>
+        <div class="form-hint param-val-hint">${a.parameter ? 'Tab or click Look up to see allowed values.' : ''}</div>
       </div>
     </div>`;
   }
@@ -1955,8 +2203,11 @@ function actionFields(a) {
       </div>
     </div>`;
   if (type === 'privacy_mask') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'privacy', 'mask_id', a.mask_id || '', 'e.g. Mask 1');
     let maskControl;
-    if (privacyMasks === null) {
+    if (remoteCtrl) {
+      maskControl = remoteCtrl;
+    } else if (privacyMasks === null) {
       maskControl = `<input type="text" data-k="mask_id" value="${escHtml(a.mask_id || '')}" placeholder="Loading masks…" disabled>`;
     } else if (!privacyMasks.length) {
       maskControl = `<input type="text" data-k="mask_id" value="${escHtml(a.mask_id || '')}" placeholder="e.g. Mask 1">`;
@@ -2031,8 +2282,11 @@ function actionFields(a) {
     </div>`;
   }
   if (type === 'acap_control') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'acap', 'package', a.package || '', 'e.g. com.axis.myapp');
     let pkgControl;
-    if (acapApps === null) {
+    if (remoteCtrl) {
+      pkgControl = remoteCtrl;
+    } else if (acapApps === null) {
       pkgControl = `<input type="text" data-k="package" value="${escHtml(a.package || '')}" placeholder="Loading apps…" disabled>`;
     } else if (!acapApps.length) {
       pkgControl = `<input type="text" data-k="package" value="${escHtml(a.package || '')}" placeholder="e.g. com.axis.myapp">`;
@@ -2205,7 +2459,7 @@ function renderActionList() {
         <button class="btn btn-ghost btn-sm" id="atest-${i}" onclick="testActionRow(${i})" title="Send a test — executes this action with sample data now">Test</button>
         <button class="tca-remove" onclick="removeActionRow(${i})">&times;</button>
       </div>
-      <div class="tca-fields">${actionFields(a)}</div>
+      <div class="tca-fields">${remoteDeviceFields(a)}${actionFields(a, i)}</div>
     </div>
   `).join('');
 }
@@ -2346,6 +2600,8 @@ function normalizeCondition(c) {
     out.name = c.name; out.op = c.op || 'eq'; out.value = c.value;
   } else if (c.type === 'io_state') {
     out.port = parseInt(c.port) || 1; out.state = c.state || 'active';
+    { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
+      if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
   } else if (c.type === 'http_check') {
     out.url = c.url; out.expected_status = parseInt(c.expected_status) || 200;
     if (c.expected_body) out.expected_body = c.expected_body;
@@ -2356,6 +2612,8 @@ function normalizeCondition(c) {
     out.object_class = c.object_class || 'any';
     out.op = c.op || 'gt';
     out.value = parseFloat(c.value) || 0;
+    { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
+      if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
   } else if (c.type === 'day_night') {
     out.state = c.state || 'day';
     if (c.lat !== undefined && c.lat !== '') out.lat = parseFloat(c.lat);
@@ -2364,6 +2622,8 @@ function normalizeCondition(c) {
     out.event_key = c.event_key || '';
     out.data_key  = c.data_key || '';
     out.expected  = c.expected || '';
+    { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
+      if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
   }
   return out;
 }
@@ -2382,6 +2642,14 @@ function normalizeAction(a) {
                  'event_key','data_key','expected','interval'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
+  /* Remote device support */
+  const isRemote = a.remote_host_toggle === 'remote'
+    || (a.remote_host && a.remote_host_toggle !== 'local');
+  if (isRemote && REMOTE_CAPABLE_ACTIONS.has(a.type)) {
+    if (a.remote_host) out.remote_host = a.remote_host.trim();
+    if (a.remote_user) out.remote_user = a.remote_user.trim();
+    if (a.remote_pass) out.remote_pass = a.remote_pass;
+  }
   if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
   if (out.port     !== undefined) out.port     = parseInt(out.port)     || 1;
   if (out.channel  !== undefined && a.type !== 'slack_webhook') out.channel = parseInt(out.channel) || 1;

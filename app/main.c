@@ -5,6 +5,7 @@
 #include <time.h>
 #include <glib.h>
 #include <glib-unix.h>
+#include <curl/curl.h>
 
 #include "ACAP.h"
 #include "cJSON.h"
@@ -88,7 +89,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         "speaker_display",
         NULL
     };
-    static const char* const trigger_logic_values[] = {"OR", "AND", NULL};
+    static const char* const trigger_logic_values[] = {"OR", "AND", "AND_ACTIVE", NULL};
     static const char* const condition_logic_values[] = {"AND", "OR", NULL};
     static const char* const max_exec_period_values[] = {"", "minute", "hour", "day", NULL};
 
@@ -115,7 +116,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
 
     const char* trigger_logic = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "trigger_logic"));
     if (trigger_logic && !string_in_list(trigger_logic, trigger_logic_values)) {
-        snprintf(error, error_size, "'trigger_logic' must be OR or AND");
+        snprintf(error, error_size, "'trigger_logic' must be OR, AND, or AND_ACTIVE");
         return 0;
     }
 
@@ -998,6 +999,432 @@ static void HTTP_Fire(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 }
 
 /*=====================================================
+ * POST /local/acap_event_engine/remote-caps
+ * Proxy VAPIX capability queries to a remote Axis device.
+ * Body: { "host":"IP", "user":"root", "pass":"pass", "query":"ptz|audio|siren|privacy|guardtour|acap" }
+ * Returns the parsed capability list as a JSON array.
+ *=====================================================*/
+
+static size_t rc_write_cb(void* ptr, size_t sz, size_t n, void* ud) {
+    char** buf = (char**)ud;
+    size_t add = sz * n;
+    size_t cur = *buf ? strlen(*buf) : 0;
+    char* nb = realloc(*buf, cur + add + 1);
+    if (!nb) return 0;
+    memcpy(nb + cur, ptr, add);
+    nb[cur + add] = '\0';
+    *buf = nb;
+    return add;
+}
+
+static char* rc_get(const char* host, const char* user, const char* pass, const char* path) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* resp = NULL;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rc_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(resp); return NULL; }
+    return resp;
+}
+
+static char* rc_post(const char* host, const char* user, const char* pass,
+                     const char* path, const char* body) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* resp = NULL;
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rc_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(resp); return NULL; }
+    return resp;
+}
+
+static char* rc_post_soap(const char* host, const char* user, const char* pass,
+                          const char* path, const char* body) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* resp = NULL;
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/soap+xml; charset=utf-8");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rc_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(resp); return NULL; }
+    return resp;
+}
+
+static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    if (strcmp(get_method(req), "POST") != 0) {
+        ACAP_HTTP_Respond_Error(resp, 405, "POST required");
+        return;
+    }
+    cJSON* body = get_body_json(req);
+    if (!body) { ACAP_HTTP_Respond_Error(resp, 400, "Invalid JSON"); return; }
+
+    const char* host  = cJSON_GetStringValue(cJSON_GetObjectItem(body, "host"));
+    const char* user  = cJSON_GetStringValue(cJSON_GetObjectItem(body, "user"));
+    const char* pass  = cJSON_GetStringValue(cJSON_GetObjectItem(body, "pass"));
+    const char* query = cJSON_GetStringValue(cJSON_GetObjectItem(body, "query"));
+
+    if (!host || !host[0] || !query || !query[0]) {
+        cJSON_Delete(body);
+        ACAP_HTTP_Respond_Error(resp, 400, "Missing host or query");
+        return;
+    }
+    if (!user) user = "";
+    if (!pass) pass = "";
+
+    cJSON* result = cJSON_CreateArray();
+
+    if (strcmp(query, "ptz") == 0) {
+        char* raw = rc_get(host, user, pass, "/axis-cgi/com/ptz.cgi?query=presetposall");
+        if (raw) {
+            char* line = strtok(raw, "\n");
+            cJSON* cur_ch = NULL;
+            while (line) {
+                int ch = 0;
+                if (sscanf(line, "Preset Positions for camera %d", &ch) == 1) {
+                    cur_ch = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(cur_ch, "channel", ch);
+                    cJSON* presets = cJSON_AddArrayToObject(cur_ch, "presets");
+                    (void)presets;
+                    cJSON_AddItemToArray(result, cur_ch);
+                } else if (cur_ch) {
+                    char pname[256];
+                    if (sscanf(line, "presetposno%*d=%255[^\r\n]", pname) == 1) {
+                        cJSON* presets = cJSON_GetObjectItem(cur_ch, "presets");
+                        if (presets) cJSON_AddItemToArray(presets, cJSON_CreateString(pname));
+                    }
+                }
+                line = strtok(NULL, "\n");
+            }
+            free(raw);
+        }
+    } else if (strcmp(query, "audio") == 0) {
+        char* raw = rc_get(host, user, pass, "/axis-cgi/param.cgi?action=list&group=MediaClip");
+        if (raw) {
+            cJSON* byid = cJSON_CreateObject();
+            char* line = strtok(raw, "\n");
+            while (line) {
+                char key[32], prop[32], val[256];
+                if (sscanf(line, "root.MediaClip.%31[^.].%31[^=]=%255[^\r\n]", key, prop, val) == 3) {
+                    cJSON* obj = cJSON_GetObjectItem(byid, key);
+                    if (!obj) { obj = cJSON_CreateObject(); cJSON_AddItemToObject(byid, key, obj); cJSON_AddStringToObject(obj, "id", key + 1); }
+                    if (strcmp(prop, "Name") == 0) cJSON_AddStringToObject(obj, "name", val);
+                    if (strcmp(prop, "Type") == 0) cJSON_AddStringToObject(obj, "type", val);
+                }
+                line = strtok(NULL, "\n");
+            }
+            free(raw);
+            cJSON* child;
+            cJSON_ArrayForEach(child, byid) {
+                const char* t = cJSON_GetStringValue(cJSON_GetObjectItem(child, "type"));
+                const char* n = cJSON_GetStringValue(cJSON_GetObjectItem(child, "name"));
+                if (t && strcmp(t, "audio") == 0 && n && n[0])
+                    cJSON_AddItemToArray(result, cJSON_Duplicate(child, 1));
+            }
+            cJSON_Delete(byid);
+        }
+    } else if (strcmp(query, "siren") == 0) {
+        char* raw = rc_post(host, user, pass, "/axis-cgi/siren_and_light.cgi",
+                            "{\"apiVersion\":\"1.0\",\"method\":\"getProfiles\"}");
+        if (raw) {
+            cJSON* root_j = cJSON_Parse(raw); free(raw);
+            if (root_j) {
+                cJSON* profiles = cJSON_GetObjectItem(cJSON_GetObjectItem(root_j, "data"), "profiles");
+                if (profiles && cJSON_IsArray(profiles)) {
+                    cJSON* p;
+                    cJSON_ArrayForEach(p, profiles) {
+                        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(p, "name"));
+                        if (name) { cJSON* item = cJSON_CreateObject(); cJSON_AddStringToObject(item, "name", name); cJSON_AddItemToArray(result, item); }
+                    }
+                }
+                cJSON_Delete(root_j);
+            }
+        }
+    } else if (strcmp(query, "privacy") == 0) {
+        char* raw = rc_get(host, user, pass, "/axis-cgi/privacymask.cgi?query=listpxjson");
+        if (raw) {
+            cJSON* root_j = cJSON_Parse(raw); free(raw);
+            if (root_j) {
+                cJSON* list = cJSON_GetObjectItem(root_j, "listpx");
+                if (list && cJSON_IsArray(list)) {
+                    cJSON* m;
+                    cJSON_ArrayForEach(m, list) {
+                        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(m, "name"));
+                        if (name) { cJSON* item = cJSON_CreateObject(); cJSON_AddStringToObject(item, "name", name); cJSON_AddItemToArray(result, item); }
+                    }
+                }
+                cJSON_Delete(root_j);
+            }
+        }
+    } else if (strcmp(query, "guardtour") == 0) {
+        char* raw = rc_get(host, user, pass, "/axis-cgi/param.cgi?action=list&group=GuardTour");
+        if (raw) {
+            char* line = strtok(raw, "\n");
+            while (line) {
+                int gid; char gname[256];
+                if (sscanf(line, "root.GuardTour.G%d.Name=%255[^\r\n]", &gid, gname) == 2 && gname[0]) {
+                    cJSON* item = cJSON_CreateObject();
+                    cJSON_AddNumberToObject(item, "id", gid);
+                    cJSON_AddStringToObject(item, "name", gname);
+                    cJSON_AddItemToArray(result, item);
+                }
+                line = strtok(NULL, "\n");
+            }
+            free(raw);
+        }
+    } else if (strcmp(query, "acap") == 0) {
+        char* raw = rc_get(host, user, pass, "/axis-cgi/applications/list.cgi");
+        if (raw) {
+            /* Parse minimal XML: <application Name="..." NiceName="..." ...> */
+            char* p = raw;
+            while ((p = strstr(p, "<application")) != NULL) {
+                char pkg[128] = "", nice[128] = "";
+                char* name_a = strstr(p, "Name=\"");
+                char* nice_a = strstr(p, "NiceName=\"");
+                char* end_a  = strchr(p, '>');
+                if (end_a && name_a && name_a < end_a) {
+                    name_a += 6;
+                    char* eq = strchr(name_a, '"');
+                    if (eq) { size_t l = (size_t)(eq - name_a); if (l < sizeof(pkg)) { memcpy(pkg, name_a, l); pkg[l] = '\0'; } }
+                }
+                if (end_a && nice_a && nice_a < end_a) {
+                    nice_a += 10;
+                    char* eq = strchr(nice_a, '"');
+                    if (eq) { size_t l = (size_t)(eq - nice_a); if (l < sizeof(nice)) { memcpy(nice, nice_a, l); nice[l] = '\0'; } }
+                }
+                if (pkg[0]) {
+                    cJSON* item = cJSON_CreateObject();
+                    cJSON_AddStringToObject(item, "package", pkg);
+                    cJSON_AddStringToObject(item, "niceName", nice[0] ? nice : pkg);
+                    cJSON_AddItemToArray(result, item);
+                }
+                p++;
+            }
+            free(raw);
+        }
+    } else if (strcmp(query, "param") == 0) {
+        const char* param_name = cJSON_GetStringValue(cJSON_GetObjectItem(body, "param_name"));
+        if (!param_name || !param_name[0]) {
+            cJSON_Delete(result);
+            cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, "Missing param_name");
+            return;
+        }
+        /* Normalise to always include root. prefix */
+        char full_param[256];
+        if (strncmp(param_name, "root.", 5) == 0)
+            snprintf(full_param, sizeof(full_param), "%s", param_name);
+        else
+            snprintf(full_param, sizeof(full_param), "root.%s", param_name);
+
+        char req[512];
+        snprintf(req, sizeof(req), "/axis-cgi/param.cgi?action=list&group=%s", full_param);
+        char* raw = rc_get(host, user, pass, req);
+        char currentVal[512] = "";
+        if (raw) {
+            char* eq = strchr(raw, '=');
+            if (eq) {
+                char* nl = strchr(eq + 1, '\n');
+                if (nl) *nl = '\0';
+                char* v = eq + 1;
+                size_t l = strlen(v);
+                if (l > 0 && v[l-1] == '\r') v[l-1] = '\0';
+                snprintf(currentVal, sizeof(currentVal), "%s", v);
+            }
+            free(raw);
+        }
+
+        char def_req[512];
+        snprintf(def_req, sizeof(def_req),
+                 "/axis-cgi/param.cgi?action=listdefinitions&group=%s&type=all&listformat=xmlschema",
+                 full_param);
+        char* def_raw = rc_get(host, user, pass, def_req);
+
+        /* Build result item */
+        cJSON* item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "currentValue", currentVal);
+
+        /* Parse XML to extract enum values and default. */
+        cJSON* enum_arr = cJSON_AddArrayToObject(item, "enumValues");
+        char   defValueStr[128] = "";
+        if (def_raw) {
+            /* Extract enum entries: value="X" patterns inside <entry ...> tags */
+            char* p = def_raw;
+            while ((p = strstr(p, "<entry")) != NULL) {
+                char ev[128] = "", nv[128] = "";
+                char* val_a  = strstr(p, "value=\"");
+                char* nice_a = strstr(p, "niceValue=\"");
+                char* end_a  = strchr(p, '>');
+                if (end_a && val_a && val_a < end_a) {
+                    val_a += 7;
+                    char* q = strchr(val_a, '"');
+                    if (q && (q - val_a) < (int)sizeof(ev) - 1) {
+                        strncpy(ev, val_a, q - val_a);
+                        ev[q - val_a] = '\0';
+                    }
+                }
+                if (end_a && nice_a && nice_a < end_a) {
+                    nice_a += 11;
+                    char* q = strchr(nice_a, '"');
+                    if (q && (q - nice_a) < (int)sizeof(nv) - 1) {
+                        strncpy(nv, nice_a, q - nice_a);
+                        nv[q - nice_a] = '\0';
+                    }
+                }
+                if (ev[0]) {
+                    cJSON* e = cJSON_CreateObject();
+                    cJSON_AddStringToObject(e, "value", ev);
+                    cJSON_AddStringToObject(e, "label", nv[0] ? nv : ev);
+                    cJSON_AddItemToArray(enum_arr, e);
+                }
+                p++;
+            }
+            /* Extract default value from <parameter ... value="..." */
+            char* param_tag = strstr(def_raw, "<parameter ");
+            if (param_tag) {
+                char* def_a = strstr(param_tag, "value=\"");
+                char* end_t = strchr(param_tag, '>');
+                if (def_a && end_t && def_a < end_t) {
+                    def_a += 7;
+                    char* q = strchr(def_a, '"');
+                    if (q && (q - def_a) < (int)sizeof(defValueStr) - 1) {
+                        strncpy(defValueStr, def_a, q - def_a);
+                        defValueStr[q - def_a] = '\0';
+                    }
+                }
+            }
+            free(def_raw);
+        }
+        cJSON_AddStringToObject(item, "defaultValue", defValueStr);
+        cJSON_AddItemToArray(result, item);
+
+    } else if (strcmp(query, "allparams") == 0) {
+        /* Return all parameter names from the remote device for datalist autocomplete */
+        char* raw = rc_get(host, user, pass, "/axis-cgi/param.cgi?action=list");
+        if (raw) {
+            char* line = strtok(raw, "\n");
+            while (line) {
+                char* eq = strchr(line, '=');
+                if (eq && eq > line) {
+                    int len = (int)(eq - line);
+                    char name[512];
+                    if (len < (int)sizeof(name)) {
+                        strncpy(name, line, len);
+                        name[len] = '\0';
+                        /* trim trailing \r and spaces */
+                        int l2 = len;
+                        while (l2 > 0 && (name[l2-1] == '\r' || name[l2-1] == ' ')) name[--l2] = '\0';
+                        if (name[0]) {
+                            cJSON* it = cJSON_CreateObject();
+                            cJSON_AddStringToObject(it, "name", name);
+                            cJSON_AddItemToArray(result, it);
+                        }
+                    }
+                }
+                line = strtok(NULL, "\n");
+            }
+            free(raw);
+        }
+
+    } else if (strcmp(query, "aoa") == 0) {
+        /* Return AOA scenarios from the remote device */
+        char* raw = rc_post(host, user, pass,
+                            "/local/objectanalytics/control.cgi",
+                            "{\"apiVersion\":\"1.0\",\"method\":\"getConfiguration\"}");
+        if (raw) {
+            cJSON* root_j = cJSON_Parse(raw); free(raw);
+            if (root_j) {
+                cJSON* data_j = cJSON_GetObjectItem(root_j, "data");
+                cJSON* scenarios = data_j ? cJSON_GetObjectItem(data_j, "scenarios") : NULL;
+                if (scenarios && cJSON_IsArray(scenarios)) {
+                    cJSON* s;
+                    cJSON_ArrayForEach(s, scenarios) {
+                        cJSON* id_j    = cJSON_GetObjectItem(s, "id");
+                        cJSON* name_j  = cJSON_GetObjectItem(s, "name");
+                        cJSON* type_j  = cJSON_GetObjectItem(s, "type");
+                        if (!id_j) continue;
+                        cJSON* item = cJSON_CreateObject();
+                        cJSON_AddNumberToObject(item, "id",   id_j->valuedouble);
+                        const char* sname = name_j ? cJSON_GetStringValue(name_j) : NULL;
+                        const char* stype = type_j ? cJSON_GetStringValue(type_j) : NULL;
+                        cJSON_AddStringToObject(item, "name", sname ? sname : "");
+                        cJSON_AddStringToObject(item, "type", stype ? stype : "");
+                        cJSON_AddItemToArray(result, item);
+                    }
+                }
+                cJSON_Delete(root_j);
+            }
+        }
+
+    } else if (strcmp(query, "vapix_events") == 0) {
+        /* Fetch VAPIX event properties via SOAP GetEventProperties.
+         * Returns [{soap: "<raw XML>"}] so the JS can parse with its existing
+         * parseVapixEventCatalog() function (same call the local catalog uses). */
+        const char* soap_body =
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+            " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\">"
+            "<soap:Body><tev:GetEventProperties/></soap:Body></soap:Envelope>";
+        char* raw = rc_post_soap(host, user, pass, "/vapix/services", soap_body);
+        if (raw) {
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "soap", raw);
+            cJSON_AddItemToArray(result, item);
+            free(raw);
+        }
+
+    } else {
+        cJSON_Delete(result);
+        cJSON_Delete(body);
+        ACAP_HTTP_Respond_Error(resp, 400, "Unknown query type");
+        return;
+    }
+
+    cJSON_Delete(body);
+    ACAP_HTTP_Respond_JSON(resp, result);
+    cJSON_Delete(result);
+}
+
+/*=====================================================
  * GET /local/acap_event_engine/aoa
  * Returns list of configured AOA scenarios (id, name, type)
  * by proxying getConfiguration to objectanalytics/control.cgi
@@ -1164,7 +1591,8 @@ int main(void) {
     ACAP_HTTP_Node("events",    HTTP_Events);
     ACAP_HTTP_Node("fire",      HTTP_Fire);
     ACAP_HTTP_Node("variables", HTTP_Variables);
-    ACAP_HTTP_Node("aoa",       HTTP_AOA);
+    ACAP_HTTP_Node("aoa",        HTTP_AOA);
+    ACAP_HTTP_Node("remote-caps", HTTP_RemoteCaps);
 
     /* 1-second engine tick */
     g_timeout_add_seconds(1, Engine_Tick, NULL);

@@ -1,5 +1,91 @@
 'use strict';
 
+/* ------------------------------------------------------------
+ * Remote capability cache: key = "host:::query", value = array
+ * ------------------------------------------------------------ */
+const remoteCapCache = {};
+
+/* Fetch capabilities from a remote Axis device via the /remote-caps proxy endpoint.
+ * query: "ptz" | "audio" | "siren" | "privacy" | "guardtour" | "acap"
+ * Returns an array of {value, label} objects, or null on failure. */
+async function fetchRemoteCaps(query, host, user, pass) {
+  const key = `${host}:::${query}`;
+  if (remoteCapCache[key]) return remoteCapCache[key];
+  try {
+    const resp = await fetch('/local/acap_event_engine/remote-caps', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, user: user || 'root', pass: pass || '', query })
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!Array.isArray(data)) return null;
+    remoteCapCache[key] = data;
+    return data;
+  } catch(e) { return null; }
+}
+
+/* Called by "Load from device" buttons in action rows.
+ * Fetches capabilities, caches them, and re-renders the action list. */
+async function loadRemoteCap(rowIndexStr, query) {
+  const rowIndex = parseInt(rowIndexStr);
+  const row = document.getElementById('arow-' + rowIndex);
+  if (!row) return;
+  const hostEl = row.querySelector('[data-k="remote_host"]');
+  const userEl = row.querySelector('[data-k="remote_user"]');
+  const passEl = row.querySelector('[data-k="remote_pass"]');
+  if (!hostEl || !hostEl.value.trim()) { toast('Enter remote device IP first', 'warning'); return; }
+  const btn = row.querySelector('.remote-load-btn[data-q="' + query + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  const result = await fetchRemoteCaps(
+    query, hostEl.value.trim(),
+    userEl ? userEl.value.trim() : 'root',
+    passEl ? passEl.value : '');
+  if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
+  if (!result) { toast('Could not fetch capabilities from remote device', 'error'); return; }
+  /* Preserve current form values then re-render */
+  const data = { type: actionRows[rowIndex].type };
+  row.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[rowIndex] = data;
+  renderActionList();
+}
+
+/* Called by "Load" buttons in condition rows (aoa_occupancy and vapix_event_state).
+ * Works identically to loadRemoteCap but targets crow-{rowIndex} and conditionRows. */
+async function loadRemoteCondCap(rowIndexStr, query) {
+  const rowIndex = parseInt(rowIndexStr);
+  const row = document.getElementById('crow-' + rowIndex);
+  if (!row) return;
+  const hostEl = row.querySelector('[data-k="remote_host"]');
+  const userEl = row.querySelector('[data-k="remote_user"]');
+  const passEl = row.querySelector('[data-k="remote_pass"]');
+  if (!hostEl || !hostEl.value.trim()) { toast('Enter remote device IP first', 'warning'); return; }
+  const host = hostEl.value.trim();
+  const btn = row.querySelector('.remote-load-btn[data-q="' + query + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  const result = await fetchRemoteCaps(
+    query, host,
+    userEl ? userEl.value.trim() : 'root',
+    passEl ? passEl.value : '');
+  if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
+  if (!result) { toast('Could not fetch options from remote device', 'error'); return; }
+
+  /* vapix_events returns [{soap: "<raw xml>"}] — parse with existing catalog parser */
+  if (query === 'vapix_events' && result[0] && result[0].soap) {
+    const parsed = parseVapixEventCatalog(result[0].soap);
+    remoteCapCache[`${host}:::vapix_events`] = parsed
+      .map(ev => ({ topic: vapixCatalogTopicPath(ev), dataKeys: ev.dataKeys }))
+      .filter(ev => ev.topic);
+    if (!remoteCapCache[`${host}:::vapix_events`].length)
+      toast('No events found on remote device', 'warning');
+  }
+
+  collectConditionRow(rowIndex);
+  renderConditionList();
+}
+
 async function loadVapixEventCatalog() {
   try {
     const resp = await fetch('/vapix/services', {
@@ -162,7 +248,8 @@ async function loadAoaScenarios() {
 }
 
 /* Fetch current value + allowed values for a device parameter.
- * Called onblur from the parameter input in the set_device_param action row. */
+ * Called onblur from the parameter input in the set_device_param action row.
+ * In remote mode, proxies through /remote-caps with query=param. */
 async function fetchParamValues(paramInput) {
   const row = paramInput.closest('.tca-row');
   if (!row) return;
@@ -175,38 +262,74 @@ async function fetchParamValues(paramInput) {
   const hintEl      = row.querySelector('.param-val-hint');
   if (!valueInput || !hintEl) return;
 
+  /* Detect remote mode */
+  const hostEl    = row.querySelector('[data-k="remote_host"]');
+  const userEl    = row.querySelector('[data-k="remote_user"]');
+  const passEl    = row.querySelector('[data-k="remote_pass"]');
+  const toggleEl  = row.querySelector('[data-k="remote_host_toggle"]');
+  const isRemote  = toggleEl && toggleEl.value === 'remote' && hostEl && hostEl.value.trim();
+
   hintEl.textContent = 'Looking up…';
 
-  /* 1 — current value */
-  let currentVal = '';
-  try {
-    const r = await fetch(`/axis-cgi/param.cgi?action=list&group=${encodeURIComponent(param)}`);
-    if (r.ok) {
-      const text = await r.text();
-      const m = text.match(/=(.+)/);
-      if (m) currentVal = m[1].trim().replace(/\r$/, '');
-    }
-  } catch(e) {}
+  let currentVal = '', allowedValues = [], allowedLabels = [], paramType = '', defVal = '', minVal = '', maxVal = '';
 
-  /* 2 — definitions (type, allowed values, range, default) */
-  let allowedValues = [], paramType = '', defVal = '', minVal = '', maxVal = '';
-  try {
-    const r = await fetch(`/axis-cgi/param.cgi?action=listdefinitions&group=${encodeURIComponent(param)}&type=all`);
-    if (r.ok) {
-      const text = await r.text();
-      for (const line of text.split('\n')) {
-        const eq = line.indexOf('=');
-        if (eq < 0) continue;
-        const key = line.slice(0, eq).trim();
-        const val = line.slice(eq + 1).trim().replace(/\r$/, '');
-        if (key.endsWith('.values')) allowedValues = val.split(',').map(v => v.trim()).filter(Boolean);
-        else if (key.endsWith('.type')) paramType = val;
-        else if (key.endsWith('.def'))  defVal     = val;
-        else if (key.endsWith('.min'))  minVal     = val;
-        else if (key.endsWith('.max'))  maxVal     = val;
+  if (isRemote) {
+    /* Proxy through /remote-caps */
+    try {
+      const resp = await fetch('/local/acap_event_engine/remote-caps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: hostEl.value.trim(),
+          user: userEl ? userEl.value.trim() : 'root',
+          pass: passEl ? passEl.value : '',
+          query: 'param',
+          param_name: param
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data) && data[0]) {
+          const item = data[0];
+          currentVal = item.currentValue || '';
+          defVal     = item.defaultValue || '';
+          /* enumValues is an array of {value, label} objects */
+          if (Array.isArray(item.enumValues) && item.enumValues.length) {
+            allowedValues = item.enumValues.map(e => e.value);
+            allowedLabels = item.enumValues.map(e => e.label || e.value);
+          }
+        }
       }
-    }
-  } catch(e) {}
+    } catch(e) {}
+  } else {
+    /* Local device */
+    try {
+      const r = await fetch(`/axis-cgi/param.cgi?action=list&group=${encodeURIComponent(param)}`);
+      if (r.ok) {
+        const text = await r.text();
+        const m = text.match(/=(.+)/);
+        if (m) currentVal = m[1].trim().replace(/\r$/, '');
+      }
+    } catch(e) {}
+
+    try {
+      const r = await fetch(`/axis-cgi/param.cgi?action=listdefinitions&group=${encodeURIComponent(param)}&type=all`);
+      if (r.ok) {
+        const text = await r.text();
+        for (const line of text.split('\n')) {
+          const eq = line.indexOf('=');
+          if (eq < 0) continue;
+          const key = line.slice(0, eq).trim();
+          const val = line.slice(eq + 1).trim().replace(/\r$/, '');
+          if (key.endsWith('.values')) { allowedValues = val.split(',').map(v => v.trim()).filter(Boolean); allowedLabels = [...allowedValues]; }
+          else if (key.endsWith('.type')) paramType = val;
+          else if (key.endsWith('.def'))  defVal     = val;
+          else if (key.endsWith('.min'))  minVal     = val;
+          else if (key.endsWith('.max'))  maxVal     = val;
+        }
+      }
+    } catch(e) {}
+  }
 
   /* Update the value input's datalist */
   if (valListEl && allowedValues.length) {
@@ -222,6 +345,21 @@ async function fetchParamValues(paramInput) {
   if (defVal) parts.push(`Default: ${escHtml(defVal)}`);
 
   hintEl.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : 'No definition found.';
+
+  /* Swap the value text input → <select> when enum values are known */
+  if (allowedValues.length) {
+    const curVal = valueInput.value || currentVal;
+    const sel = document.createElement('select');
+    sel.dataset.k = 'value';
+    let opts = '<option value="">\u2014 select \u2014</option>';
+    for (let j = 0; j < allowedValues.length; j++) {
+      const v = allowedValues[j];
+      const l = (allowedLabels && allowedLabels[j]) || v;
+      opts += `<option value="${escHtml(v)}" ${curVal === v ? 'selected' : ''}>${escHtml(l)}</option>`;
+    }
+    sel.innerHTML = opts;
+    valueInput.replaceWith(sel);
+  }
 }
 
 function parseVapixEventCatalog(xmlText) {

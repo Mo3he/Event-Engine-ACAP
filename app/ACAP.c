@@ -2266,16 +2266,21 @@ char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
     }
     snprintf(url, url_size, "http://127.0.0.12/axis-cgi/%s", endpoint);
 
+    struct curl_slist* json_hdr = curl_slist_append(NULL, "Content-Type: application/json");
+
     pthread_mutex_lock(&vapix_mutex);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_URL, url);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_USERPWD, VAPIX_Credentials);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, json_hdr);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_POSTFIELDS, request);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEFUNCTION, append_to_buffer_callback);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &response);
 
     CURLcode res = curl_easy_perform(VAPIX_CURL);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
     pthread_mutex_unlock(&vapix_mutex);
+    curl_slist_free_all(json_hdr);
     free(url);
 
     if (res != CURLE_OK) {

@@ -36,24 +36,24 @@ Rules are built in a clean web UI and take effect immediately.
 | **Device Event** | Any device event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition - boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards supported, optional payload filter) |
-| **HTTP Webhook** | External POST request with a secret token (max 120 characters). Requires admin-level camera credentials |
+| **HTTP Webhook** | External POST request with a secret token (max 120 characters). Requires admin-level camera credentials. All keys in the JSON `payload` object are flattened and injected as `{{trigger.KEY}}` variables |
 | **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
 | **Counter Threshold** | When a named counter crosses a configured value |
 | **Rule Chain** | Fires when another named rule executes |
-| **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}` and `{{trigger.object_class}}` |
+| **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}`, `{{trigger.active}}`, and `{{trigger.reason}}` |
 
 ## Conditions
 
 | Type | Description |
 |------|-------------|
 | **Time Window** | Only allow firing between two times of day |
-| **I/O State** | Check the current state of an I/O port |
+| **I/O State** | Check the current state of an I/O port. Supports **remote device** target |
 | **Counter Compare** | Compare a counter value against a threshold |
 | **Variable Compare** | Compare a named variable against a value |
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
-| **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count |
+| **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count. Supports **remote device** target; use Load to fetch available scenarios from the remote device |
 | **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Location. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
-| **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?) |
+| **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?). Supports **remote device** target; use Load to fetch the full event catalog from the remote device |
 
 ## Actions
 

@@ -491,6 +491,21 @@
               "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control",
               "speaker_display"
             ]
+          },
+          "remote_host": {
+            "type": "string",
+            "description": "IP address or hostname of a remote Axis device to execute this action on. When set, the action targets the remote device via VAPIX over HTTP using digest authentication. Supported by: recording, overlay_text, ptz_preset, io_output, audio_clip, siren_light, guard_tour, set_device_param, ir_cut_filter, privacy_mask, wiper, light_control, acap_control, speaker_display.",
+            "example": "192.168.1.100"
+          },
+          "remote_user": {
+            "type": "string",
+            "description": "Username for the remote device (default: root). Required when remote_host is set.",
+            "example": "root"
+          },
+          "remote_pass": {
+            "type": "string",
+            "description": "Password for the remote device user. Required when remote_host is set.",
+            "example": "pass"
           }
         }
       },
@@ -1579,6 +1594,52 @@
           "200": { "description": "OK" }
         }
       }
+    },
+
+    "/remote-caps": {
+      "post": {
+        "summary": "Query capabilities of a remote Axis device",
+        "operationId": "queryRemoteCaps",
+        "tags": ["Remote"],
+        "description": "Proxies a VAPIX capability query to a remote Axis device and returns the results as a JSON array. Used by the rule editor to populate dropdowns (PTZ presets, siren profiles, etc.) when an action targets a remote device.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["host", "query"],
+                "properties": {
+                  "host":  { "type": "string", "description": "IP address or hostname of the remote Axis device", "example": "192.168.1.100" },
+                  "user":  { "type": "string", "description": "Username on the remote device", "default": "root" },
+                  "pass":  { "type": "string", "description": "Password on the remote device" },
+                  "query": {
+                    "type": "string",
+                    "enum": ["ptz", "audio", "siren", "privacy", "guardtour", "acap"],
+                    "description": "Capability type to query: ptz=PTZ presets, audio=audio clips, siren=siren profiles, privacy=privacy masks, guardtour=guard tours, acap=installed ACAP applications"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Array of capability items. Structure varies by query type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "type": "object" },
+                  "example": [{ "name": "HomePosition" }, { "name": "Guard Tour" }]
+                }
+              }
+            }
+          },
+          "400": { "description": "Missing host or query parameter" },
+          "500": { "description": "Could not connect to remote device" }
+        }
+      }
     }
   },
 
@@ -1587,6 +1648,7 @@
     { "name": "Catalog",    "description": "Available trigger and action types" },
     { "name": "Variables",  "description": "Named variables and counters" },
     { "name": "Monitoring", "description": "Engine status and event log" },
-    { "name": "Settings",   "description": "Engine and MQTT configuration" }
+    { "name": "Settings",   "description": "Engine and MQTT configuration" },
+    { "name": "Remote",     "description": "Remote device capability queries" }
   ]
 }

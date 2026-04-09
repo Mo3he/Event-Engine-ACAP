@@ -19,6 +19,10 @@ void Conditions_Set_Proxy(const char* proxy) {
     snprintf(g_socks5_proxy, sizeof(g_socks5_proxy), "%s", proxy ? proxy : "");
 }
 
+/* Forward declarations for remote helpers defined in the http_check section */
+static char* cond_remote_get(const char* host, const char* user, const char* pass, const char* cgi);
+static char* cond_remote_post(const char* host, const char* user, const char* pass, const char* path, const char* body);
+
 /*-----------------------------------------------------
  * time_window
  * config: { "start": "HH:MM", "end": "HH:MM", "days": [0-6,...] }
@@ -106,9 +110,14 @@ static int cond_vapix_event_state(cJSON* cfg) {
     const char* expected  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "expected"));
     if (!event_key || !data_key || !expected) return 0;
 
+    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
     const char* body =
         "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\"}";
-    char* resp = ACAP_VAPIX_Post("eventhandler.cgi", body);
+    char* resp = (rh && rh[0])
+        ? cond_remote_post(rh, ru, rp, "eventhandler.cgi", body)
+        : ACAP_VAPIX_Post("eventhandler.cgi", body);
     if (!resp) return 0;
 
     cJSON* root = cJSON_Parse(resp);
@@ -174,6 +183,55 @@ static size_t http_check_write(void* ptr, size_t sz, size_t nmemb, void* userdat
     buf->size = new_size;
     buf->data[buf->size] = '\0';
     return sz * nmemb;
+}
+
+/* Remote device helpers — curl wrappers for condition evaluation on a remote Axis device */
+static char* cond_remote_get(const char* host, const char* user, const char* pass, const char* cgi) {
+    char url[512], userpwd[512];
+    snprintf(url,     sizeof(url),     "http://%s/axis-cgi/%s", host, cgi);
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user ? user : "", pass ? pass : "");
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    struct curl_buf buf = {NULL, 0};
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(buf.data); return NULL; }
+    return buf.data;
+}
+
+static char* cond_remote_post(const char* host, const char* user, const char* pass,
+                               const char* path, const char* body) {
+    char url[512], userpwd[512];
+    if (path[0] == '/')
+        snprintf(url, sizeof(url), "http://%s%s", host, path);
+    else
+        snprintf(url, sizeof(url), "http://%s/axis-cgi/%s", host, path);
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user ? user : "", pass ? pass : "");
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    struct curl_buf buf = {NULL, 0};
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(buf.data); return NULL; }
+    return buf.data;
 }
 
 static int cond_http_check(cJSON* cfg) {
@@ -265,9 +323,15 @@ static int cond_io_state(cJSON* cfg) {
     if (!port_j || !expected) return 0;
 
     int port = (int)port_j->valuedouble;
+    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+
     char req[64];
     snprintf(req, sizeof(req), "io/port.cgi?checkactive=%d", port);
-    char* resp = ACAP_VAPIX_Get(req);
+    char* resp = (rh && rh[0])
+        ? cond_remote_get(rh, ru, rp, req)
+        : ACAP_VAPIX_Get(req);
     if (!resp) return 0;
 
     int result = 0;
@@ -311,7 +375,12 @@ static int cond_aoa_occupancy(cJSON* cfg) {
         "{\"method\":\"getOccupancy\",\"apiVersion\":\"1.0\","
         "\"params\":{\"scenario\":%d}}", scenario_id);
 
-    char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
+    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+    char* raw = (rh && rh[0])
+        ? cond_remote_post(rh, ru, rp, "/local/objectanalytics/control.cgi", body)
+        : ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
     if (!raw) return 0;
 
     cJSON* root = cJSON_Parse(raw);

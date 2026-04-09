@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "mqtt_client.h"
 #include "event_log.h"
+#include "rule_engine.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
@@ -53,6 +54,69 @@ extern void RuleEngine_Dispatch_RuleFired(const char* rule_id);
 static int overlay_identity[MAX_OVERLAY_CHANNELS];
 static int overlay_identity_init = 0;
 static void overlay_remove(int identity);
+static void overlay_remove_remote(int identity, const char* host, const char* user, const char* pass);
+static char* remote_vapix_post(const char* host, const char* user, const char* pass, const char* cgi, const char* body);
+static char* remote_vapix_get(const char* host, const char* user, const char* pass, const char* cgi_and_query);
+static char* remote_vapix_post_path(const char* host, const char* user, const char* pass, const char* path, const char* body);
+static int   stop_active_recordings_from_xml(const char* xml, const char* remote_host, const char* remote_user, const char* remote_pass);
+static gboolean recording_stop_timeout_cb(gpointer user_data);
+
+/* Global recording ID table — maps diskid → recording_id for active recordings.
+ * Populated on every start regardless of while_active so that explicit "stop"
+ * actions in separate rules can find the right recording ID. */
+#define MAX_ACTIVE_RECORDINGS 8
+static struct {
+    char host[128];        /* empty = local device */
+    char diskid[64];
+    char recording_id[64];
+} active_recordings[MAX_ACTIVE_RECORDINGS];
+static int active_recording_count = 0;
+
+static void active_recording_store(const char* host, const char* diskid, const char* recording_id) {
+    const char* h = host ? host : "";
+    for (int i = 0; i < active_recording_count; i++) {
+        if (strcmp(active_recordings[i].host, h) == 0 &&
+            strcmp(active_recordings[i].diskid, diskid) == 0) {
+            snprintf(active_recordings[i].recording_id, 64, "%s", recording_id);
+            return;
+        }
+    }
+    if (active_recording_count < MAX_ACTIVE_RECORDINGS) {
+        snprintf(active_recordings[active_recording_count].host,         128, "%s", h);
+        snprintf(active_recordings[active_recording_count].diskid,        64, "%s", diskid);
+        snprintf(active_recordings[active_recording_count].recording_id,  64, "%s", recording_id);
+        active_recording_count++;
+    }
+}
+
+static const char* active_recording_lookup(const char* host, const char* diskid) {
+    const char* h = host ? host : "";
+    for (int i = 0; i < active_recording_count; i++)
+        if (strcmp(active_recordings[i].host, h) == 0 &&
+            strcmp(active_recordings[i].diskid, diskid) == 0)
+            return active_recordings[i].recording_id;
+    return NULL;
+}
+
+static void active_recording_remove(const char* host, const char* diskid) {
+    const char* h = host ? host : "";
+    for (int i = 0; i < active_recording_count; i++) {
+        if (strcmp(active_recordings[i].host, h) == 0 &&
+            strcmp(active_recordings[i].diskid, diskid) == 0) {
+            active_recordings[i] = active_recordings[--active_recording_count];
+            return;
+        }
+    }
+}
+
+static void active_recording_remove_by_id(const char* recording_id) {
+    for (int i = 0; i < active_recording_count; i++) {
+        if (strcmp(active_recordings[i].recording_id, recording_id) == 0) {
+            active_recordings[i] = active_recordings[--active_recording_count];
+            return;
+        }
+    }
+}
 
 /* Generic "while_active" tracking — one entry per active rule/action pair */
 #define MAX_WHILE_ACTIVE 64
@@ -62,7 +126,11 @@ typedef struct {
     char siren_profile[128];
     int  overlay_channel;
     int  io_port;
-    char io_restore[16];   /* opposite state to restore: "active" or "inactive" */
+    char io_restore[16];   /* opposite state to restore: "open" or "closed" */
+    char recording_id[64]; /* recording ID returned by record/record.cgi */
+    char remote_host[128]; /* empty = local device */
+    char remote_user[64];
+    char remote_pass[128];
 } WhileActiveEntry;
 static WhileActiveEntry while_active_entries[MAX_WHILE_ACTIVE];
 static int while_active_count = 0;
@@ -83,6 +151,7 @@ static void while_active_register(WhileActiveEntry* e) {
 }
 
 static void while_active_undo(WhileActiveEntry* e) {
+    int is_remote = (e->remote_host[0] != '\0');
     if (strcmp(e->atype, "siren_light") == 0) {
         cJSON* req = cJSON_CreateObject();
         cJSON_AddStringToObject(req, "apiVersion", "1.0");
@@ -90,34 +159,52 @@ static void while_active_undo(WhileActiveEntry* e) {
         cJSON* p = cJSON_AddObjectToObject(req, "params");
         cJSON_AddStringToObject(p, "profile", e->siren_profile);
         char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
-        char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
+        char* resp = is_remote
+            ? remote_vapix_post(e->remote_host, e->remote_user, e->remote_pass, "siren_and_light.cgi", body)
+            : ACAP_VAPIX_Post("siren_and_light.cgi", body);
         free(body); if (resp) free(resp);
         LOG("while_active: stopped siren '%s' for rule %s", e->siren_profile, e->rule_id);
     } else if (strcmp(e->atype, "recording") == 0) {
-        cJSON* req = cJSON_CreateObject();
-        cJSON_AddStringToObject(req, "apiVersion", "1.0");
-        cJSON_AddStringToObject(req, "method", "stop");
-        cJSON* p = cJSON_AddObjectToObject(req, "params");
-        cJSON_AddStringToObject(p, "diskId", "SD_DISK");
-        char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
-        char* resp = ACAP_VAPIX_Post("record.cgi", body);
-        free(body); if (resp) free(resp);
-        LOG("while_active: stopped recording for rule %s", e->rule_id);
+        /* Use the stored recording_id for a precise stop of exactly our recording */
+        if (e->recording_id[0]) {
+            char req[128];
+            snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", e->recording_id);
+            char* resp = is_remote
+                ? remote_vapix_get(e->remote_host, e->remote_user, e->remote_pass, req)
+                : ACAP_VAPIX_Get(req);
+            if (resp) free(resp);
+            active_recording_remove_by_id(e->recording_id);
+            LOG("while_active: stopped recording %s for rule %s", e->recording_id, e->rule_id);
+        } else {
+            LOG_WARN("while_active: no recording_id stored for rule %s", e->rule_id);
+        }
     } else if (strcmp(e->atype, "overlay_text") == 0) {
         int ch = e->overlay_channel;
         if (ch >= 1 && ch <= MAX_OVERLAY_CHANNELS && overlay_identity[ch - 1] >= 0) {
-            overlay_remove(overlay_identity[ch - 1]);
+            overlay_remove_remote(overlay_identity[ch - 1],
+                                  is_remote ? e->remote_host : NULL,
+                                  e->remote_user, e->remote_pass);
             overlay_identity[ch - 1] = -1;
             LOG("while_active: cleared overlay ch%d for rule %s", ch, e->rule_id);
         }
     } else if (strcmp(e->atype, "io_output") == 0) {
-        char req[128];
-        snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s", e->io_port, e->io_restore);
-        char* resp = ACAP_VAPIX_Get(req); if (resp) free(resp);
+        char port_str[8], body[256];
+        snprintf(port_str, sizeof(port_str), "%d", e->io_port - 1);
+        snprintf(body, sizeof(body),
+            "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\","
+            "\"params\":{\"ports\":[{\"port\":\"%s\",\"state\":\"%s\"}]}}",
+            port_str, e->io_restore);
+        char* resp = is_remote
+            ? remote_vapix_post(e->remote_host, e->remote_user, e->remote_pass,
+                                "io/portmanagement.cgi", body)
+            : ACAP_VAPIX_Post("io/portmanagement.cgi", body);
+        if (resp) free(resp);
         LOG("while_active: restored I/O port %d to %s for rule %s", e->io_port, e->io_restore, e->rule_id);
     } else if (strcmp(e->atype, "speaker_display") == 0) {
-        char* resp = ACAP_VAPIX_Post_Path(
-            "/config/rest/speaker-display-notification/v1/stop", "{\"data\":{}}");
+        char* resp = is_remote
+            ? remote_vapix_post_path(e->remote_host, e->remote_user, e->remote_pass,
+                                     "/config/rest/speaker-display-notification/v1/stop", "{\"data\":{}}")
+            : ACAP_VAPIX_Post_Path("/config/rest/speaker-display-notification/v1/stop", "{\"data\":{}}");
         if (resp) free(resp);
         LOG("while_active: stopped speaker display for rule %s", e->rule_id);
     }
@@ -125,12 +212,14 @@ static void while_active_undo(WhileActiveEntry* e) {
 
 void Actions_Stop_Active_Siren(const char* rule_id) {
     if (!rule_id) return;
-    for (int i = 0; i < while_active_count; i++) {
-        if (strcmp(while_active_entries[i].rule_id, rule_id) == 0 &&
-            strcmp(while_active_entries[i].atype, "siren_light") == 0) {
+    /* Stop ALL while_active actions for this rule (siren, speaker_display, recording,
+     * overlay, io_output) — called when the backing trigger goes inactive. */
+    for (int i = 0; i < while_active_count; ) {
+        if (strcmp(while_active_entries[i].rule_id, rule_id) == 0) {
             while_active_undo(&while_active_entries[i]);
             while_active_entries[i] = while_active_entries[--while_active_count];
-            return;
+        } else {
+            i++;
         }
     }
 }
@@ -427,6 +516,146 @@ static void curl_apply_base(CURL* curl, long timeout) {
     }
 }
 
+/* ---------- Remote-device VAPIX helpers ----------
+ * Extract remote_host/user/pass from a cJSON action config.
+ * Returns 1 if remote fields are present and non-empty, 0 for local.
+ */
+static int get_remote_target(cJSON* cfg,
+                              const char** out_host,
+                              const char** out_user,
+                              const char** out_pass) {
+    const char* h = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    const char* u = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* p = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+    if (!h || !h[0]) return 0;
+    if (out_host) *out_host = h;
+    if (out_user) *out_user = u ? u : "";
+    if (out_pass) *out_pass = p ? p : "";
+    return 1;
+}
+
+/* Accumulate response into a dynamically growing buffer */
+static size_t remote_write_cb(void* ptr, size_t sz, size_t n, void* ud) {
+    char** buf = (char**)ud;
+    size_t add = sz * n;
+    size_t cur = *buf ? strlen(*buf) : 0;
+    char* nb = realloc(*buf, cur + add + 1);
+    if (!nb) return 0;
+    memcpy(nb + cur, ptr, add);
+    nb[cur + add] = '\0';
+    *buf = nb;
+    return add;
+}
+
+/* POST JSON to a remote Axis device's axis-cgi endpoint (e.g. "record.cgi") */
+static char* remote_vapix_post(const char* host, const char* user, const char* pass,
+                                const char* cgi, const char* body) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s/axis-cgi/%s", host, cgi);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* response = NULL;
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(response); return NULL; }
+    return response;
+}
+
+/* GET from a remote Axis device's axis-cgi endpoint (e.g. "io/port.cgi?action=...") */
+static char* remote_vapix_get(const char* host, const char* user, const char* pass,
+                               const char* cgi_and_query) {
+    char url[1024];
+    snprintf(url, sizeof(url), "http://%s/axis-cgi/%s", host, cgi_and_query);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* response = NULL;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(response); return NULL; }
+    return response;
+}
+
+/* POST to an arbitrary path (not under axis-cgi/) on a remote device */
+static char* remote_vapix_post_path(const char* host, const char* user, const char* pass,
+                                     const char* path, const char* body) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* response = NULL;
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(response); return NULL; }
+    return response;
+}
+
+/* Convenience macros: call remote or local VAPIX based on cfg */
+#define VAPIX_POST(cfg, cgi, body) \
+    ({ const char*_h,*_u,*_p; \
+       get_remote_target((cfg),&_h,&_u,&_p) \
+         ? remote_vapix_post(_h,_u,_p,(cgi),(body)) \
+         : ACAP_VAPIX_Post((cgi),(body)); })
+
+#define VAPIX_GET(cfg, req) \
+    ({ const char*_h,*_u,*_p; \
+       get_remote_target((cfg),&_h,&_u,&_p) \
+         ? remote_vapix_get(_h,_u,_p,(req)) \
+         : ACAP_VAPIX_Get((req)); })
+
+#define VAPIX_POST_PATH(cfg, path, body) \
+    ({ const char*_h,*_u,*_p; \
+       get_remote_target((cfg),&_h,&_u,&_p) \
+         ? remote_vapix_post_path(_h,_u,_p,(path),(body)) \
+         : ACAP_VAPIX_Post_Path((path),(body)); })
+
+/* Fill remote_host/user/pass into a WhileActiveEntry from a cfg JSON object */
+#define WA_SET_REMOTE(e, cfg) do { \
+    const char* _h = cJSON_GetStringValue(cJSON_GetObjectItem((cfg), "remote_host")); \
+    const char* _u = cJSON_GetStringValue(cJSON_GetObjectItem((cfg), "remote_user")); \
+    const char* _p = cJSON_GetStringValue(cJSON_GetObjectItem((cfg), "remote_pass")); \
+    snprintf((e).remote_host, sizeof((e).remote_host), "%s", _h ? _h : ""); \
+    snprintf((e).remote_user, sizeof((e).remote_user), "%s", _u ? _u : ""); \
+    snprintf((e).remote_pass, sizeof((e).remote_pass), "%s", _p ? _p : ""); \
+} while(0)
+
 static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
     if (!url_tmpl || !url_tmpl[0]) { LOG_ACTION_ERR("http_request: no url"); return; }
@@ -542,37 +771,176 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     }
 }
 
-/* recording */
+/* recording
+ * Uses the VAPIX Recording API (old-style CGI, not JSON):
+ *   Start: GET /axis-cgi/record/record.cgi?diskid=<id>[&options=streamprofile%3D<profile>]
+ *     → returns XML with recordingid attribute
+ *   Stop:  GET /axis-cgi/record/stop.cgi?recordingid=<id>
+ */
+
+/* Extract a quoted XML attribute value of the form  attr="value"  from xml. */
+static int extract_xml_attr(const char* xml, const char* attr, char* out, size_t out_size) {
+    if (!xml || !attr || !out) return 0;
+    char needle[64];
+    snprintf(needle, sizeof(needle), "%s=\"", attr);
+    const char* p = strstr(xml, needle);
+    if (!p) return 0;
+    p += strlen(needle);
+    const char* end = strchr(p, '"');
+    if (!end) return 0;
+    size_t len = (size_t)(end - p);
+    if (len >= out_size) len = out_size - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return 1;
+}
+
+/* Stop all recordings that are currently in recordingstatus="recording" in the given list.cgi XML.
+ * Returns the number of recordings stopped. */
+static int stop_active_recordings_from_xml(const char* xml,
+                                            const char* remote_host,
+                                            const char* remote_user,
+                                            const char* remote_pass) {
+    int stopped = 0;
+    const char* p = xml;
+    const char* status_needle = "recordingstatus=\"recording\"";
+    while ((p = strstr(p, status_needle)) != NULL) {
+        /* Backtrack to the '<' that starts this element */
+        const char* elem = p;
+        while (elem > xml && *elem != '<') elem--;
+        /* Extract the recordingid attribute from within this element */
+        char rid[64] = {0};
+        extract_xml_attr(elem, "recordingid", rid, sizeof(rid));
+        if (rid[0]) {
+            char req[128];
+            snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", rid);
+            char* sr = (remote_host && remote_host[0])
+                ? remote_vapix_get(remote_host, remote_user, remote_pass, req)
+                : ACAP_VAPIX_Get(req);
+            if (sr) { free(sr); stopped++; }
+            LOG("recording: stopped active recording %s", rid);
+            active_recording_remove_by_id(rid);
+        }
+        p++;
+    }
+    return stopped;
+}
+
+typedef struct { char rid[64]; char host[128]; char user[64]; char pass[128]; } RecStopCtx;
+
+static gboolean recording_stop_timeout_cb(gpointer user_data) {
+    RecStopCtx* ctx = (RecStopCtx*)user_data;
+    char req[128];
+    snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", ctx->rid);
+    char* r = ctx->host[0]
+        ? remote_vapix_get(ctx->host, ctx->user, ctx->pass, req)
+        : ACAP_VAPIX_Get(req);
+    if (r) { free(r); LOG("recording: max-duration stop of %s", ctx->rid); }
+    active_recording_remove_by_id(ctx->rid);
+    free(ctx);
+    return G_SOURCE_REMOVE;
+}
+
 static void action_recording(const char* rule_id, cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     if (!op) op = "start";
     int starting = strcmp(op, "stop") != 0;
 
-    cJSON* req = cJSON_CreateObject();
-    cJSON_AddStringToObject(req, "apiVersion", "1.0");
-    cJSON_AddStringToObject(req, "method", starting ? "start" : "stop");
-    cJSON* params = cJSON_AddObjectToObject(req, "params");
-    cJSON_AddStringToObject(params, "diskId", "SD_DISK");
+    const char* diskid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "diskid"));
+    if (!diskid || !diskid[0]) diskid = "SD_DISK";
+
     if (starting) {
+        /* Build GET request: record/record.cgi?diskid=<id>[&options=streamprofile%3D<profile>] */
+        char req[512];
         const char* profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
-        cJSON_AddStringToObject(params, "streamProfile", profile ? profile : "Quality");
-        cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
-        if (dur) cJSON_AddNumberToObject(params, "maxRecordingTime", dur->valuedouble);
-    }
+        if (profile && profile[0])
+            snprintf(req, sizeof(req),
+                     "record/record.cgi?diskid=%s&options=streamprofile%%3D%s",
+                     diskid, profile);
+        else
+            snprintf(req, sizeof(req), "record/record.cgi?diskid=%s", diskid);
 
-    char* body = cJSON_PrintUnformatted(req);
-    cJSON_Delete(req);
-    char* resp = ACAP_VAPIX_Post("record.cgi", body);
-    free(body);
-    if (resp) free(resp);
+        char* resp = VAPIX_GET(cfg, req);
+        if (!resp) { LOG_WARN("recording: failed to start on disk %s", diskid); return; }
 
-    if (starting && rule_id) {
-        cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
-        if (wa && cJSON_IsTrue(wa)) {
-            WhileActiveEntry e = {0};
-            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
-            snprintf(e.atype,   sizeof(e.atype),   "recording");
-            while_active_register(&e);
+        /* Parse recording ID from XML: <record recordingid="..." result="OK" /> */
+        char recording_id[64] = {0};
+        extract_xml_attr(resp, "recordingid", recording_id, sizeof(recording_id));
+        free(resp);
+
+        LOG("recording: started on %s%s%s", diskid,
+            recording_id[0] ? ", id=" : "", recording_id);
+
+        /* Always store so an explicit "stop" rule in a separate trigger can find it */
+        if (recording_id[0]) {
+            const char* _rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+            active_recording_store(_rh ? _rh : "", diskid, recording_id);
+        }
+
+        if (rule_id) {
+            cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+            if (wa && cJSON_IsTrue(wa)) {
+                WhileActiveEntry e = {0};
+                snprintf(e.rule_id,      sizeof(e.rule_id),      "%s", rule_id);
+                snprintf(e.atype,        sizeof(e.atype),        "recording");
+                snprintf(e.recording_id, sizeof(e.recording_id), "%s", recording_id);
+                WA_SET_REMOTE(e, cfg);
+                while_active_register(&e);
+            }
+        }
+
+        /* Max duration: auto-stop after N seconds if specified */
+        cJSON* dur_j = cJSON_GetObjectItem(cfg, "duration");
+        int dur_s = dur_j ? (int)dur_j->valuedouble : 0;
+        if (dur_s > 0 && recording_id[0]) {
+            RecStopCtx* ctx = calloc(1, sizeof(RecStopCtx));
+            if (ctx) {
+                snprintf(ctx->rid,  sizeof(ctx->rid),  "%s", recording_id);
+                const char* _rh2 = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+                const char* _ru2 = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+                const char* _rp2 = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+                if (_rh2) snprintf(ctx->host, sizeof(ctx->host), "%s", _rh2);
+                if (_ru2) snprintf(ctx->user, sizeof(ctx->user), "%s", _ru2);
+                if (_rp2) snprintf(ctx->pass, sizeof(ctx->pass), "%s", _rp2);
+                g_timeout_add_seconds((guint)dur_s, recording_stop_timeout_cb, ctx);
+            }
+        }
+    } else {
+        /* Stop: query list.cgi for all currently active recordings on this disk and stop them.
+         * This works regardless of whether the recording was started by Event Engine,
+         * the camera itself, or any other source. */
+        const char* _rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+        const char* _ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+        const char* _rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+        const char* host = (_rh && _rh[0]) ? _rh : NULL;
+
+        char list_req[256];
+        snprintf(list_req, sizeof(list_req),
+                 "record/list.cgi?recordingid=all&startstoptime=yes");
+        char* list_resp = host
+            ? remote_vapix_get(host, _ru ? _ru : "", _rp ? _rp : "", list_req)
+            : ACAP_VAPIX_Get(list_req);
+
+        if (list_resp) {
+            int n = stop_active_recordings_from_xml(list_resp, host,
+                                                    _ru ? _ru : "", _rp ? _rp : "");
+            free(list_resp);
+            if (n == 0)
+                LOG_WARN("recording: no active recordings found on disk %s host %s",
+                         diskid, host ? host : "local");
+            /* Clean up our tracking table entry for this disk */
+            active_recording_remove(host ? host : "", diskid);
+            /* Clean up any while_active entry for this rule */
+            for (int i = 0; i < while_active_count; i++) {
+                if (strcmp(while_active_entries[i].atype, "recording") == 0 &&
+                    strcmp(while_active_entries[i].rule_id, rule_id ? rule_id : "") == 0) {
+                    while_active_entries[i] = while_active_entries[--while_active_count];
+                    break;
+                }
+            }
+        } else {
+            LOG_WARN("recording: could not query recording list on disk %s host %s",
+                     diskid, host ? host : "local");
         }
     }
 }
@@ -590,13 +958,33 @@ static void overlay_remove(int identity) {
     if (resp) free(resp);
 }
 
+/* Remote-aware overlay remove used by while_active_undo */
+static void overlay_remove_remote(int identity, const char* host, const char* user, const char* pass) {
+    char body[64];
+    snprintf(body, sizeof(body), "{\"apiVersion\":\"1.0\",\"method\":\"remove\",\"params\":{\"identity\":%d}}", identity);
+    char* resp = (host && host[0])
+        ? remote_vapix_post(host, user, pass, "dynamicoverlay/dynamicoverlay.cgi", body)
+        : ACAP_VAPIX_Post("dynamicoverlay/dynamicoverlay.cgi", body);
+    if (resp) free(resp);
+}
+
+typedef struct {
+    int  identity;
+    char remote_host[128];
+    char remote_user[64];
+    char remote_pass[128];
+} OverlayRemoveCtx;
+
 static gboolean overlay_remove_cb(gpointer user_data) {
-    int identity = GPOINTER_TO_INT(user_data);
-    overlay_remove(identity);
+    OverlayRemoveCtx* ctx = (OverlayRemoveCtx*)user_data;
+    overlay_remove_remote(ctx->identity,
+                          ctx->remote_host[0] ? ctx->remote_host : NULL,
+                          ctx->remote_user, ctx->remote_pass);
     /* Also clear from our tracking array if it matches */
     for (int i = 0; i < MAX_OVERLAY_CHANNELS; i++) {
-        if (overlay_identity[i] == identity) overlay_identity[i] = -1;
+        if (overlay_identity[i] == ctx->identity) overlay_identity[i] = -1;
     }
+    free(ctx);
     return G_SOURCE_REMOVE;
 }
 
@@ -645,7 +1033,7 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
 
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
-    char* resp_str = ACAP_VAPIX_Post("dynamicoverlay/dynamicoverlay.cgi", body);
+    char* resp_str = VAPIX_POST(cfg, "dynamicoverlay/dynamicoverlay.cgi", body);
     free(body);
 
     if (resp_str) {
@@ -671,9 +1059,17 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
 
     /* If duration > 0, schedule removal after that many seconds */
     if (duration > 0 && overlay_identity[channel - 1] >= 0) {
-        g_timeout_add_seconds((guint)duration,
-                              overlay_remove_cb,
-                              GINT_TO_POINTER(overlay_identity[channel - 1]));
+        OverlayRemoveCtx* ctx = calloc(1, sizeof(*ctx));
+        if (ctx) {
+            ctx->identity = overlay_identity[channel - 1];
+            const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+            const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+            const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+            snprintf(ctx->remote_host, sizeof(ctx->remote_host), "%s", rh ? rh : "");
+            snprintf(ctx->remote_user, sizeof(ctx->remote_user), "%s", ru ? ru : "");
+            snprintf(ctx->remote_pass, sizeof(ctx->remote_pass), "%s", rp ? rp : "");
+            g_timeout_add_seconds((guint)duration, overlay_remove_cb, ctx);
+        }
     } else if (duration == 0 && rule_id) {
         cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
         if (wa && cJSON_IsTrue(wa)) {
@@ -681,6 +1077,7 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
             snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
             snprintf(e.atype,   sizeof(e.atype),   "overlay_text");
             e.overlay_channel = channel;
+            WA_SET_REMOTE(e, cfg);
             while_active_register(&e);
         }
     }
@@ -702,46 +1099,76 @@ static void action_ptz_preset(cJSON* cfg) {
         char req[128];
         snprintf(req, sizeof(req), "com/ptz.cgi?camera=%d&gotoserverpresetno=%d",
                  channel, (int)pid->valuedouble);
-        char* resp = ACAP_VAPIX_Get(req);
+        char* resp = VAPIX_GET(cfg, req);
         if (resp) free(resp);
     } else {
         char req[256];
         snprintf(req, sizeof(req), "com/ptz.cgi?camera=%d&gotoserverpresetname=%s",
                  channel, preset);
-        char* resp = ACAP_VAPIX_Get(req);
+        char* resp = VAPIX_GET(cfg, req);
         if (resp) free(resp);
     }
 }
 
-/* io_output */
+/* io_output — drive an I/O output port using io/portmanagement.cgi.
+ *
+ * Port numbering: UI uses 1-based integers; portmanagement expects 0-based
+ * string IDs ("0" = physical port 1, "1" = physical port 2, …).
+ *
+ * State mapping:  UI "active"   → portmanagement "closed"  (circuit closed)
+ *                 UI "inactive" → portmanagement "open"    (circuit open)
+ *
+ * For timed pulses (duration > 0) we use setStateSequence which auto-restores.
+ * For permanent state we use setPorts and optionally track for while_active undo.
+ * The while_active io_restore field stores "open" or "closed" for direct undo use.
+ */
 static void action_io_output(const char* rule_id, cJSON* cfg) {
     cJSON* port_j = cJSON_GetObjectItem(cfg, "port");
     if (!port_j) return;
     int port = (int)port_j->valuedouble;
-    const char* state = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
-    if (!state) state = "active";
+    const char* state_ui = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
+    if (!state_ui) state_ui = "active";
+
+    /* Convert UI state to portmanagement state */
+    const char* io_state   = (strcmp(state_ui, "active") == 0) ? "closed" : "open";
+    const char* io_restore = (strcmp(io_state, "closed")  == 0) ? "open"   : "closed";
+
+    /* Convert 1-based port number to 0-based string ID */
+    char port_str[8];
+    snprintf(port_str, sizeof(port_str), "%d", port - 1);
 
     cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
-    char req[128];
+    char body[512];
     if (dur && dur->valuedouble > 0) {
-        snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s/%d",
-                 port, state, (int)dur->valuedouble);
+        /* Timed pulse: drive to io_state for <duration> seconds then restore */
+        int ms = (int)(dur->valuedouble * 1000);
+        snprintf(body, sizeof(body),
+            "{\"apiVersion\":\"1.0\",\"method\":\"setStateSequence\","
+            "\"params\":{\"port\":\"%s\",\"sequence\":["
+            "{\"state\":\"%s\",\"time\":%d},"
+            "{\"state\":\"%s\",\"time\":0}]}}",
+            port_str, io_state, ms, io_restore);
     } else {
-        snprintf(req, sizeof(req), "io/port.cgi?action=%d:/%s", port, state);
+        /* Permanent state change */
+        snprintf(body, sizeof(body),
+            "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\","
+            "\"params\":{\"ports\":[{\"port\":\"%s\",\"state\":\"%s\"}]}}",
+            port_str, io_state);
     }
-    char* resp = ACAP_VAPIX_Get(req);
+
+    char* resp = VAPIX_POST(cfg, "io/portmanagement.cgi", body);
     if (resp) free(resp);
 
-    /* Register while_active only when no duration (duration handles its own reset) */
+    /* Register while_active only when no duration (timed pulse auto-restores) */
     if ((!dur || dur->valuedouble == 0) && rule_id) {
         cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
         if (wa && cJSON_IsTrue(wa)) {
             WhileActiveEntry e = {0};
-            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
-            snprintf(e.atype,   sizeof(e.atype),   "io_output");
+            snprintf(e.rule_id,    sizeof(e.rule_id),    "%s", rule_id);
+            snprintf(e.atype,      sizeof(e.atype),      "io_output");
             e.io_port = port;
-            snprintf(e.io_restore, sizeof(e.io_restore), "%s",
-                     strcmp(state, "active") == 0 ? "inactive" : "active");
+            snprintf(e.io_restore, sizeof(e.io_restore), "%s", io_restore);
+            WA_SET_REMOTE(e, cfg);
             while_active_register(&e);
         }
     }
@@ -753,7 +1180,7 @@ static void action_audio_clip(cJSON* cfg) {
     if (!clip) return;
     char req[256];
     snprintf(req, sizeof(req), "mediaclip.cgi?action=play&clip=%s", clip);
-    char* resp = ACAP_VAPIX_Get(req);
+    char* resp = VAPIX_GET(cfg, req);
     if (resp) free(resp);
 }
 
@@ -1393,7 +1820,7 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
     cJSON_AddStringToObject(params, "profile", profile);
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
-    char* resp = ACAP_VAPIX_Post("siren_and_light.cgi", body);
+    char* resp = VAPIX_POST(cfg, "siren_and_light.cgi", body);
     free(body);
     if (resp) free(resp);
 
@@ -1404,6 +1831,7 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
             snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
             snprintf(e.atype,   sizeof(e.atype),   "siren_light");
             snprintf(e.siren_profile, sizeof(e.siren_profile), "%s", profile);
+            WA_SET_REMOTE(e, cfg);
             while_active_register(&e);
         }
     }
@@ -1412,7 +1840,7 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
 /* run_rule — forward to rule engine */
 static void action_run_rule(cJSON* cfg) {
     const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
-    if (rid) RuleEngine_Dispatch_RuleFired(rid);
+    if (rid) RuleEngine_Fire(rid, NULL);  /* directly execute the target rule's actions */
 }
 
 /* vapix_query — fetch cached VAPIX event data and inject into trigger_data
@@ -1455,7 +1883,7 @@ static void action_guard_tour(cJSON* cfg) {
             char running_req[128];
             snprintf(running_req, sizeof(running_req),
                      "param.cgi?action=update&root.GuardTour.G%d.Running=no", n);
-            char* resp = ACAP_VAPIX_Get(running_req);
+            char* resp = VAPIX_GET(cfg, running_req);
             if (!resp) break;  /* no more slots */
             free(resp);
         }
@@ -1467,7 +1895,7 @@ static void action_guard_tour(cJSON* cfg) {
         char name_req[128];
         snprintf(name_req, sizeof(name_req),
                  "param.cgi?action=list&group=root.GuardTour.G%d.Name", n);
-        char* resp = ACAP_VAPIX_Get(name_req);
+        char* resp = VAPIX_GET(cfg, name_req);
         if (!resp) break;  /* no more slots */
 
         /* Response is "root.GuardTour.G<n>.Name=<value>\n" */
@@ -1486,7 +1914,7 @@ static void action_guard_tour(cJSON* cfg) {
                 snprintf(run_req, sizeof(run_req),
                          "param.cgi?action=update&root.GuardTour.G%d.Running=%s",
                          n, starting ? "yes" : "no");
-                char* r2 = ACAP_VAPIX_Get(run_req);
+                char* r2 = VAPIX_GET(cfg, run_req);
                 if (r2) free(r2);
                 LOG("guard_tour: %s tour '%s' (G%d)", starting ? "started" : "stopped", tour_name, n);
                 return;
@@ -1512,7 +1940,7 @@ static void action_set_device_param(cJSON* cfg) {
 
     char req[512];
     snprintf(req, sizeof(req), "param.cgi?action=update&%s=%s", full_param, value);
-    char* resp = ACAP_VAPIX_Get(req);
+    char* resp = VAPIX_GET(cfg, req);
     if (resp) free(resp);
 }
 
@@ -1605,7 +2033,7 @@ static void action_ir_cut_filter(cJSON* cfg) {
     char req[128];
     snprintf(req, sizeof(req),
              "param.cgi?action=update&root.ImageSource.I%d.DayNight.IrCutFilter=%s", idx, val);
-    char* resp = ACAP_VAPIX_Get(req);
+    char* resp = VAPIX_GET(cfg, req);
     if (resp) free(resp);
 }
 
@@ -1624,7 +2052,7 @@ static void action_privacy_mask(cJSON* cfg) {
         char name_req[128];
         snprintf(name_req, sizeof(name_req),
                  "param.cgi?action=list&group=root.Image.I%d.Overlay.MaskWindows.M%d.Name", idx, n);
-        char* resp = ACAP_VAPIX_Get(name_req);
+        char* resp = VAPIX_GET(cfg, name_req);
         if (!resp) break;
 
         char* eq = strchr(resp, '=');
@@ -1641,7 +2069,7 @@ static void action_privacy_mask(cJSON* cfg) {
                 snprintf(set_req, sizeof(set_req),
                          "param.cgi?action=update&root.Image.I%d.Overlay.MaskWindows.M%d.Enabled=%s",
                          idx, n, enabled ? "yes" : "no");
-                char* r2 = ACAP_VAPIX_Get(set_req);
+                char* r2 = VAPIX_GET(cfg, set_req);
                 if (r2) free(r2);
                 LOG("privacy_mask: %s mask '%s' (I%d M%d)", enabled ? "enabled" : "disabled", mask_name, idx, n);
                 return;
@@ -1673,7 +2101,7 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
     if (!op) op = "show";
 
     if (strcmp(op, "stop") == 0) {
-        char* resp = ACAP_VAPIX_Post_Path(
+        char* resp = VAPIX_POST_PATH(cfg,
             "/config/rest/speaker-display-notification/v1/stop",
             "{\"data\":{}}");
         if (resp) free(resp);
@@ -1726,7 +2154,7 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);
 
-    char* resp = ACAP_VAPIX_Post_Path(
+    char* resp = VAPIX_POST_PATH(cfg,
         "/config/rest/speaker-display-notification/v1/simple", body);
     free(body);
     if (resp) free(resp);
@@ -1737,6 +2165,7 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
             WhileActiveEntry e = {0};
             snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
             snprintf(e.atype,   sizeof(e.atype),   "speaker_display");
+            WA_SET_REMOTE(e, cfg);
             while_active_register(&e);
         }
     }
@@ -1760,7 +2189,7 @@ static void action_wiper(cJSON* cfg) {
         cJSON_AddNumberToObject(p, "duration", dur_j->valuedouble);
 
     char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
-    char* resp = ACAP_VAPIX_Post("clearviewcontrol.cgi", body);
+    char* resp = VAPIX_POST(cfg, "clearviewcontrol.cgi", body);
     free(body); if (resp) free(resp);
 }
 
@@ -1788,7 +2217,7 @@ static void action_light_control(cJSON* cfg) {
             cJSON_AddStringToObject(req, "method", "setManualIntensity");
             cJSON_AddNumberToObject(p, "intensity", intensity_j->valuedouble);
             char* body = cJSON_PrintUnformatted(req);
-            char* resp = ACAP_VAPIX_Post("lightcontrol.cgi", body);
+            char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
             free(body); if (resp) free(resp);
             /* Now activate */
             cJSON_SetValuestring(cJSON_GetObjectItem(req, "method"), "activateLight");
@@ -1799,7 +2228,7 @@ static void action_light_control(cJSON* cfg) {
     }
 
     char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
-    char* resp = ACAP_VAPIX_Post("lightcontrol.cgi", body);
+    char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
     free(body); if (resp) free(resp);
 }
 
@@ -1871,7 +2300,7 @@ static void action_acap_control(cJSON* cfg) {
     if (!op) op = "start";
     char req[256];
     snprintf(req, sizeof(req), "applications/control.cgi?package=%s&action=%s", package, op);
-    char* resp = ACAP_VAPIX_Get(req);
+    char* resp = VAPIX_GET(cfg, req);
     if (resp) free(resp);
 }
 
@@ -2084,17 +2513,6 @@ void Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_d
 
 int Actions_Test(const char* type, cJSON* config) {
     if (!type || !config) return -1;
-    /* Only allow safe/notification action types for testing */
-    const char* testable[] = {
-        "http_request", "mqtt_publish", "slack_webhook", "teams_webhook",
-        "telegram", "email", "send_syslog", "influxdb_write",
-        "fire_vapix_event", "speaker_display", NULL
-    };
-    int allowed = 0;
-    for (int i = 0; testable[i]; i++) {
-        if (strcmp(type, testable[i]) == 0) { allowed = 1; break; }
-    }
-    if (!allowed) return -2; /* not testable */
 
     /* Build a single-item actions array with type injected */
     cJSON* action = cJSON_Duplicate(config, 1);

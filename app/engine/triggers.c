@@ -295,11 +295,13 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             }
 
             /* Subscribe to VAPIX events */
-            cJSON* decl = build_subscription_decl(rule_id, idx, trig);
-            int sub_id = ACAP_EVENTS_Subscribe(decl, NULL);
-            cJSON_Delete(decl);
-            s->acap_subscription_id = sub_id;
-            if (!sub_id) LOG_WARN("VAPIX subscribe failed for rule %s trigger %d", rule_id, idx);
+            if (strcmp(type, "vapix_event") == 0 || strcmp(type, "io_input") == 0) {
+                cJSON* decl = build_subscription_decl(rule_id, idx, trig);
+                int sub_id = ACAP_EVENTS_Subscribe(decl, NULL);
+                cJSON_Delete(decl);
+                s->acap_subscription_id = sub_id;
+                if (!sub_id) LOG_WARN("VAPIX subscribe failed for rule %s trigger %d", rule_id, idx);
+            }
 
         } else if (strcmp(type, "http_webhook") == 0) {
             s->type = TRIG_HTTP_WEBHOOK;
@@ -542,7 +544,17 @@ int Triggers_On_Webhook(const char* token, cJSON* payload) {
 
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type", "http_webhook");
-        if (payload) cJSON_AddItemToObject(tdata, "payload", cJSON_Duplicate(payload, 1));
+        if (payload) {
+            cJSON_AddItemToObject(tdata, "payload", cJSON_Duplicate(payload, 1));
+            /* Flatten top-level payload keys so {{trigger.mykey}} works directly */
+            if (cJSON_IsObject(payload)) {
+                cJSON* pf;
+                cJSON_ArrayForEach(pf, payload) {
+                    if (pf->string && !cJSON_GetObjectItem(tdata, pf->string))
+                        cJSON_AddItemToObject(tdata, pf->string, cJSON_Duplicate(pf, 1));
+                }
+            }
+        }
         fire_fn(s->rule_id, s->trigger_index, tdata);
         cJSON_Delete(tdata);
         fired++;

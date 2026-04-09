@@ -267,6 +267,41 @@ Control and observe the engine itself. These templates provide the building bloc
 
 ---
 
+## Use Case 6: Cross-Device Automation
+
+Event Engine can check conditions on — and act on — **remote Axis devices** over the network. This lets a single Event Engine instance orchestrate a multi-camera or multi-device workflow: detect on camera A, validate state on camera B, act on device C.
+
+### 6.1 I/O Input → Remote I/O State Condition → Speaker Display
+
+**Scenario:** A door opens (an I/O input rising edge on the Event Engine camera), but you only want to raise an alarm if a second camera's door sensor is also active — preventing false alarms from the first sensor glitching. When both are active, show an alert on a remote speaker display.
+
+**How it works:**
+- An **I/O Input** trigger fires on port 1 rising edge
+- An **I/O State** condition checks port 1 on a *remote* camera (e.g. `192.168.1.101`) — rule proceeds only if that sensor is also active
+- A **Speaker Display** action shows a scrolling alert on a *remote* speaker display (e.g. `192.168.1.102`) for 15 seconds
+
+**Setup:** Set the remote IP, username, and password in both the condition and action blocks. Adjust port numbers to match your camera wiring.
+
+**Template:** [`templates/6.1-cross-device-io-condition-speaker-display.json`](templates/6.1-cross-device-io-condition-speaker-display.json)
+
+---
+
+### 6.2 AOA Detection → Remote AOA Occupancy Condition → Alert
+
+**Scenario:** Camera A detects a person via AOA, but only raises an alert if camera B also currently counts at least one person (confirming the event is real, not a far-field false positive). The response includes a speaker display on a remote device and an MQTT alert.
+
+**How it works:**
+- An **AOA Scenario** trigger fires when scenario 1 detects an object
+- An **AOA Occupancy** condition checks a *remote* camera (e.g. `192.168.1.101`) — passes only if occupancy > 0
+- A **Speaker Display** action shows a 10-second warning on a remote speaker display
+- An **MQTT Publish** action sends `{"camera":"…","event":"aoa_scenario","time":"…"}` to an alert topic
+
+**Setup:** Set remote IPs, credentials, and scenario IDs to match your cameras. Adjust MQTT topic and broker settings under Settings → MQTT.
+
+**Template:** [`templates/6.2-cross-device-aoa-condition-alert.json`](templates/6.2-cross-device-aoa-condition-alert.json)
+
+---
+
 ## Template Summary
 
 | # | Template File | Use Case | Description |
@@ -295,6 +330,8 @@ Control and observe the engine itself. These templates provide the building bloc
 | 5.1b | `5.1b-disarm-system-via-mqtt.json` | System Management | MQTT "disarm" → set system.armed = false + syslog |
 | 5.2 | `5.2-motion-audio-clip.json` | System Management | Motion → play audio clip (deterrent or on-site alert) |
 | 5.3 | `5.3-schedule-wiper.json` | System Management | Daily 07:00 → run camera wiper |
+| 6.1 | `6.1-cross-device-io-condition-speaker-display.json` | Cross-Device | I/O input → remote I/O state condition → remote speaker display |
+| 6.2 | `6.2-cross-device-aoa-condition-alert.json` | Cross-Device | AOA detection → remote AOA occupancy condition → speaker display + MQTT |
 
 ---
 

@@ -1,0 +1,49 @@
+{
+  "name": "Cross-Device — AOA Detection → Remote AOA Occupancy Condition → Alert",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "condition_logic": "AND",
+  "triggers": [
+    {
+      "type": "aoa_scenario",
+      "scenario_id": 1
+    }
+  ],
+  "conditions": [
+    {
+      "type": "aoa_occupancy",
+      "scenario_id": 1,
+      "object_class": "human",
+      "op": "gt",
+      "value": 0,
+      "remote_host": "192.168.1.101",
+      "remote_user": "root",
+      "remote_pass": "pass"
+    }
+  ],
+  "actions": [
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "Motion detected — {{camera.name}} at {{time}}",
+      "textSize": "medium",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#D9A24B",
+      "duration_type": "time",
+      "duration_value": 10000,
+      "remote_host": "192.168.1.102",
+      "remote_user": "root",
+      "remote_pass": "pass"
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "cameras/{{camera.serial}}/cross-device-alert",
+      "payload": "{\"camera\":\"{{camera.serial}}\",\"event\":\"aoa_scenario\",\"time\":\"{{timestamp}}\"}",
+      "qos": 0,
+      "retain": false
+    }
+  ],
+  "cooldown": 60,
+  "max_executions": 0,
+  "max_exec_period": ""
+}

@@ -280,7 +280,6 @@
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-group-label">Getting Started</div>
       <a href="#overview">Overview</a>
-      <a href="#install">Installation</a>
       <a href="#accessing-ui">Accessing the UI</a>
 
       <div class="sidebar-group-label">Rules</div>
@@ -310,6 +309,7 @@
       <a href="#cond-aoa" class="sub">AOA Occupancy</a>
       <a href="#cond-daynight" class="sub">Day / Night</a>
       <a href="#cond-vapix-state" class="sub">Device Event State</a>
+      <a href="#remote-device-conditions" class="sub">Remote Device Conditions</a>
 
       <div class="sidebar-group-label">Actions</div>
       <a href="#actions">All Actions</a>
@@ -347,6 +347,8 @@
       <a href="#act-aoa-counts" class="sub">AOA Get Counts</a>
 
       <div class="sidebar-group-label">Advanced</div>
+      <a href="#remote-device">Remote Device Actions</a>
+      <a href="#remote-device-conditions">Remote Device Conditions</a>
       <a href="#variables">Dynamic Variables</a>
       <a href="#while-active">While-Active Actions</a>
       <a href="#templates">Rule Templates</a>
@@ -377,24 +379,6 @@
         <li><strong>Actions</strong> — what happens when the rule fires (run in sequence)</li>
       </ul>
       <p>Rules take effect immediately when saved — no restart required.</p>
-
-      <!-- ═══════════════════════════════════════════ INSTALL -->
-      <h2 id="install">Installation</h2>
-      <ol>
-        <li>Download the latest <code>.eap</code> file from <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases" target="_blank">Releases</a>. Choose the file that matches your camera architecture:
-          <ul>
-            <li><strong>aarch64</strong> — newer Axis cameras (ARTPEC-8, most cameras from 2020+)</li>
-            <li><strong>armv7hf</strong> — older Axis cameras (ARTPEC-6/7)</li>
-          </ul>
-        </li>
-        <li>In your camera's web interface, go to <strong>Apps</strong>.</li>
-        <li>Click <strong>Add app</strong> and upload the <code>.eap</code> file.</li>
-        <li>Once installed, start the app.</li>
-      </ol>
-      <div class="callout tip">
-        <span class="callout-icon">💡</span>
-        <div>If you are unsure which architecture your camera uses, check <strong>System → About</strong> in the camera web interface.</div>
-      </div>
 
       <!-- ═══════════════════════════════════════════ ACCESS UI -->
       <h2 id="accessing-ui">Accessing the UI</h2>
@@ -532,7 +516,7 @@ Content-Type: application/json
         <tr><td><strong>Scenario</strong></td><td>Select from the list of configured AOA scenarios.</td></tr>
         <tr><td><strong>Object class filter</strong></td><td>Optionally limit to a specific class: Human, Car, Truck, Bus, Bike, Other Vehicle, or Any.</td></tr>
       </table>
-      <p>Variables injected: <span class="var">{{trigger.scenario_id}}</span>, <span class="var">{{trigger.object_class}}</span>.</p>
+      <p>Variables injected: <span class="var">{{trigger.scenario_id}}</span>, <span class="var">{{trigger.active}}</span>, <span class="var">{{trigger.reason}}</span> (detected object class, e.g. <code>Human</code>).</p>
 
       <!-- ═══════════════════════════════════════════ CONDITIONS -->
       <h2 id="conditions">Conditions</h2>
@@ -552,7 +536,8 @@ Content-Type: application/json
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>Port</strong></td><td>The I/O port number to check.</td></tr>
-        <tr><td><strong>Expected state</strong></td><td><em>High</em> or <em>Low</em>.</td></tr>
+        <tr><td><strong>Expected state</strong></td><td><em>Active (high)</em> or <em>Inactive (low)</em>.</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
       </table>
 
       <h3 id="cond-counter">Counter Compare</h3>
@@ -589,10 +574,11 @@ Content-Type: application/json
       <p>Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a configured threshold.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><strong>Scenario</strong></td><td>The AOA scenario to poll.</td></tr>
+        <tr><td><strong>Scenario</strong></td><td>The AOA scenario to poll. When a remote device is configured, click <strong>Load</strong> to fetch available scenarios from that device.</td></tr>
         <tr><td><strong>Object class</strong></td><td>Which class to count: Human, Car, Truck, Bus, Bike, Other Vehicle, or All (total).</td></tr>
         <tr><td><strong>Operator</strong></td><td><code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, or <code>=</code></td></tr>
         <tr><td><strong>Count</strong></td><td>Numeric occupancy threshold.</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
       </table>
 
       <h3 id="cond-daynight">Day / Night</h3>
@@ -608,10 +594,33 @@ Content-Type: application/json
       <p>Check the current state of any device event by polling the device’s event instances.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><strong>Topic substring</strong></td><td>Filter event instances whose topic contains this string.</td></tr>
+        <tr><td><strong>Topic / Event</strong></td><td>Select from the live event catalog or type a topic substring. When a remote device is configured, click <strong>Load</strong> to fetch the full event catalog from that device — no manual entry needed.</td></tr>
         <tr><td><strong>Data key</strong></td><td>The event data key to inspect (e.g. <code>active</code>).</td></tr>
-        <tr><td><strong>Expected value</strong></td><td>The value the data key must equal (e.g. <code>true</code>).</td></tr>
+        <tr><td><strong>Expected value</strong></td><td>The value the data key must equal (e.g. <code>true</code> or <code>1</code>).</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
       </table>
+
+      <!-- ═══════════════════════════ REMOTE DEVICE CONDITIONS -->
+      <hr class="section-rule">
+      <h2 id="remote-device-conditions">Remote Device Conditions</h2>
+      <p>Three condition types — <strong>I/O State</strong>, <strong>AOA Occupancy</strong>, and <strong>Device Event State</strong> — can evaluate a <strong>remote Axis device</strong> instead of the camera running Event Engine. This enables cross-device logic: for example, "only activate the speaker display if a door sensor on a different camera is currently active".</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Target Device</strong></td><td>Select <em>Local (this camera)</em> (default) or <em>Remote device</em>.</td></tr>
+        <tr><td><strong>IP / Hostname</strong></td><td>IP address or hostname of the remote Axis device, e.g. <code>192.168.1.100</code>.</td></tr>
+        <tr><td><strong>Username</strong></td><td>Login name on the remote device (default: <code>root</code>).</td></tr>
+        <tr><td><strong>Password</strong></td><td>Password for the remote device user.</td></tr>
+      </table>
+      <h4>Loading Remote Scenarios and Events</h4>
+      <p>For <strong>AOA Occupancy</strong> and <strong>Device Event State</strong> conditions, a <strong>Load</strong> button appears once a remote host is configured. Click it to fetch available AOA scenarios or the full event catalog directly from the remote device — no manual entry of scenario IDs or topic paths required.</p>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>Combine with <a href="#remote-device">Remote Device Actions</a> to build fully cross-device automation: detect an event on one camera, validate a condition on a second, and act on a third.</div>
+      </div>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Remote condition checks add a short network round-trip (typically 100–500 ms on a LAN). Avoid using them in rules with very tight timing requirements.</div>
+      </div>
 
       <!-- ═══════════════════════════════════════════ ACTIONS -->
       <h2 id="actions">Actions</h2>
@@ -812,13 +821,12 @@ Content-Type: application/json
         <tr><td><strong>Background Color</strong></td><td>Optional hex background color, e.g. <code>#000000</code>.</td></tr>
         <tr><td><strong>Scroll Direction</strong></td><td><em>Right→Left</em> (horizontal) or <em>Bottom→Top</em> (vertical). Leave as <em>None</em> for static text.</td></tr>
         <tr><td><strong>Scroll Speed</strong></td><td>0–10. 0 = static text, 1 = slowest scroll, 10 = fastest.</td></tr>
-        <tr><td><strong>Duration Type</strong></td><td><em>Indefinite</em> (stays until another request or Stop), <em>Repetitions</em> (scroll N times), <em>Time (ms)</em> (display for N milliseconds), or <em>Time + complete msg</em> (at least N ms, rounded up to a full scroll).</td></tr>
-        <tr><td><strong>Duration Value</strong></td><td>The repetition count or millisecond value for the chosen duration type.</td></tr>
+        <tr><td><strong>Duration Type</strong></td><td><em>Indefinite</em> (stays until another request or Stop), <em>Repetitions</em> (scroll N times), <em>Time</em> (display for N seconds), or <em>Time + complete msg</em> (at least N seconds, rounded up to a full scroll).</td></tr>
+        <tr><td><strong>Duration Value</strong></td><td>The repetition count or time in <strong>seconds</strong> for the chosen duration type. Leave Duration Type as <em>Indefinite</em> to control the display manually or via <em>While active</em>.</td></tr>
         <tr><td><strong>While active</strong></td><td>Only shown when Duration is <em>Indefinite</em>. Automatically sends a Stop command when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
       </table>
 
       <h3 id="act-io-output">I/O Output</h3>
-      <p>Set a digital output port high or low.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>Port</strong></td><td>Output port number.</td></tr>
@@ -932,10 +940,29 @@ Content-Type: application/json
       </table>
       <p>Enable <strong>Reset after fetch</strong> to zero the counters after reading them.</p>
 
+      <!-- ═══════════════════════════════════════════ REMOTE DEVICE -->
+      <hr class="section-rule">
+      <h2 id="remote-device">Remote Device Actions</h2>
+      <p>Many camera actions (Recording, PTZ Preset, Siren / Light, Speaker Display, I/O Output, Audio Clip, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, ACAP Control, Overlay Text, Set Device Param) can target a <strong>remote Axis device</strong> instead of the camera running Event Engine.</p>
+      <p>This enables cross-device automation — for example, triggering a Speaker Display on an Axis C1710 when motion is detected by a Q3538 running Area Object Analytics.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Target Device</strong></td><td>Select <em>Local (this camera)</em> (default) or <em>Remote device</em>. Only shown for action types that support remote execution.</td></tr>
+        <tr><td><strong>IP / Hostname</strong></td><td>IP address or hostname of the remote Axis device, e.g. <code>192.168.1.100</code>. Must be reachable from the camera running Event Engine.</td></tr>
+        <tr><td><strong>Username</strong></td><td>Login name on the remote device. Default: <code>root</code>.</td></tr>
+        <tr><td><strong>Password</strong></td><td>Password for the remote device user.</td></tr>
+      </table>
+      <h4>Loading Remote Capabilities</h4>
+      <p>For actions with dropdown options (PTZ presets, audio clips, siren profiles, guard tours, privacy masks, ACAP applications), a <strong>Load</strong> button appears next to the input field when a remote device is configured. Click it to fetch the available options directly from the remote device and populate the dropdown.</p>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>Credentials are stored as part of the rule configuration. For production deployments, consider using a dedicated account with only the necessary privileges on the remote device.</div>
+      </div>
+
       <!-- ═══════════════════════════════════════════ WHILE-ACTIVE -->
       <hr class="section-rule">
       <h2 id="while-active">While-Active Actions</h2>
-      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, I/O Output, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops the display) when the triggering condition clears.</p>
+      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, I/O Output, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops the display) when the triggering condition clears. While-active works correctly even when the action targets a <strong>remote device</strong>.</p>
       <p>This is useful for scenarios like "record while motion is detected" or "activate siren while I/O port 1 is high". The rule must use a stateful trigger (e.g. a Device Event that has active/inactive states) for while-active to function correctly.</p>
       <div class="callout tip">
         <span class="callout-icon">💡</span>
@@ -962,6 +989,8 @@ Content-Type: application/json
         <li>Device Event → Notification Digest</li>
         <li>Sunrise / Sunset → IR Cut Filter</li>
         <li>Counter Threshold → Slack Alert</li>
+        <li>Cross-Device: I/O Input → Remote I/O State Condition → Speaker Display</li>
+        <li>Cross-Device: AOA Detection → Remote AOA Occupancy Condition → Alert</li>
       </ul>
       <p>Applying a template opens the rule editor pre-filled with the template's triggers, conditions, and actions. Modify any field before saving.</p>
 
@@ -989,7 +1018,8 @@ Content-Type: application/json
         <tr><td><span class="var">{{trigger.topic}}</span></td><td>MQTT topic (MQTT Message trigger)</td></tr>
         <tr><td><span class="var">{{trigger.payload}}</span></td><td>MQTT payload (MQTT Message trigger)</td></tr>
         <tr><td><span class="var">{{trigger.scenario_id}}</span></td><td>AOA scenario ID (AOA Scenario trigger)</td></tr>
-        <tr><td><span class="var">{{trigger.object_class}}</span></td><td>Detected object class (AOA Scenario trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.reason}}</span></td><td>Detected object class, e.g. <code>Human</code> (AOA Scenario trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.fired_rule_id}}</span></td><td>ID of the rule that fired (Rule Chain trigger)</td></tr>
         <tr><td><span class="var">{{trigger.snapshot_base64}}</span></td><td>Base64-encoded JPEG (when <em>Attach snapshot</em> is enabled on HTTP Request)</td></tr>
       </table>
 
@@ -1130,10 +1160,10 @@ Content-Type: application/json
         <tr><td>GET / POST</td><td><code>/settings</code></td><td>Engine, MQTT, SMTP, and device configuration.</td></tr>
         <tr><td>GET</td><td><code>/alertStream</code></td><td>Real-time multipart event stream. See below.</td></tr>
       </table>
-      <p>For interactive documentation, open <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json" target="_blank">API Docs</a>.</p>
+      <p>For interactive documentation, open <a href="swagger.html" target="_blank">API Docs</a>.</p>
 
       <h3 id="alert-stream">Alert Stream</h3>
-      <p>A long-lived HTTP endpoint that streams rule-fire events in real-time as <code>multipart/mixed</code> JSON chunks. External software connects with Digest Auth and receives a new chunk every time a rule fires &mdash; with no polling required.</p>
+      <p>A long-lived HTTP endpoint that streams rule-fire events in real-time as <code>multipart/mixed</code> JSON chunks. External software connects with Digest Auth and receives a new chunk every time a rule fires — with no polling required.</p>
       <pre><code>GET http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code></pre>
       <p>The connection stays open indefinitely. The first chunk is sent immediately on connect:</p>
       <pre><code>--AxisEventBoundary

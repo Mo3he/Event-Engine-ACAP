@@ -8,7 +8,7 @@
       "embeddedSdkVersion": "3.0",
       "vendorUrl": "https://github.com/Mo3he",
       "runMode": "respawn",
-      "version": "1.8.12"
+      "version": "1.9.0"
     },
     "configuration": {
       "settingPage": "index.html",
@@ -24,7 +24,8 @@
         {"name": "acapevents",   "access": "admin", "type": "fastCgi"},
         {"name": "fire",         "access": "admin", "type": "fastCgi"},
         {"name": "variables","access": "admin", "type": "fastCgi"},
-        {"name": "aoa",      "access": "admin", "type": "fastCgi"}
+        {"name": "aoa",          "access": "admin", "type": "fastCgi"},
+        {"name": "remote-caps",  "access": "admin", "type": "fastCgi"}
       ],
       "reverseProxy": [
         {"apiPath": "alertStream", "target": "http://localhost:8888", "access": "admin"}
