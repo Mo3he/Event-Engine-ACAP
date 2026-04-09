@@ -10,6 +10,8 @@ Want to know why you need this ACAP, take a look at [Use Cases](../../blob/main/
 A full user manual is built in to the ACAP and available here [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)  
 API documentation can be found here [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json)
 
+If you find something that doesnt work the way it should or you would like me to add something, Open an  [Issue](https://github.com/Mo3he/Event-Engine-ACAP/issues) or start a [Dicussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions)
+
 ---
 
 ## What It Does
