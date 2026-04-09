@@ -2085,7 +2085,7 @@ int Actions_Test(const char* type, cJSON* config) {
     const char* testable[] = {
         "http_request", "mqtt_publish", "slack_webhook", "teams_webhook",
         "telegram", "email", "send_syslog", "influxdb_write",
-        "fire_vapix_event", NULL
+        "fire_vapix_event", "speaker_display", NULL
     };
     int allowed = 0;
     for (int i = 0; testable[i]; i++) {

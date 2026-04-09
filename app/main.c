@@ -85,6 +85,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         "wiper", "light_control", "audio_clip", "siren_light", "io_output", "digest",
         "delay", "set_variable", "increment_counter", "run_rule", "fire_vapix_event",
         "vapix_query", "set_device_param", "acap_control", "influxdb_write", "aoa_get_counts",
+        "speaker_display",
         NULL
     };
     static const char* const trigger_logic_values[] = {"OR", "AND", NULL};

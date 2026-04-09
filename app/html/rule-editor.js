@@ -6,7 +6,12 @@ function openRuleEditor(rule) {
   conditionLogic = rule && rule.condition_logic ? rule.condition_logic : 'AND';
   triggerRows = rule ? (rule.triggers || []).map(t => ({ ...t })) : [];
   conditionRows = rule ? (rule.conditions || []).map(c => ({ ...c })) : [];
-  actionRows = rule ? (rule.actions || []).map(a => ({ ...a })) : [];
+  actionRows = rule ? (rule.actions || []).map(a => {
+    /* Convert ms → seconds for display when loading saved speaker_display time durations */
+    if (a.type === 'speaker_display' && a.duration_type && a.duration_type !== 'repetitions' && a.duration_value > 100)
+      return { ...a, duration_value: Math.round(a.duration_value / 1000) };
+    return { ...a };
+  }) : [];
 
   document.getElementById('modal-title').textContent = rule ? 'Edit Rule' : 'New Rule';
   document.getElementById('modal-body').innerHTML = buildRuleForm(rule);
@@ -2166,12 +2171,14 @@ function actionFields(a) {
         </select>
         <div class="form-hint">Stays on screen until replaced or stopped.</div>
       </div>
-      ${durType ? `
-      <div class="form-group" style="flex:0 0 140px;">
-        <label>${durType === 'repetitions' ? 'Repetitions' : 'Milliseconds'}</label>
-        <input type="number" data-k="duration_value" value="${a.duration_value || (durType==='repetitions' ? 3 : 5000)}" min="1">
-      </div>` : ''}
     </div>
+    ${durType ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>${durType === 'repetitions' ? 'Repetitions' : 'Seconds'}</label>
+        <input type="number" data-k="duration_value" value="${a.duration_value || (durType==='repetitions' ? 3 : 10)}" min="1">
+      </div>
+    </div>` : ''}
     ${!durType ? `
     <div class="form-row"><div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -2441,10 +2448,16 @@ function normalizeAction(a) {
   if (a.type === 'speaker_display') {
     out.operation = a.operation || 'show';
     if (out.operation === 'show') {
+      if (a.textColor)       out.textColor       = a.textColor;
+      if (a.backgroundColor) out.backgroundColor = a.backgroundColor;
+      if (a.textSize)        out.textSize        = a.textSize;
+      if (a.scrollDirection) out.scrollDirection = a.scrollDirection;
       out.scrollSpeed = parseInt(a.scrollSpeed) || 0;
       if (a.duration_type) {
         out.duration_type  = a.duration_type;
-        out.duration_value = parseInt(a.duration_value) || 1;
+        const dv = parseInt(a.duration_value) || 1;
+        /* UI shows seconds for time types; API expects milliseconds */
+        out.duration_value = (a.duration_type === 'repetitions') ? dv : dv * 1000;
       } else {
         out.while_active = a.while_active === true;
       }
