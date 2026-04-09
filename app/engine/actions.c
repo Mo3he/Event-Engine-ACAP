@@ -1706,8 +1706,11 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
         cJSON_AddStringToObject(data, "scrollDirection", scroll_dir);
 
     cJSON* speed_j = cJSON_GetObjectItem(cfg, "scrollSpeed");
-    if (speed_j && cJSON_IsNumber(speed_j))
-        cJSON_AddNumberToObject(data, "scrollSpeed", speed_j->valuedouble);
+    if (speed_j && cJSON_IsNumber(speed_j)) {
+        /* Only send non-zero speed when a scroll direction is set; otherwise force 0 (static) */
+        double speed = (scroll_dir && scroll_dir[0]) ? speed_j->valuedouble : 0;
+        cJSON_AddNumberToObject(data, "scrollSpeed", speed);
+    }
 
     const char* dur_type = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "duration_type"));
     cJSON* dur_val_j = cJSON_GetObjectItem(cfg, "duration_value");
