@@ -2,9 +2,8 @@
 
 <img src="event_engine_icon_dark.svg" alt="Event Engine" width="72" align="right">
 
-A powerful If-This-Then-That style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
-
 ### Check out the [Homepage](https://mo3he.github.io/Event-Engine-ACAP/) for a full overview of everything Event Engine can do  
+A powerful If-This-Then-That style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more. 
 
 #### To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface.
 
