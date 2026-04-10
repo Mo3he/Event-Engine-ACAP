@@ -1,6 +1,6 @@
 # Event Engine - Use Cases & Templates
 
-Three main use cases for the ACAP Event Engine, each with three worked examples and ready-to-import rule templates.
+Some use cases for the ACAP Event Engine, each with worked examples and ready-to-import rule templates.
 
 > **Import a template:** Open the Event Engine web UI → Rules tab → Import / use the API or paste the JSON into a POST to `/local/acap_event_engine/rules`.
 
@@ -12,7 +12,7 @@ Push alerts to people and push data to systems. The camera becomes an edge senso
 
 ### 1.1 Environmental Sensor Data Transmission
 
-**Scenario:** An Axis camera with a connected environmental sensor (thermometry, air quality, etc) periodically reads sensor values and transmits them to external systems. Two separate templates cover the two main approaches:
+**Scenario:** An Axis environmental sensor (thermometry, air quality, etc) periodically reads sensor values and transmits them to external systems. Two separate templates cover the two main approaches:
 
 #### 1.1a - Power BI Real-Time Dashboard
 
@@ -184,7 +184,7 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 
 ## Use Case 4: Speaker Display
 
-Drive the built-in screen on Axis speaker-display devices (e.g. D3110) directly from rules — no VMS or middleware required. Requires AXIS OS 11.11 or later on the device.
+Drive the built-in screen on Axis speaker-display devices (e.g. C1710) directly from rules — no VMS or middleware required.
 
 ### 4.1 Automated Display Messages
 
