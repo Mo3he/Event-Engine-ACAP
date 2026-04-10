@@ -1,0 +1,55 @@
+{
+  "name": "Intrusion — Snapshot Upload with FTP Fallback",
+  "description": "When armed and a person is detected after hours, POST a timestamped snapshot to the primary evidence server. If the HTTP upload fails (network error or non-2xx status), the on_failure chain automatically falls back to FTP backup storage and logs a syslog warning. Demonstrates on_failure action chains, http_request with attach_snapshot, and ftp_upload.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 60,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "aoa_scenario",
+      "scenario_id": 1,
+      "object_class": "human"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "variable_compare",
+      "name": "system.armed",
+      "op": "eq",
+      "value": "true"
+    },
+    {
+      "type": "time_window",
+      "start": "19:00",
+      "end": "07:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "actions": [
+    {
+      "type": "http_request",
+      "url": "https://evidence.example.com/api/upload",
+      "method": "POST",
+      "attach_snapshot": true,
+      "headers": "Content-Type: application/json\nX-API-Key: YOUR_API_KEY",
+      "body": "{\"camera\":\"{{camera.serial}}\",\"model\":\"{{camera.model}}\",\"timestamp\":\"{{timestamp}}\",\"image\":\"{{trigger.snapshot_base64}}\"}",
+      "on_failure": [
+        {
+          "type": "ftp_upload",
+          "url": "ftp://backup.example.com/evidence/",
+          "username": "ftpuser",
+          "password": "ftppass"
+        },
+        {
+          "type": "send_syslog",
+          "message": "Evidence HTTP upload failed — pushed to FTP backup for {{camera.serial}} at {{timestamp}}",
+          "level": "warning"
+        }
+      ]
+    }
+  ]
+}

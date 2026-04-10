@@ -12,7 +12,7 @@
     {
       "type": "schedule",
       "schedule_type": "daily_time",
-      "daily_time": "08:00",
+      "time": "08:00",
       "days": [1, 2, 3, 4, 5]
     }
   ],

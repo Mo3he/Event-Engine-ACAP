@@ -19,6 +19,8 @@ let deviceParams = null;      /* null=loading, []=none,   ['root.X.Y.Z',...] */
 let guardTours = null;        /* null=loading, []=none,   [{id,name},...] */
 let aoaScenarios = null;      /* null=loading, []=none or not available, [{id,name,type},...] */
 let acapEvents = null;        /* null=loading, []=none, [{id,name,state,system},...] */
+let pagingActions = null;     /* null=loading, []=none or not a paging device, [{id,label},...] */
+let pagingPages   = null;     /* null=loading, []=none, [{id,name},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 let engineLat = 0;            /* engine settings latitude — used as default for astronomical triggers */
@@ -162,7 +164,9 @@ const RULE_TYPE_LABELS = {
     guard_tour: 'Guard Tour', ir_cut_filter: 'IR Cut', light_control: 'Light',
     privacy_mask: 'Privacy Mask', wiper: 'Wiper', set_device_param: 'Device Param',
     acap_control: 'ACAP Control',
-    speaker_display: 'Speaker Display'
+    speaker_display: 'Speaker Display',
+    paging_console_execute: 'Paging Execute',
+    paging_console_button: 'Paging Button'
   }
 };
 function ruleTypeLabel(group, type) {
@@ -203,7 +207,7 @@ const RULE_TEMPLATES = [
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'schedule', schedule_type: 'daily_time', time: '08:00', days: [1,2,3,4,5] }],
       conditions: [],
-      actions: [{ type: 'send_syslog', message: 'Daily check at {{timestamp}} on {{camera.model}}', level: 'info' }],
+      actions: [{ type: 'send_syslog', message: 'Daily check at {{timestamp}} on {{camera.name}}', level: 'info' }],
     }
   },
   {
@@ -216,7 +220,7 @@ const RULE_TEMPLATES = [
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
       actions: [{ type: 'email', to: 'alerts@example.com',
-                  subject: 'Alert from {{camera.model}}',
+                  subject: 'Alert from {{camera.name}}',
                   body: 'An event occurred at {{timestamp}}.\nCamera: {{camera.serial}} ({{camera.ip}})' }],
     }
   },
@@ -230,7 +234,7 @@ const RULE_TEMPLATES = [
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
       actions: [{ type: 'slack_webhook', webhook_url: '',
-                  message: 'Alert from {{camera.model}} at {{timestamp}}' }],
+                  message: 'Alert from {{camera.name}} at {{timestamp}}' }],
     }
   },
   {
@@ -296,7 +300,7 @@ const RULE_TEMPLATES = [
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
       actions: [{ type: 'telegram', bot_token: '', chat_id: '',
-                  message: '📷 Alert from *{{camera.model}}*\nTime: {{timestamp}}\nCamera: {{camera.serial}}',
+                  message: '📷 Alert from *{{camera.name}}*\nTime: {{timestamp}}\nCamera: {{camera.serial}}',
                   parse_mode: 'Markdown' }],
     }
   },
@@ -310,7 +314,7 @@ const RULE_TEMPLATES = [
       triggers: [{ type: 'vapix_event' }],
       conditions: [],
       actions: [{ type: 'teams_webhook', webhook_url: '',
-                  title: 'Alert from {{camera.model}}',
+                  title: 'Alert from {{camera.name}}',
                   message: 'An event was detected at {{timestamp}} on camera {{camera.serial}} ({{camera.ip}}).' }],
     }
   },
@@ -339,7 +343,7 @@ const RULE_TEMPLATES = [
     rule: {
       name: 'Arm System via MQTT',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
-      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/{{camera.serial}}/arm', payload_filter: 'arm' }],
+      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/+/arm', payload_filter: 'arm' }],
       conditions: [],
       actions: [
         { type: 'set_variable', name: 'system.armed', value: 'true' },
@@ -354,7 +358,7 @@ const RULE_TEMPLATES = [
     rule: {
       name: 'Disarm System via MQTT',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
-      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/{{camera.serial}}/arm', payload_filter: 'disarm' }],
+      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/+/arm', payload_filter: 'disarm' }],
       conditions: [],
       actions: [
         { type: 'set_variable', name: 'system.armed', value: 'false' },
@@ -397,7 +401,7 @@ const RULE_TEMPLATES = [
       actions: [{
         type: 'mqtt_publish',
         topic: 'cameras/{{camera.serial}}/aoa',
-        payload: '{"scenario":"{{trigger.scenario_id}}","class":"{{trigger.reason}}","time":"{{timestamp}}"}',
+        payload: '{"scenario":1,"active":"{{trigger.active}}","camera":"{{camera.serial}}","time":"{{timestamp}}"}',
         qos: 0, retain: false
       }],
       cooldown: 5,
@@ -418,7 +422,7 @@ const RULE_TEMPLATES = [
           url: 'http://influxdb:8086', version: 'v2',
           org: 'my-org', bucket: 'cameras', token: '',
           measurement: 'camera_sensors',
-          tags: 'camera={{camera.serial}},model={{camera.model}}',
+          tags: 'camera={{camera.serial}},model={{camera.name}}',
           fields: 'value={{trigger.Value}}' }
       ],
     }
@@ -473,7 +477,7 @@ const RULE_TEMPLATES = [
       triggers: [{ type: 'counter_threshold', counter_name: 'my_counter', op: 'gte', value: 10 }],
       conditions: [],
       actions: [{ type: 'slack_webhook', webhook_url: '',
-                  message: 'Counter *{{trigger.counter_name}}* reached {{trigger.counter_value}} on {{camera.model}} at {{timestamp}}' }],
+                  message: 'Counter *{{trigger.counter_name}}* reached {{trigger.counter_value}} on {{camera.name}} at {{timestamp}}' }],
       cooldown: 60,
     }
   },
@@ -612,6 +616,217 @@ const RULE_TEMPLATES = [
         }
       ],
       cooldown: 0,
+    }
+  },
+  {
+    name: 'HTTP Webhook → Action',
+    icon: '🌐',
+    desc: 'Fire a rule from any external system with a signed HTTP POST — overlay text while the signal is active',
+    rule: {
+      name: 'HTTP Webhook → Action',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'http_webhook', token: 'REPLACE_WITH_SECRET_TOKEN' }],
+      conditions: [],
+      actions: [{ type: 'overlay_text', text: 'Remote trigger at {{time}}', channel: 1, duration: 10, position: 'topLeft', text_color: 'white' }],
+    }
+  },
+  {
+    name: 'Rule Fired → Notify (Rule Chain)',
+    icon: '🔁',
+    desc: 'Trigger this rule whenever another rule executes — useful as a shared "send alert" helper',
+    rule: {
+      name: 'Rule Fired → Notify',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'rule_fired', rule_id: 'REPLACE_WITH_SOURCE_RULE_ID' }],
+      conditions: [],
+      actions: [{ type: 'send_syslog', message: 'Rule chain fired at {{timestamp}} on {{camera.name}}', level: 'info' }],
+    }
+  },
+  {
+    name: 'Dual Trigger → Alert (AND logic)',
+    icon: '⚡',
+    desc: 'Fire only when both an I/O input AND motion occur within 10 seconds of each other — not on either alone',
+    rule: {
+      name: 'Dual-Trigger AND Alert',
+      enabled: true, trigger_logic: 'AND', trigger_window: 10, condition_logic: 'AND',
+      triggers: [
+        { type: 'io_input', port: 1, edge: 'rising' },
+        { type: 'vapix_event', topic0: { tns1: 'RuleEngine' }, topic1: { tnsaxis: 'MotionDetection' }, filter_key: 'active', filter_value: true }
+      ],
+      conditions: [],
+      actions: [{ type: 'send_syslog', message: 'Both triggers fired within window at {{timestamp}}', level: 'warning' }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'Simultaneous Presence → Alert (AND_ACTIVE)',
+    icon: '🚨',
+    desc: 'Fire only while both triggers are simultaneously active — e.g. door open AND motion at the same time',
+    rule: {
+      name: 'Simultaneous Presence Alert',
+      enabled: true, trigger_logic: 'AND_ACTIVE', trigger_window: 0, condition_logic: 'AND',
+      triggers: [
+        { type: 'io_input', port: 1, edge: 'both' },
+        { type: 'vapix_event', topic0: { tns1: 'RuleEngine' }, topic1: { tnsaxis: 'MotionDetection' }, filter_key: 'active', filter_value: true }
+      ],
+      conditions: [],
+      actions: [{ type: 'send_syslog', message: 'Simultaneous breach at {{timestamp}} on {{camera.name}}', level: 'error' }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'Night-Only Action (Day/Night Condition)',
+    icon: '🌙',
+    desc: 'Perform an action on motion only during actual darkness — adapts to real sunrise/sunset year-round',
+    rule: {
+      name: 'Night-Only Action',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event', topic0: { tns1: 'RuleEngine' }, topic1: { tnsaxis: 'MotionDetection' }, filter_key: 'active', filter_value: true }],
+      conditions: [{ type: 'day_night', state: 'night', lat: 0, lon: 0 }],
+      actions: [{ type: 'recording', operation: 'start', duration: 30 }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'Counter Threshold + Counter Condition',
+    icon: '🔢',
+    desc: 'Increment a counter on every motion event; escalate with Slack when both threshold trigger and counter condition agree',
+    rule: {
+      name: 'Counter Escalation',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'counter_threshold', counter_name: 'motion_count', op: 'gte', value: 10 }],
+      conditions: [{ type: 'counter', name: 'motion_count', op: 'gte', value: 10 }],
+      actions: [
+        { type: 'increment_counter', counter_name: 'motion_count', operation: 'reset' },
+        { type: 'slack_webhook', webhook_url: '', message: 'Motion count hit 10 on {{camera.name}} — counter reset.' }
+      ],
+      cooldown: 60,
+    }
+  },
+  {
+    name: 'Network-Gated Action (HTTP Check)',
+    icon: '🌐',
+    desc: 'Only act if an external endpoint is reachable and healthy — prevents flooding dead queues when offline',
+    rule: {
+      name: 'Network-Gated Action',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [{ type: 'http_check', url: 'https://health.example.com/ping', method: 'GET', expected_status: 200, expected_body: 'ok' }],
+      actions: [{ type: 'slack_webhook', webhook_url: '', message: 'Event from {{camera.name}} at {{timestamp}}', attach_snapshot: true }],
+      cooldown: 30,
+    }
+  },
+  {
+    name: 'OR Conditions — Morning or Evening Window',
+    icon: '🕗',
+    desc: 'condition_logic OR: act if the event falls in the morning window OR the evening window',
+    rule: {
+      name: 'Morning or Evening Alert',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'OR',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [
+        { type: 'time_window', start: '07:00', end: '09:00', days: [1,2,3,4,5] },
+        { type: 'time_window', start: '17:00', end: '19:00', days: [1,2,3,4,5] }
+      ],
+      actions: [{ type: 'send_syslog', message: 'Event in monitored window at {{timestamp}}', level: 'info' }],
+      cooldown: 60,
+    }
+  },
+  {
+    name: 'Device Event → Snapshot Upload',
+    icon: '📷',
+    desc: 'POST a raw binary JPEG snapshot to a URL whenever a device event fires',
+    rule: {
+      name: 'Device Event → Snapshot Upload',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'snapshot_upload', url: 'https://archive.example.com/api/images', method: 'POST', channel: 1, headers: 'Authorization: Bearer REPLACE_TOKEN' }],
+      cooldown: 10,
+    }
+  },
+  {
+    name: 'HTTP Request with Fallback (on_failure)',
+    icon: '🔄',
+    desc: 'POST to primary endpoint; if it fails (network error or non-2xx) automatically fall back to syslog',
+    rule: {
+      name: 'HTTP Request with Fallback',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{
+        type: 'http_request', method: 'POST',
+        url: 'https://primary.example.com/events',
+        headers: 'Content-Type: application/json',
+        body: '{"camera":"{{camera.serial}}","time":"{{timestamp}}"}',
+        on_failure: [{ type: 'send_syslog', message: 'Primary HTTP failed at {{timestamp}} on {{camera.name}}', level: 'error' }]
+      }],
+      cooldown: 10,
+    }
+  },
+  {
+    name: 'Rate-Limited Rule (max_executions per day)',
+    icon: '⏱️',
+    desc: 'Cap a rule to fire at most 3 times per day — e.g. limit noisy motion alerts during business hours',
+    rule: {
+      name: 'Rate-Limited Alert',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      max_executions: 3, max_exec_period: 'day',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [{ type: 'time_window', start: '08:00', end: '18:00', days: [1,2,3,4,5] }],
+      actions: [{ type: 'slack_webhook', webhook_url: '', message: 'Alert (capped 3/day) from {{camera.name}} at {{timestamp}}' }],
+    }
+  },
+  {
+    name: 'Event → Recording (While Active)',
+    icon: '📹',
+    desc: 'Record for exactly as long as the trigger event stays active — stops automatically on deactivation',
+    rule: {
+      name: 'Recording While Active',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event' }],
+      conditions: [],
+      actions: [{ type: 'recording', operation: 'start', while_active: true }],
+    }
+  },
+  {
+    name: 'MQTT → Enable/Disable Rule',
+    icon: '🔧',
+    desc: 'Enable or disable another rule by ID when an MQTT command arrives',
+    rule: {
+      name: 'MQTT → Enable Rule',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/rules/control', payload_filter: 'enable' }],
+      conditions: [],
+      actions: [
+        { type: 'set_rule_enabled', rule_id: 'REPLACE_WITH_TARGET_RULE_ID', enabled: true },
+        { type: 'send_syslog', message: 'Rule enabled via MQTT at {{timestamp}}', level: 'info' }
+      ],
+    }
+  },
+  {
+    name: 'Motion → Increment Counter',
+    icon: '🔢',
+    desc: 'Count every motion event — pair with a counter_threshold trigger on another rule to escalate',
+    rule: {
+      name: 'Motion → Increment Counter',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'vapix_event', topic0: { tns1: 'RuleEngine' }, topic1: { tnsaxis: 'MotionDetection' }, filter_key: 'active', filter_value: true }],
+      conditions: [],
+      actions: [{ type: 'increment_counter', counter_name: 'motion_count', operation: 'increment', value: 1 }],
+      cooldown: 5,
+    }
+  },
+  {
+    name: 'Event → Privacy Mask On/Off',
+    icon: '🔒',
+    desc: 'Enable a privacy mask when an MQTT command arrives — pair with a second rule to disable it',
+    rule: {
+      name: 'Event → Privacy Mask Enable',
+      enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'mqtt_message', topic_filter: 'cameras/+/privacy', payload_filter: 'enable' }],
+      conditions: [],
+      actions: [{ type: 'privacy_mask', operation: 'enable', window: 1 }],
     }
   },
 ];
@@ -1156,7 +1371,8 @@ window.addEventListener('DOMContentLoaded', () => {
       loadPrivacyMasks(),
       loadDeviceParams(),
       loadGuardTours(),
-      loadAoaScenarios()
+      loadAoaScenarios(),
+      loadPagingConsoleData()
     ]).then(() => renderDeviceCapabilities()).catch(() => {});
 
     /* Load engine lat/lon early so astronomical trigger defaults are correct */

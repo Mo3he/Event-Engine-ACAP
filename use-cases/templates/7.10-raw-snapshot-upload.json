@@ -1,0 +1,48 @@
+{
+  "name": "Raw Binary Snapshot Upload",
+  "description": "When armed and motion is detected, POST a raw JPEG snapshot directly to an evidence archive endpoint. Uses snapshot_upload (raw binary Content-Type: image/jpeg transfer), unlike http_request with attach_snapshot which base64-encodes the image inside JSON. Demonstrates the snapshot_upload action, per-rule lifetime max_executions cap, and Authorization header injection.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 10,
+  "max_executions": 500,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [
+    {
+      "type": "variable_compare",
+      "name": "system.armed",
+      "op": "eq",
+      "value": "true"
+    },
+    {
+      "type": "time_window",
+      "start": "18:00",
+      "end": "08:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "actions": [
+    {
+      "type": "snapshot_upload",
+      "url": "https://evidence.example.com/api/v1/images",
+      "method": "POST",
+      "channel": 1,
+      "headers": "Authorization: Bearer REPLACE_WITH_API_TOKEN\nX-Device-Serial: {{camera.serial}}\nX-Timestamp: {{timestamp}}"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Raw snapshot uploaded for motion event on {{camera.model}} ({{camera.serial}}) at {{timestamp}}",
+      "level": "info"
+    }
+  ]
+}

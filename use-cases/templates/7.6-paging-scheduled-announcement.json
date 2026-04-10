@@ -1,0 +1,30 @@
+{
+  "name": "Paging Console — Scheduled Hourly Announcement",
+  "description": "Use a cron schedule to trigger a pre-configured announcement action on an Axis C6110 paging console at the top of every hour during business hours (08:00–17:00, Mon–Fri). Demonstrates the cron schedule type and the paging_console_execute action. Replace the action_id with the UUID of your configured paging action from the C6110 web interface.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "cron",
+      "cron": "0 8-17 * * 1-5"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "paging_console_execute",
+      "action_id": "REPLACE_WITH_PAGING_ACTION_UUID"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Paging announcement triggered at {{time}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

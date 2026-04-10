@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <syslog.h>
 #include <glib.h>
 #include <curl/curl.h>
@@ -58,6 +59,8 @@ static void overlay_remove_remote(int identity, const char* host, const char* us
 static char* remote_vapix_post(const char* host, const char* user, const char* pass, const char* cgi, const char* body);
 static char* remote_vapix_get(const char* host, const char* user, const char* pass, const char* cgi_and_query);
 static char* remote_vapix_post_path(const char* host, const char* user, const char* pass, const char* path, const char* body);
+static char* remote_vapix_put_path(const char* host, const char* user, const char* pass, const char* path, const char* body);
+static char* remote_vapix_get_path(const char* host, const char* user, const char* pass, const char* path);
 static int   stop_active_recordings_from_xml(const char* xml, const char* remote_host, const char* remote_user, const char* remote_pass);
 static gboolean recording_stop_timeout_cb(gpointer user_data);
 
@@ -675,6 +678,59 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
     return response;
 }
 
+/* PUT to an arbitrary path on a remote (or local via 127.0.0.1) Axis device */
+static char* remote_vapix_put_path(const char* host, const char* user, const char* pass,
+                                    const char* path, const char* body) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* response = NULL;
+    struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(response); return NULL; }
+    return response;
+}
+
+/* GET from a remote Axis device at an arbitrary path (not under /axis-cgi/) */
+static char* remote_vapix_get_path(const char* host, const char* user, const char* pass,
+                                    const char* path) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* response = NULL;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(response); return NULL; }
+    return response;
+}
+
 /* POST SOAP to a remote Axis device (e.g. /vapix/services) */
 static char* remote_soap_post(const char* host, const char* user, const char* pass,
                                const char* path, const char* soap_body) {
@@ -881,6 +937,18 @@ static cJSON* remote_pullpoint_query(const char* host, const char* user,
        get_remote_target((cfg),&_h,&_u,&_p) \
          ? remote_vapix_post_path(_h,_u,_p,(path),(body)) \
          : ACAP_VAPIX_Post_Path((path),(body)); })
+
+#define VAPIX_GET_PATH(cfg, path) \
+    ({ const char*_h,*_u,*_p; \
+       get_remote_target((cfg),&_h,&_u,&_p) \
+         ? remote_vapix_get_path(_h,_u,_p,(path)) \
+         : ACAP_VAPIX_Get_Path((path)); })
+
+#define VAPIX_PUT_PATH(cfg, path, body) \
+    ({ const char*_h,*_u,*_p; \
+       get_remote_target((cfg),&_h,&_u,&_p) \
+         ? remote_vapix_put_path(_h,_u,_p,(path),(body)) \
+         : ACAP_VAPIX_Put_Path((path),(body)); })
 
 /* Fill remote_host/user/pass into a WhileActiveEntry from a cfg JSON object */
 #define WA_SET_REMOTE(e, cfg) do { \
@@ -1433,6 +1501,110 @@ static void action_send_syslog(cJSON* cfg, cJSON* trigger_data) {
     }
     syslog(priority, "EventEngine: %s", msg);
     free(msg);
+}
+
+/* paging_console_execute — POST /config/rest/paging-console-actions/v1/actions/{id}/execute
+ * Fields: action_id (UUID), remote_host (default 127.0.0.1), remote_user, remote_pass
+ */
+static void action_paging_console_execute(cJSON* cfg) {
+    const char* action_id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "action_id"));
+    if (!action_id || !action_id[0]) {
+        LOG_ACTION_ERR("paging_console_execute: no action_id"); return;
+    }
+    /* Validate: UUID characters only (hex digits and hyphens) */
+    for (const char* p = action_id; *p; p++) {
+        if (!isalnum((unsigned char)*p) && *p != '-') {
+            LOG_ACTION_ERR("paging_console_execute: invalid action_id"); return;
+        }
+    }
+
+    char path[256];
+    snprintf(path, sizeof(path),
+             "/config/rest/paging-console-actions/v1/actions/%s/execute", action_id);
+
+    char* resp = VAPIX_POST_PATH(cfg, path, "{}");
+    if (resp) free(resp);
+    else LOG_ACTION_ERR("paging_console_execute: failed for action %s", action_id);
+}
+
+/* paging_console_button — GET page, update actionLayout[slot-1], PUT back with {"data":{...}}
+ * Fields: page_id (UUID), slot (integer, 1-based), action_id (UUID, empty = clear slot to null),
+ *         remote_host (optional), remote_user, remote_pass
+ */
+static void action_paging_console_button(cJSON* cfg) {
+    const char* page_id   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "page_id"));
+    const char* action_id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "action_id"));
+    cJSON* slot_j = cJSON_GetObjectItem(cfg, "slot");
+
+    if (!page_id || !page_id[0]) { LOG_ACTION_ERR("paging_console_button: no page_id"); return; }
+    if (!slot_j)                  { LOG_ACTION_ERR("paging_console_button: no slot"); return; }
+    int slot = (int)slot_j->valuedouble;
+    if (slot < 1 || slot > 32)    { LOG_ACTION_ERR("paging_console_button: slot %d out of range", slot); return; }
+
+    /* Validate UUIDs (hex digits and hyphens only) */
+    for (const char* p = page_id; *p; p++) {
+        if (!isalnum((unsigned char)*p) && *p != '-') {
+            LOG_ACTION_ERR("paging_console_button: invalid page_id"); return;
+        }
+    }
+    if (action_id && action_id[0]) {
+        for (const char* p = action_id; *p; p++) {
+            if (!isalnum((unsigned char)*p) && *p != '-') {
+                LOG_ACTION_ERR("paging_console_button: invalid action_id"); return;
+            }
+        }
+    }
+
+    /* Step 1: GET the current page to read the full actionLayout array */
+    char get_path[256];
+    snprintf(get_path, sizeof(get_path),
+             "/config/rest/paging-console-button-layout/v1/pages/%s", page_id);
+
+    char* page_json = VAPIX_GET_PATH(cfg, get_path);
+    if (!page_json) {
+        LOG_ACTION_ERR("paging_console_button: GET page failed"); return;
+    }
+
+    /* Step 2: Parse actionLayout from {"status":"success","data":{"actionLayout":[...]}} */
+    cJSON* root = cJSON_Parse(page_json);
+    free(page_json);
+    if (!root) { LOG_ACTION_ERR("paging_console_button: invalid page JSON"); return; }
+
+    cJSON* data_obj = cJSON_GetObjectItem(root, "data");
+    cJSON* layout   = data_obj ? cJSON_GetObjectItem(data_obj, "actionLayout") : NULL;
+    if (!cJSON_IsArray(layout)) {
+        cJSON_Delete(root);
+        LOG_ACTION_ERR("paging_console_button: no actionLayout in page"); return;
+    }
+
+    /* Step 3: Update the target slot (0-based index) */
+    int idx = slot - 1;
+    while (cJSON_GetArraySize(layout) <= idx)
+        cJSON_AddItemToArray(layout, cJSON_CreateNull());
+    cJSON_ReplaceItemInArray(layout, idx,
+        (action_id && action_id[0]) ? cJSON_CreateString(action_id) : cJSON_CreateNull());
+
+    /* Step 4: PUT back {"data":{"actionLayout":[...]}} */
+    cJSON* put_body = cJSON_CreateObject();
+    cJSON* put_data = cJSON_CreateObject();
+    cJSON_DetachItemFromObject(data_obj, "actionLayout");
+    cJSON_AddItemToObject(put_data, "actionLayout", layout);
+    cJSON_AddItemToObject(put_body, "data", put_data);
+    char* body_str = cJSON_PrintUnformatted(put_body);
+    cJSON_Delete(put_body);
+    cJSON_Delete(root);
+
+    if (!body_str) { LOG_ACTION_ERR("paging_console_button: JSON encode failed"); return; }
+
+    char* put_resp = VAPIX_PUT_PATH(cfg, get_path, body_str);
+    free(body_str);
+
+    if (put_resp) {
+        free(put_resp);
+    } else {
+        LOG_ACTION_ERR("paging_console_button: PUT failed for page %s slot %d",
+                       page_id, slot);
+    }
 }
 
 /* fire_vapix_event */
@@ -2752,8 +2924,10 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(rule_id, action, trigger_data);
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
         else if (strcmp(type, "io_output")         == 0) action_io_output(rule_id, action);
-        else if (strcmp(type, "audio_clip")        == 0) action_audio_clip(action);
-        else if (strcmp(type, "siren_light")       == 0) action_siren_light(rule_id, action);
+        else if (strcmp(type, "audio_clip")              == 0) action_audio_clip(action);
+        else if (strcmp(type, "paging_console_execute")    == 0) action_paging_console_execute(action);
+        else if (strcmp(type, "paging_console_button")     == 0) action_paging_console_button(action);
+        else if (strcmp(type, "siren_light")               == 0) action_siren_light(rule_id, action);
         else if (strcmp(type, "send_syslog")       == 0) action_send_syslog(action, trigger_data);
         else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action);
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);

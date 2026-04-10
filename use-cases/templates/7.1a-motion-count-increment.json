@@ -1,0 +1,28 @@
+{
+  "name": "Motion Counter — Increment Daily Count",
+  "description": "Increment a named counter each time motion is detected. Pair with 7.1b (counter_threshold escalation) to fire an escalating alert when the count reaches a threshold. Reset the counter daily via template 5.2.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 5,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "increment_counter",
+      "name": "motion_count",
+      "delta": 1
+    }
+  ]
+}

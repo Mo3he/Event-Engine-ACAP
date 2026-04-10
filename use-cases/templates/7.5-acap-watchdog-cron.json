@@ -1,0 +1,51 @@
+{
+  "name": "ACAP Service Watchdog",
+  "description": "Every 10 minutes (via cron), check if a dependent ACAP application is still active via its VAPIX event state. If the ACAP reports as inactive (crashed or stopped), restart it via ACAP Control, restore a device parameter to its known-good value, and publish an alert to MQTT. Demonstrates cron schedule, vapix_event_state condition, acap_control, and set_device_param.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 300,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "cron",
+      "cron": "*/10 * * * *"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "vapix_event_state",
+      "event_key": "tnsaxis:ACAP/YOUR_PACKAGE_NAME/Running",
+      "data_key": "active",
+      "op": "boolean",
+      "expected": "false"
+    }
+  ],
+  "actions": [
+    {
+      "type": "acap_control",
+      "package": "com.example.youracap",
+      "operation": "start"
+    },
+    {
+      "type": "set_device_param",
+      "parameter": "ImageSource.I0.Sensor.ExposureMode",
+      "value": "automatic"
+    },
+    {
+      "type": "send_syslog",
+      "message": "ACAP watchdog: restarted com.example.youracap on {{camera.serial}} at {{timestamp}}",
+      "level": "warning"
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "cameras/{{camera.serial}}/watchdog/acap_restart",
+      "payload": "{\"package\":\"com.example.youracap\",\"action\":\"restarted\",\"time\":\"{{timestamp}}\",\"camera\":\"{{camera.serial}}\"}",
+      "qos": 1,
+      "retain": false
+    }
+  ]
+}

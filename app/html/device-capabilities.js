@@ -87,6 +87,38 @@ async function loadRemoteCondCap(rowIndexStr, query) {
   renderConditionList();
 }
 
+/* Called by "Load" buttons on remote paging_console_* action rows.
+ * Fetches actions+pages from the remote device's paging-console REST API
+ * and stores them in remoteCapCache so the field builder can render dropdowns. */
+async function loadRemotePagingCap(rowIndexStr) {
+  const rowIndex = parseInt(rowIndexStr);
+  const row = document.getElementById('arow-' + rowIndex);
+  if (!row) return;
+  const hostEl = row.querySelector('[data-k="remote_host"]');
+  const userEl = row.querySelector('[data-k="remote_user"]');
+  const passEl = row.querySelector('[data-k="remote_pass"]');
+  if (!hostEl || !hostEl.value.trim()) { toast('Enter remote device IP first', 'warning'); return; }
+  const host = hostEl.value.trim();
+  const btn = row.querySelector('.remote-load-btn[data-q="paging"]');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  const result = await fetchRemoteCaps(
+    'paging', host,
+    userEl ? userEl.value.trim() : 'root',
+    passEl ? passEl.value : '');
+  if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
+  if (!result || !result[0]) { toast('Could not fetch paging data from remote device', 'error'); return; }
+  const paging = result[0];
+  remoteCapCache[`${host}:::paging_actions`] = paging.actions || [];
+  remoteCapCache[`${host}:::paging_pages`]   = paging.pages   || [];
+  /* Preserve current form values then re-render */
+  const data = { type: actionRows[rowIndex].type };
+  row.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[rowIndex] = data;
+  renderActionList();
+}
+
 /* Called by "Load Events" button in a remote vapix_query action row.
  * Reuses the full catalog cached by the condition loader when available;
  * otherwise fetches directly (not via fetchRemoteCaps, whose cache key
@@ -322,6 +354,52 @@ async function loadAoaScenarios() {
     renderActionList();
     renderConditionList();
   }
+}
+
+async function loadPagingConsoleData() {
+  try {
+    /* Actions — GET /config/rest/paging-console-actions/v1/actions */
+    const ar = await fetch('/config/rest/paging-console-actions/v1/actions');
+    if (!ar.ok) { pagingActions = []; pagingPages = []; return; }
+    const aData = await ar.json();
+    const actions = Array.isArray(aData) ? aData
+                  : Array.isArray(aData.data) ? aData.data
+                  : (aData.actions || []);
+    pagingActions = actions.map(a => {
+      /* Prefer the saved description as the human label, then type-specific details */
+      let label = a.description || a.label || '';
+      if (!label) {
+        const p = a.params || {};
+        if      (a.type === 'callContact'    && p.callContact)  label = `Call ${p.callContact.contactId  || ''}`;
+        else if (a.type === 'pageContact'    && p.pageContact)  label = `Page ${p.pageContact.contactId  || ''}`;
+        else if (a.type === 'announcement'   && p.announcement) label = `Announce ${p.announcement.groupId || ''}`;
+        else if (a.type === 'httpRequest'    && p.httpRequest)  label = `HTTP: ${(p.httpRequest.recipient && p.httpRequest.recipient.url) || ''}`;
+        else if (a.type === 'dtmf'           && p.dtmf)         label = `DTMF: ${p.dtmf.tones || ''}`;
+        else if (a.type === 'softKeyEvent'   && p.softKeyEvent) label = `Key: ${p.softKeyEvent.key || ''}`;
+        else if (a.type === 'showContacts')                      label = 'Show Contacts';
+        else if (a.type === 'showCallHistory')                   label = 'Show Call History';
+        else if (a.type === 'clearCallHistory')                  label = 'Clear Call History';
+        else if (a.type === 'returnToStart')                     label = 'Return to Start';
+      }
+      const display = label ? `[${a.type}] ${label}` : `[${a.type}] ${a.id}`;
+      return { id: a.id, label: display };
+    }).sort((a, b) => a.label.localeCompare(b.label));
+  } catch(e) { pagingActions = []; }
+
+  try {
+    /* Pages — GET /config/rest/paging-console-button-layout/v1/pages */
+    const pr = await fetch('/config/rest/paging-console-button-layout/v1/pages');
+    if (!pr.ok) { pagingPages = []; return; }
+    const pData = await pr.json();
+    const pages = Array.isArray(pData) ? pData
+                : Array.isArray(pData.data) ? pData.data
+                : (pData.pages || []);
+    pagingPages = pages.map((p, i) => ({ id: p.id, name: p.name || p.label || `Page ${i + 1}` }))
+                       .sort((a, b) => a.name.localeCompare(b.name));
+  } catch(e) { pagingPages = []; }
+
+  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
+    renderActionList();
 }
 
 /* Fetch current value + allowed values for a device parameter.

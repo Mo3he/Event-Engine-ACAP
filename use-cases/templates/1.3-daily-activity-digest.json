@@ -19,7 +19,7 @@
     {
       "type": "schedule",
       "schedule_type": "daily_time",
-      "daily_time": "18:00",
+      "time": "18:00",
       "days": [0, 1, 2, 3, 4, 5, 6]
     }
   ],
