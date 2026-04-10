@@ -1,0 +1,1315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Engine - Automation for Axis Cameras</title>
+  <meta name="description" content="A powerful IFTTT-style automation engine that runs directly on your Axis camera. Build rules with triggers, conditions, and actions - no server required.">
+  <link rel="icon" href="event_engine_icon_dark.svg" type="image/svg+xml">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg: #09090b;
+      --surface: #18181b;
+      --surface2: #27272a;
+      --surface3: #3f3f46;
+      --border: #27272a;
+      --border-hover: #3f3f46;
+      --text: #fafafa;
+      --text-muted: #a1a1aa;
+      --text-dim: #71717a;
+      --accent: #378ADD;
+      --accent2: #2b70b8;
+      --accent3: #F5A623;
+      --green: #00D4A0;
+      --amber: #F5A623;
+      --blue: #378ADD;
+      --cyan: #00D4A0;
+      --rose: #f43f5e;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --radius-lg: 16px;
+    }
+
+    [data-theme="light"] {
+      --bg: #f8f9fb;
+      --surface: #ffffff;
+      --surface2: #f0f1f4;
+      --surface3: #dcdee3;
+      --border: #e0e2e7;
+      --border-hover: #c8cad0;
+      --text: #1a1d23;
+      --text-muted: #5c6370;
+      --text-dim: #8b919d;
+      --accent: #2a6cb8;
+      --accent2: #225a9a;
+      --accent3: #d48b0a;
+      --green: #00b389;
+      --amber: #d48b0a;
+      --blue: #2a6cb8;
+      --cyan: #00b389;
+      --rose: #d93651;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Noise texture overlay ──────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='256' height='256' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 9999;
+    }
+    [data-theme="light"] body::before { opacity: 0.5; }
+
+    /* ── Nav ────────────────────────────────────── */
+    .nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      padding: 0 24px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      backdrop-filter: blur(20px) saturate(1.4);
+      -webkit-backdrop-filter: blur(20px) saturate(1.4);
+      background: rgba(9, 9, 11, 0.8);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    [data-theme="light"] .nav {
+      background: rgba(248, 249, 251, 0.85);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+    }
+    .nav-logo {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .nav-logo img {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .nav-links {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .nav-links a {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      transition: all 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); background: var(--surface); }
+    .nav-cta {
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      color: #fff !important;
+      background: var(--accent) !important;
+      padding: 7px 16px !important;
+      border-radius: var(--radius-sm) !important;
+      transition: all 0.2s !important;
+    }
+    .nav-cta:hover { opacity: 0.9; transform: translateY(-1px); background: var(--accent) !important; }
+
+    /* ── Hero ───────────────────────────────────── */
+    .hero {
+      position: relative;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 120px 24px 80px;
+      overflow: hidden;
+    }
+
+    /* Animated gradient orbs */
+    .hero-glow {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.3;
+      animation: float 20s ease-in-out infinite;
+    }
+    [data-theme="light"] .hero-glow { opacity: 0.12; }
+    .hero-glow-1 {
+      width: 600px; height: 600px;
+      background: #378ADD;
+      top: -200px; right: -100px;
+      animation-delay: 0s;
+    }
+    .hero-glow-2 {
+      width: 500px; height: 500px;
+      background: #F5A623;
+      bottom: -150px; left: -100px;
+      animation-delay: -7s;
+    }
+    .hero-glow-3 {
+      width: 400px; height: 400px;
+      background: #00D4A0;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      animation-delay: -14s;
+      opacity: 0.15;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -40px) scale(1.05); }
+      66% { transform: translate(-20px, 30px) scale(0.95); }
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      text-align: center;
+      max-width: 800px;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px 6px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(55, 138, 221, 0.3);
+      background: rgba(55, 138, 221, 0.1);
+      font-size: 13px;
+      font-weight: 500;
+      color: #7ab8f0;
+      margin-bottom: 28px;
+      backdrop-filter: blur(10px);
+    }
+    [data-theme="light"] .hero-badge {
+      border: 1px solid rgba(42, 108, 184, 0.25);
+      background: rgba(42, 108, 184, 0.08);
+      color: #2a6cb8;
+    }
+    .hero-badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    .hero-icon {
+      width: 80px;
+      height: 80px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 0 40px rgba(55, 138, 221, 0.25), 0 0 80px rgba(0, 212, 160, 0.12);
+      animation: fadeSlideUp 0.6s ease-out both;
+    }
+    [data-theme="light"] .hero-icon {
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1), 0 0 40px rgba(42, 108, 184, 0.12);
+    }
+
+    /* ── Theme toggle ───────────────────────────── */
+    .theme-toggle {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 16px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .theme-toggle:hover {
+      color: var(--text);
+      background: var(--surface2);
+      border-color: var(--border-hover);
+    }
+    @keyframes pulse-dot {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
+      50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 900;
+      line-height: 1.05;
+      letter-spacing: -2px;
+      margin-bottom: 20px;
+    }
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, #ffffff 0%, #e0e0e0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-word {
+      display: inline-block;
+      color: var(--accent);
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    [data-theme="light"] .hero h1 .gradient {
+      background: linear-gradient(135deg, #1a1d23 0%, #3a3f4a 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--text-muted);
+      max-width: 580px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border-radius: var(--radius);
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #378ADD, #2b70b8);
+      color: #fff;
+      box-shadow: 0 0 24px rgba(55, 138, 221, 0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 40px rgba(55, 138, 221, 0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover {
+      background: var(--surface2);
+      border-color: var(--border-hover);
+      transform: translateY(-1px);
+    }
+    .btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+    /* ── Hero visual — animated rule diagram ───── */
+    .hero-visual {
+      margin-top: 64px;
+      position: relative;
+      z-index: 1;
+    }
+    .rule-flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      flex-wrap: wrap;
+      padding: 0 20px;
+    }
+    .rule-node {
+      padding: 14px 22px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid;
+      backdrop-filter: blur(10px);
+      position: relative;
+      animation: fadeSlideUp 0.8s ease-out both;
+    }
+    .rule-node:nth-child(1) { animation-delay: 0.2s; }
+    .rule-node:nth-child(3) { animation-delay: 0.4s; }
+    .rule-node:nth-child(5) { animation-delay: 0.6s; }
+
+    .rule-trigger {
+      background: rgba(55, 138, 221, 0.1);
+      border-color: rgba(55, 138, 221, 0.3);
+      color: #7ab8f0;
+    }
+    .rule-condition {
+      background: rgba(245, 166, 35, 0.1);
+      border-color: rgba(245, 166, 35, 0.3);
+      color: #F5A623;
+    }
+    .rule-action {
+      background: rgba(0, 212, 160, 0.1);
+      border-color: rgba(0, 212, 160, 0.3);
+      color: #00D4A0;
+    }
+    [data-theme="light"] .rule-trigger {
+      background: rgba(42, 108, 184, 0.08);
+      border-color: rgba(42, 108, 184, 0.3);
+      color: #2a6cb8;
+    }
+    [data-theme="light"] .rule-condition {
+      background: rgba(212, 139, 10, 0.08);
+      border-color: rgba(212, 139, 10, 0.3);
+      color: #b07a08;
+    }
+    [data-theme="light"] .rule-action {
+      background: rgba(0, 179, 137, 0.08);
+      border-color: rgba(0, 179, 137, 0.3);
+      color: #009970;
+    }
+    .rule-arrow {
+      color: var(--text-dim);
+      font-size: 20px;
+      padding: 0 8px;
+      animation: fadeSlideUp 0.8s ease-out both;
+    }
+    .rule-arrow:nth-child(2) { animation-delay: 0.3s; }
+    .rule-arrow:nth-child(4) { animation-delay: 0.5s; }
+
+    .rule-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      opacity: 0.6;
+      display: block;
+      margin-bottom: 2px;
+    }
+
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Sections shared ───────────────────────── */
+    .section {
+      padding: 100px 24px;
+      position: relative;
+    }
+    .section-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .section-label {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-title {
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+    .section-desc {
+      font-size: 17px;
+      color: var(--text-muted);
+      max-width: 560px;
+      line-height: 1.6;
+    }
+    .section-header {
+      margin-bottom: 56px;
+    }
+
+    /* ── Stats bar ─────────────────────────────── */
+    .stats {
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .stats-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+    }
+    .stat {
+      padding: 40px 32px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 40px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, var(--text), var(--text-muted));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat-label {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-weight: 500;
+    }
+
+    /* ── Features grid ─────────────────────────── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .feature-card {
+      background: var(--surface);
+      padding: 36px 28px;
+      position: relative;
+    }
+    .feature-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(55,138,221,0.05), transparent);
+      opacity: 0;
+    }
+
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      margin-bottom: 16px;
+    }
+    .feature-icon.green { background: rgba(0, 212, 160, 0.15); }
+    .feature-icon.blue { background: rgba(55, 138, 221, 0.15); }
+    .feature-icon.amber { background: rgba(245, 166, 35, 0.15); }
+    .feature-icon.purple { background: rgba(55, 138, 221, 0.12); }
+    .feature-icon.rose { background: rgba(245, 166, 35, 0.12); }
+    .feature-icon.cyan { background: rgba(0, 212, 160, 0.12); }
+
+    .feature-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      letter-spacing: -0.3px;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* ── Trigger / Condition / Action columns ──── */
+    .tca-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 2fr;
+      gap: 24px;
+    }
+    .tca-col {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .tca-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+    }
+    .tca-header-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .tca-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .tca-dot.green { background: #378ADD; }
+    .tca-dot.amber { background: #F5A623; }
+    .tca-dot.blue { background: #00D4A0; }
+    .tca-header h3 {
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .tca-header span {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+    .tca-list {
+      padding: 12px;
+      list-style: none;
+    }
+    .tca-list li {
+      padding: 10px 14px;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .tca-list li .ico {
+      font-size: 16px;
+      width: 24px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .tca-list li.has-desc {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
+    }
+    .tca-list li.has-desc .tca-item-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .tca-list li.has-desc .tca-item-desc {
+      font-size: 11px;
+      color: var(--text-dim);
+      font-weight: 400;
+      padding-left: 34px;
+    }
+
+    .tca-list.two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    /* ── Cross-device section ──────────────────── */
+    .cross-device-visual {
+      margin-top: 48px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 48px;
+      position: relative;
+      overflow: hidden;
+    }
+    .cross-device-visual::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(55,138,221,0.06), transparent 70%);
+    }
+    .device-diagram {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      position: relative;
+      z-index: 1;
+      flex-wrap: wrap;
+    }
+    .device-box {
+      width: 180px;
+      background: var(--surface2);
+      border: 1px solid var(--border-hover);
+      border-radius: var(--radius);
+      padding: 20px;
+      text-align: center;
+      position: relative;
+    }
+    .device-box .device-emoji { font-size: 32px; margin-bottom: 8px; display: block; }
+    .device-box .device-name {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .device-box .device-role {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+    .device-connector {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      color: var(--text-dim);
+    }
+    .device-connector .conn-line {
+      width: 60px;
+      height: 2px;
+      background: linear-gradient(90deg, #378ADD, #00D4A0);
+      border-radius: 1px;
+      position: relative;
+    }
+    .device-connector .conn-line::after {
+      content: '';
+      position: absolute;
+      right: -4px;
+      top: -3px;
+      width: 0;
+      height: 0;
+      border-left: 6px solid #00D4A0;
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+    }
+    .device-connector span {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── Code block showcase ───────────────────── */
+    .code-showcase {
+      margin-top: 48px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .code-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .code-block-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .code-block-header .dots {
+      display: flex;
+      gap: 6px;
+    }
+    .code-block-header .dots span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--surface3);
+    }
+    .code-block-header .code-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      margin-left: 8px;
+    }
+    .code-block pre {
+      padding: 20px;
+      margin: 0;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text-muted);
+      overflow-x: auto;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+    }
+    .code-block pre .key { color: #7ab8f0; }
+    .code-block pre .str { color: #00D4A0; }
+    .code-block pre .num { color: #F5A623; }
+    [data-theme="light"] .code-block pre .key { color: #2a6cb8; }
+    [data-theme="light"] .code-block pre .str { color: #009970; }
+    [data-theme="light"] .code-block pre .num { color: #b07a08; }
+    [data-theme="light"] .code-block pre { color: #5c6370; }
+    .code-block pre .comment { color: var(--text-dim); font-style: italic; }
+
+    /* ── CTA section ───────────────────────────── */
+    .cta-section {
+      text-align: center;
+      padding: 120px 24px;
+      position: relative;
+    }
+    .cta-glow {
+      position: absolute;
+      width: 600px;
+      height: 300px;
+      background: linear-gradient(135deg, #378ADD, #00D4A0);
+      filter: blur(150px);
+      opacity: 0.15;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+    }
+    .cta-section .section-title,
+    .cta-section .section-desc {
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .cta-buttons {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 32px;
+      flex-wrap: wrap;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── Footer ─────────────────────────────────── */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 24px;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    .footer a {
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    .footer a:hover { color: var(--text); }
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+
+    /* ── Responsive ─────────────────────────────── */
+    @media (max-width: 900px) {
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .tca-grid { grid-template-columns: 1fr; }
+
+      .code-showcase { grid-template-columns: 1fr; }
+      .stats-inner { grid-template-columns: repeat(2, 1fr); }
+      .device-diagram { gap: 20px; }
+    }
+    @media (max-width: 640px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .stats-inner { grid-template-columns: 1fr; }
+      .nav-links a:not(.nav-cta) { display: none; }
+      .hero { padding: 100px 20px 60px; }
+      .section { padding: 64px 20px; }
+      .rule-flow { gap: 8px; }
+      .rule-arrow { display: none; }
+      .cross-device-visual { padding: 28px; }
+      .device-connector { transform: rotate(90deg); }
+    }
+
+    /* ── Scroll reveal ─────────────────────────── */
+    .reveal {
+      opacity: 0;
+      transform: translateY(30px);
+      transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">
+      <div class="nav-logo"><img src="event_engine_icon_light.svg" alt="Event Engine"></div>
+      Event Engine
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="use-cases.html">Use Cases</a>
+      <a href="help.html">Docs</a>
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest" class="nav-cta">
+        <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;margin-right:2px"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Download
+      </a>
+      <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">🌙</button>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-glow hero-glow-1"></div>
+  <div class="hero-glow hero-glow-2"></div>
+  <div class="hero-glow hero-glow-3"></div>
+  <div class="hero-content">
+    <div class="hero-badge">
+      <span class="hero-badge-dot"></span>
+      v1.9.3 - Paging Console + 42 Use-Case Templates
+    </div>
+    <h1><span class="gradient">Automate your Axis</span><br><span class="hero-word" id="heroWord">camera</span></h1>
+    <p class="hero-sub">
+      A powerful IFTTT-style rule engine that runs directly on the camera.
+      Triggers, conditions, actions - no server or cloud required.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_aarch64.eap" class="btn btn-primary">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Download aarch64
+      </a>
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_armv7hf.eap" class="btn btn-primary">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Download armv7hf
+      </a>
+    </div>
+    <div class="hero-actions" style="margin-top: 12px;">
+      <a href="use-cases.html" class="btn btn-secondary">Explore Use Cases</a>
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP" class="btn btn-secondary">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+
+    <div class="hero-visual">
+      <div class="rule-flow">
+        <div class="rule-node rule-trigger">
+          <span class="rule-label">Trigger</span>
+          Motion Detected
+        </div>
+        <span class="rule-arrow">→</span>
+        <div class="rule-node rule-condition">
+          <span class="rule-label">Condition</span>
+          After Sunset
+        </div>
+        <span class="rule-arrow">→</span>
+        <div class="rule-node rule-action">
+          <span class="rule-label">Action</span>
+          Send Alert + Record
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<section class="stats reveal">
+  <div class="stats-inner">
+    <div class="stat">
+      <div class="stat-value">8</div>
+      <div class="stat-label">Trigger Types</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">7</div>
+      <div class="stat-label">Condition Types</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">35+</div>
+      <div class="stat-label">Action Types</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">42</div>
+      <div class="stat-label">Ready-Made Templates</div>
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="section" id="features">
+  <div class="section-inner">
+    <div class="section-header reveal">
+      <div class="section-label">Features</div>
+      <h2 class="section-title">Everything runs on the edge</h2>
+      <p class="section-desc">
+        No cloud subscriptions, no middleware, no VMS plugins.
+        Event Engine runs as an ACAP directly on your Axis camera.
+      </p>
+    </div>
+    <div class="features-grid reveal">
+      <div class="feature-card">
+        <div class="feature-icon green">⚡</div>
+        <h3>Zero Latency</h3>
+        <p>Rules trigger and execute locally on the camera. Sub-second response from detection to action.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon blue">🌐</div>
+        <h3>Cross-Device Automation</h3>
+        <p>One camera detects, a second verifies, a third acts. Chain devices across your network - no middleware.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon amber">📡</div>
+        <h3>Built-in MQTT</h3>
+        <p>Native MQTT client with TLS, wildcards, and QoS. Integrate with Home Assistant, Node-RED, or any broker.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon purple">🔗</div>
+        <h3>Webhooks & REST</h3>
+        <p>Trigger rules via HTTP POST. Send data to Slack, Teams, Telegram, InfluxDB, or any API endpoint.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon rose">📊</div>
+        <h3>Smart Scheduling</h3>
+        <p>Cron, intervals, daily time, and astronomical sunrise/sunset triggers with latitude/longitude and offset support.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon cyan">🛡️</div>
+        <h3>Arm / Disarm Patterns</h3>
+        <p>System-level arming via MQTT or variables. Build full security workflows with conditional rule execution.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Capabilities (Trigger / Condition / Action) -->
+<section class="section" id="capabilities" style="background: var(--surface);">
+  <div class="section-inner">
+    <div class="section-header reveal">
+      <div class="section-label">Capabilities</div>
+      <h2 class="section-title">If this, then that - your way</h2>
+      <p class="section-desc">
+        Combine any trigger with any condition and any sequence of actions.
+        Every field supports dynamic <code style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-family:'JetBrains Mono',monospace;font-size:13px;">{{variables}}</code>.
+      </p>
+    </div>
+
+    <div class="tca-grid reveal">
+      <!-- Triggers -->
+      <div class="tca-col">
+        <div class="tca-header">
+          <div class="tca-header-row"><span class="tca-dot green"></span><h3>Triggers</h3></div>
+          <span>8 trigger types</span>
+        </div>
+        <ul class="tca-list">
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📹</span> Device Events</div><span class="tca-item-desc">Every event on every Axis device</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">⏰</span> Schedules & Cron</div><span class="tca-item-desc">One-time, recurring, or cron expressions</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🌅</span> Sunrise / Sunset</div><span class="tca-item-desc">Astronomical events based on GPS location</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📨</span> MQTT Messages</div><span class="tca-item-desc">Subscribe to topics with wildcard filters</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔌</span> HTTP Webhooks</div><span class="tca-item-desc">Receive POST requests from external systems</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔘</span> I/O Input</div><span class="tca-item-desc">Physical input port state changes</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">#️⃣</span> Counter Threshold</div><span class="tca-item-desc">Fire when a counter crosses a value</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔗</span> Rule Chain</div><span class="tca-item-desc">Trigger when another rule fires</span></li>
+        </ul>
+      </div>
+
+      <!-- Conditions -->
+      <div class="tca-col">
+        <div class="tca-header">
+          <div class="tca-header-row"><span class="tca-dot amber"></span><h3>Conditions</h3></div>
+          <span>7 condition types</span>
+        </div>
+        <ul class="tca-list">
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🕐</span> Time Window</div><span class="tca-item-desc">Only allow during specific hours</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔘</span> I/O State</div><span class="tca-item-desc">Check physical port high/low</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">#️⃣</span> Counter Compare</div><span class="tca-item-desc">Gate on counter value thresholds</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📐</span> Variable Compare</div><span class="tca-item-desc">Compare stored variables to values</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🌐</span> HTTP Check</div><span class="tca-item-desc">Query an endpoint and check the response</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">👥</span> AOA Occupancy</div><span class="tca-item-desc">Gate on live people-count thresholds</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🌙</span> Day / Night</div><span class="tca-item-desc">Check IR cut filter state</span></li>
+        </ul>
+      </div>
+
+      <!-- Actions -->
+      <div class="tca-col">
+        <div class="tca-header">
+          <div class="tca-header-row"><span class="tca-dot blue"></span><h3>Actions</h3></div>
+          <span>35+ action types</span>
+        </div>
+        <ul class="tca-list two-col">
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🌐</span> HTTP Request</div><span class="tca-item-desc">Call any REST API or webhook</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📡</span> MQTT Publish</div><span class="tca-item-desc">Publish to any topic</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📧</span> Email (SMTP)</div><span class="tca-item-desc">Send with attachments</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">💬</span> Slack</div><span class="tca-item-desc">Channel notifications</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">💬</span> Teams</div><span class="tca-item-desc">Channel notifications</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">💬</span> Telegram</div><span class="tca-item-desc">Bot messages</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📸</span> Snapshot Upload</div><span class="tca-item-desc">Capture and send JPEG</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📁</span> FTP Upload</div><span class="tca-item-desc">Push files to FTP server</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🎥</span> Recording</div><span class="tca-item-desc">Start/stop SD card recording</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📝</span> Overlay Text</div><span class="tca-item-desc">Dynamic text on video stream</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🎯</span> PTZ Preset</div><span class="tca-item-desc">Move to saved position</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔄</span> Guard Tour</div><span class="tca-item-desc">Start or stop a tour</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🌙</span> IR Cut Filter</div><span class="tca-item-desc">Force day/night mode</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔒</span> Privacy Mask</div><span class="tca-item-desc">Enable or disable masks</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🧹</span> Wiper</div><span class="tca-item-desc">Activate lens wiper</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">💡</span> Light Control</div><span class="tca-item-desc">Toggle white light/IR LED</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔊</span> Audio Clip</div><span class="tca-item-desc">Play stored audio file</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📟</span> Paging Console Execute</div><span class="tca-item-desc">Trigger paging action by UUID</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📟</span> Paging Console Button</div><span class="tca-item-desc">Swap button layout dynamically</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🚨</span> Siren / Light</div><span class="tca-item-desc">Activate strobe siren profiles</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📺</span> Speaker Display</div><span class="tca-item-desc">Show text on display speaker</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔌</span> I/O Output</div><span class="tca-item-desc">Toggle relay or output port</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📋</span> Notification Digest</div><span class="tca-item-desc">Batch alerts into summaries</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">⏱️</span> Delay</div><span class="tca-item-desc">Wait before next action</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📐</span> Set Variable</div><span class="tca-item-desc">Store dynamic values</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">#️⃣</span> Increment Counter</div><span class="tca-item-desc">Add/subtract from counters</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">▶️</span> Run Rule</div><span class="tca-item-desc">Chain to another rule</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔀</span> Enable / Disable Rule</div><span class="tca-item-desc">Toggle rules on or off</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">⚡</span> Fire ACAP Event</div><span class="tca-item-desc">Emit a VAPIX event</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🔍</span> Device Event Query</div><span class="tca-item-desc">Poll event state via VAPIX</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">⚙️</span> Set Device Parameter</div><span class="tca-item-desc">Change any device setting</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📦</span> ACAP Control</div><span class="tca-item-desc">Start/stop/restart ACAPs</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📊</span> InfluxDB Write</div><span class="tca-item-desc">Write time-series data points</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">👥</span> AOA Get Counts</div><span class="tca-item-desc">Fetch live occupancy counts</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">📓</span> Send Syslog</div><span class="tca-item-desc">Forward to syslog server</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Cross-Device -->
+<section class="section" id="cross-device">
+  <div class="section-inner">
+    <div class="section-header reveal">
+      <div class="section-label">Cross-Device</div>
+      <h2 class="section-title">Multi-camera automation,<br>zero infrastructure</h2>
+      <p class="section-desc">
+        Detect on one camera, check a condition on a second, and trigger an action on a third.
+        All over the local network - no server or cloud.
+      </p>
+    </div>
+
+    <div class="cross-device-visual reveal">
+      <div class="device-diagram">
+        <div class="device-box">
+          <span class="device-emoji">📷</span>
+          <div class="device-name">Camera A</div>
+          <div class="device-role">Motion Trigger</div>
+        </div>
+        <div class="device-connector">
+          <div class="conn-line"></div>
+          <span>Verify</span>
+        </div>
+        <div class="device-box">
+          <span class="device-emoji">🌡️</span>
+          <div class="device-name">Air Quality Sensor</div>
+          <div class="device-role">Environment Check</div>
+        </div>
+        <div class="device-connector">
+          <div class="conn-line"></div>
+          <span>Act</span>
+        </div>
+        <div class="device-box">
+          <span class="device-emoji">🔊</span>
+          <div class="device-name">Speaker</div>
+          <div class="device-role">Display + Audio Alert</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- API & Integration -->
+<section class="section" style="background: var(--surface);">
+  <div class="section-inner">
+    <div class="section-header reveal">
+      <div class="section-label">Integration</div>
+      <h2 class="section-title">Built for developers</h2>
+      <p class="section-desc">
+        Full REST API, real-time alert stream, dynamic template variables,
+        and 42 downloadable rule templates to get started fast.
+      </p>
+    </div>
+
+    <div class="code-showcase reveal">
+      <div class="code-block">
+        <div class="code-block-header">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <span class="code-title">Webhook Trigger</span>
+        </div>
+<pre>curl -u admin:pass -X POST \
+  <span class="str">"http://&lt;camera-ip&gt;/local/acap_event_engine/fire"</span> \
+  -H <span class="str">"Content-Type: application/json"</span> \
+  -d <span class="str">'{
+    "token": "my-secret-token",
+    "payload": {
+      "source": "doorbell",
+      "zone": "front-entrance"
+    }
+  }'</span></pre>
+      </div>
+      <div class="code-block">
+        <div class="code-block-header">
+          <div class="dots"><span></span><span></span><span></span></div>
+          <span class="code-title">Alert Stream</span>
+        </div>
+<pre>curl --digest -u admin:pass -N \
+  <span class="str">"http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream"</span>
+
+<span class="comment">// Response stream:</span>
+{<span class="key">"connected"</span>: <span class="num">true</span>}
+{
+  <span class="key">"eventType"</span>: <span class="str">"RuleFired"</span>,
+  <span class="key">"rule_name"</span>: <span class="str">"Motion Alert"</span>,
+  <span class="key">"dateTime"</span>: <span class="str">"2026-04-10T12:00:00Z"</span>,
+  <span class="key">"trigger_data"</span>: { ... }
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="cta-glow"></div>
+  <div class="section-inner" style="position:relative;z-index:1;">
+    <div class="section-label" style="text-align:center">Get Started</div>
+    <h2 class="section-title" style="text-align:center;max-width:600px">Ready to automate<br>your Axis cameras?</h2>
+    <p class="section-desc" style="text-align:center;margin-left:auto;margin-right:auto">
+      Download the ACAP, install it on your camera, and start building rules in minutes.
+      No licenses. No subscriptions. Free forever.
+    </p>
+    <div class="cta-buttons">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_aarch64.eap" class="btn btn-primary">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Download aarch64
+      </a>
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_armv7hf.eap" class="btn btn-primary">
+        <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
+        Download armv7hf
+      </a>
+      <a href="help.html" class="btn btn-secondary">Read the Manual</a>
+      <a href="https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json" class="btn btn-secondary">API Reference</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="footer-links">
+    <a href="https://github.com/Mo3he/Event-Engine-ACAP">GitHub</a>
+    <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases">Releases</a>
+    <a href="help.html">Documentation</a>
+    <a href="use-cases.html">Use Cases</a>
+    <a href="https://github.com/Mo3he/Event-Engine-ACAP/issues">Issues</a>
+    <a href="https://github.com/Mo3he/Event-Engine-ACAP/discussions">Discussions</a>
+  </div>
+  <p>Event Engine ACAP - Open source automation for Axis cameras</p>
+</footer>
+
+<script>
+// Scroll-reveal
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+      observer.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Cycle hero rule examples
+const examples = [
+  { trigger: 'Motion Detected',   condition: 'After Sunset',     action: 'Send Alert + Record' },
+  { trigger: 'MQTT: arm/disarm',  condition: 'Variable Check',   action: 'Enable / Disable Rules' },
+  { trigger: 'Schedule: 8 AM',    condition: 'Weekday Only',     action: 'Start Guard Tour' },
+  { trigger: 'Webhook POST',      condition: 'Counter < 100',    action: 'HTTP + InfluxDB Write' },
+  { trigger: 'I/O Input Rising',  condition: 'AOA Occupancy > 5',action: 'Siren + Slack Alert' },
+  { trigger: 'Counter ≥ 50',      condition: 'Day/Night: Night', action: 'Paging Console + Email' },
+  { trigger: 'AOA: Person Enters',condition: 'Time: 22:00–06:00',action: 'Record + Teams Alert' },
+];
+let exIdx = 0;
+const nodes = document.querySelectorAll('.rule-node');
+
+function cycleExample() {
+  exIdx = (exIdx + 1) % examples.length;
+  const ex = examples[exIdx];
+  nodes.forEach(n => { n.style.opacity = '0'; n.style.transform = 'translateY(10px)'; });
+  setTimeout(() => {
+    nodes[0].lastChild.textContent = ex.trigger;
+    nodes[1].lastChild.textContent = ex.condition;
+    nodes[2].lastChild.textContent = ex.action;
+    nodes.forEach((n, i) => {
+      setTimeout(() => { n.style.opacity = '1'; n.style.transform = 'translateY(0)'; }, i * 100);
+    });
+  }, 300);
+}
+
+setInterval(cycleExample, 4000);
+
+// Cycle hero device word
+const heroWord = document.getElementById('heroWord');
+const devices = ['camera', 'speaker', 'strobe siren', 'paging console', 'air quality sensor', 'display speaker', 'radar', 'door station', 'I/O relay module', 'intercom'];
+let wordIdx = 0;
+
+function cycleWord() {
+  wordIdx = (wordIdx + 1) % devices.length;
+  heroWord.style.opacity = '0';
+  heroWord.style.transform = 'translateY(8px)';
+  setTimeout(() => {
+    heroWord.textContent = devices[wordIdx];
+    heroWord.style.opacity = '1';
+    heroWord.style.transform = 'translateY(0)';
+  }, 250);
+}
+
+heroWord.style.display = 'inline-block';
+setInterval(cycleWord, 3000);
+
+// Theme toggle
+const toggle = document.getElementById('themeToggle');
+const iconImgs = document.querySelectorAll('.nav-logo img, .hero-icon');
+
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  toggle.textContent = theme === 'light' ? '☀️' : '🌙';
+  const iconFile = theme === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
+  iconImgs.forEach(img => { img.src = iconFile; });
+  try { localStorage.setItem('ee-theme', theme); } catch(e) {}
+}
+
+// Init from stored preference or system preference
+const stored = localStorage.getItem('ee-theme');
+if (stored) {
+  setTheme(stored);
+} else {
+  const systemLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+  setTheme(systemLight ? 'light' : 'dark');
+}
+
+// Listen for system theme changes (only applies when no manual override)
+window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', (e) => {
+  if (!localStorage.getItem('ee-theme')) {
+    setTheme(e.matches ? 'light' : 'dark');
+  }
+});
+
+toggle.addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-theme');
+  setTheme(current === 'light' ? 'dark' : 'light');
+});
+</script>
+
+</body>
+</html>
