@@ -1,0 +1,31 @@
+{
+  "name": "Maintenance Mode Disable",
+  "description": "Deactivate maintenance mode via MQTT. Sets system.maintenance = false so all suppressed rules resume normal operation, and logs the restoration to syslog.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "cameras/{{camera.serial}}/maintenance",
+      "payload_filter": "disable"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.maintenance",
+      "value": "false"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Maintenance mode DISABLED via MQTT at {{timestamp}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

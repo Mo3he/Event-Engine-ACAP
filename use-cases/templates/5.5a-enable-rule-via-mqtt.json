@@ -1,0 +1,31 @@
+{
+  "name": "Enable Rule via MQTT",
+  "description": "Enable a specific rule when an MQTT command arrives. Useful for activating seasonal rules, switching operational profiles, or enabling alert rules from a central control system. Pair with 5.5b to also be able to disable the same rule.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "cameras/{{camera.serial}}/rules/YOUR_RULE_ID/enable",
+      "payload_filter": "enable"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_rule_enabled",
+      "rule_id": "REPLACE_WITH_TARGET_RULE_ID",
+      "enabled": true
+    },
+    {
+      "type": "send_syslog",
+      "message": "Rule enabled via MQTT at {{timestamp}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

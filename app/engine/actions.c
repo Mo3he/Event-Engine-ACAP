@@ -1843,6 +1843,18 @@ static void action_run_rule(cJSON* cfg) {
     if (rid) RuleEngine_Fire(rid, NULL);  /* directly execute the target rule's actions */
 }
 
+/* set_rule_enabled — enable or disable another rule by ID */
+static void action_set_rule_enabled(cJSON* cfg) {
+    const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
+    if (!rid || !rid[0]) { LOG_WARN("set_rule_enabled: no rule_id specified"); return; }
+    cJSON* en_item = cJSON_GetObjectItem(cfg, "enabled");
+    int enabled = en_item ? (cJSON_IsTrue(en_item) ? 1 : 0) : 1;
+    if (!RuleEngine_SetEnabled(rid, enabled))
+        LOG_WARN("set_rule_enabled: rule '%s' not found", rid);
+    else
+        LOG("set_rule_enabled: rule '%s' %s", rid, enabled ? "enabled" : "disabled");
+}
+
 /* vapix_query — fetch cached VAPIX event data and inject into trigger_data
  * so subsequent actions in the same rule can use {{trigger.FIELD}} tokens.
  * Requires a passive subscription to be active (registered at rule load time). */
@@ -2491,6 +2503,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "ftp_upload")       == 0) action_ftp_upload(action, trigger_data);
         else if (strcmp(type, "digest")           == 0) action_digest(rule_id, action, trigger_data);
         else if (strcmp(type, "run_rule")          == 0) action_run_rule(action);
+        else if (strcmp(type, "set_rule_enabled")  == 0) action_set_rule_enabled(action);
         else if (strcmp(type, "vapix_query")       == 0) action_vapix_query(action, trigger_data);
         else if (strcmp(type, "guard_tour")        == 0) action_guard_tour(action);
         else if (strcmp(type, "set_device_param")  == 0) action_set_device_param(action);

@@ -1,0 +1,28 @@
+{
+  "name": "MQTT Heartbeat",
+  "description": "Publish a status heartbeat every 60 seconds. External monitoring systems (Node-RED, Home Assistant, Zabbix, Grafana) subscribe to this topic and alert if it goes silent — providing liveness detection for the camera and engine without polling.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval_seconds": 60
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "mqtt_publish",
+      "topic": "cameras/{{camera.serial}}/heartbeat",
+      "payload": "{\"serial\":\"{{camera.serial}}\",\"model\":\"{{camera.model}}\",\"time\":\"{{timestamp}}\",\"armed\":\"{{system.armed}}\"}",
+      "qos": 0,
+      "retain": false
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "Speaker Display — Air Quality Critical Alert",
+  "description": "When the air quality gateway publishes a 'critical' status (CO₂ > 1000 ppm or PM2.5 > 35 μg/m³), override the live data display with a red scrolling alert and set system.airquality_alert so the normal display rule is suppressed until the space is safe.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 60,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "sensors/airquality/status",
+      "payload_filter": "critical"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.airquality_alert",
+      "value": "active"
+    },
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "⚠ POOR AIR QUALITY — Please ventilate the area\nCO₂: {{trigger.co2}} ppm   PM2.5: {{trigger.pm25}} μg/m³",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#CC0000",
+      "textSize": "large",
+      "scrollDirection": "fromRightToLeft",
+      "scrollSpeed": 4,
+      "while_active": true
+    }
+  ]
+}

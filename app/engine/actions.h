@@ -31,6 +31,7 @@ extern "C" {
  *   set_variable      — store a variable value
  *   increment_counter — increment/decrement a counter
  *   run_rule          — trigger another rule by ID
+ *   set_rule_enabled  — enable or disable another rule by ID
  *   guard_tour        — start/stop a PTZ guard tour
  *   set_device_param  — update a camera parameter via param.cgi
  *   snapshot_upload   — capture JPEG and POST/PUT to a URL

@@ -125,6 +125,7 @@ Actions are grouped by category in the rule editor.
 | **Set Variable** | Create or update a named persistent variable |
 | **Increment Counter** | Add or subtract a value from a named counter |
 | **Run Rule** | Immediately trigger another rule by name |
+| **Enable / Disable Rule** | Enable or disable another rule by ID — use to activate seasonal rules, switch operational profiles, or suppress alerts from a central control system |
 
 ### Advanced
 

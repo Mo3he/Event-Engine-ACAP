@@ -80,7 +80,7 @@ Publish sensor data over MQTT using Home Assistant's topic conventions - sensors
 
 ## Use Case 2: Device Control
 
-Automate camera hardware functions. The camera adjusts its own imaging, PTZ position, overlays, privacy masks, and illumination in response to events, schedules, or external commands - without any VMS or controller.
+Automate camera hardware functions. The camera adjusts its own imaging, PTZ position, overlays, privacy masks, illumination, audio output, and physical hardware in response to events, schedules, or external commands - without any VMS or controller.
 
 ### 2.1 Sunrise/Sunset IR & Light Management
 
@@ -137,6 +137,32 @@ A camera covers both a public area and a private office. Privacy masks need to f
 
 ---
 
+### 2.4 Motion → Audio Clip
+
+**Scenario:** When motion is detected, play a pre-uploaded audio clip through the camera speaker — useful as an on-site deterrent (warning tone or voice message) or to alert staff in the same building without sending a remote notification.
+
+**How it works:**
+- A **Device Event** trigger subscribes to Motion Detection (active = true)
+- An **Audio Clip** action plays the selected clip by name or ID (clips are uploaded via the camera's Audio section under Settings)
+- A **10-second cooldown** prevents the clip repeating on sustained motion
+
+**Template:** [`templates/2.4-motion-audio-clip.json`](templates/2.4-motion-audio-clip.json)
+
+---
+
+### 2.5 Scheduled Wiper
+
+**Scenario:** An outdoor camera accumulates condensation or debris on its lens cover overnight. Run the wiper automatically every morning at 07:00 to restore a clear view before the working day begins — no manual intervention required.
+
+**How it works:**
+- A **schedule** trigger fires daily at 07:00, every day of the week
+- A **Wiper** action starts wiper run 1 (the primary wiper service)
+- Adjust the time or restrict to weekdays only by changing the `days` array in the template
+
+**Template:** [`templates/2.5-schedule-wiper.json`](templates/2.5-schedule-wiper.json)
+
+---
+
 ## Use Case 3: Security & Surveillance Automation
 
 Orchestrate full security responses on the edge. Combine detection triggers with conditions and multi-step action chains to implement intrusion response, access control, and occupancy monitoring - running entirely on the camera with no cloud dependency.
@@ -184,49 +210,69 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 
 ## Use Case 4: Speaker Display
 
-Drive the built-in screen on Axis speaker-display devices (e.g. C1710) directly from rules — no VMS or middleware required.
+Drive the built-in screen on Axis speaker-display devices (e.g. C1710) directly from rules using live data pushed over MQTT or HTTP webhooks — no VMS or middleware required. The display becomes a live information board that updates the moment new data arrives.
 
-### 4.1 Automated Display Messages
+### 4.1 Live Queue Ticket Display
 
-#### 4.1a - Motion Alert (While Active)
-
-**Scenario:** When motion is detected, show a red alert message on the speaker-display screen immediately. The message stays on screen for as long as motion continues and clears automatically when motion stops — no fixed timer needed.
+**Scenario:** A service desk or healthcare waiting room uses a ticketing system. Whenever the next ticket is called, the ticketing system publishes an update over MQTT and the display instantly shows the current ticket number and remaining queue length — no screen controller, no separate dashboard app.
 
 **How it works:**
-- A **Device Event** trigger subscribes to Motion Detection (active = true)
-- A **Speaker Display** action shows the message with `while_active` enabled, using a red background and large text
-- When the same camera's Motion Detection event fires with active = false, the engine calls the `/v1/stop` endpoint automatically
+- An **MQTT Message** trigger subscribes to `queue/reception/update`
+- The payload is expected as JSON: `{"current":"A047","waiting":3}` — fields are available as `{{trigger.current}}` and `{{trigger.waiting}}`
+- A **Speaker Display** action shows "NOW SERVING / A047 / 3 people waiting" on a dark-blue background, held for 5 minutes (or until the next update overwrites it)
+- Zero cooldown so every ticket call updates the display immediately
 
-**Template:** [`templates/4.1a-speaker-display-motion-alert.json`](templates/4.1a-speaker-display-motion-alert.json)
+**Setup:** Configure your ticketing system or a Node-RED / Home Assistant automation to publish to `queue/reception/update` with the JSON payload above. Adjust the topic to match your environment.
 
-#### 4.1b - Visitor Greeting
+**Template:** [`templates/4.1-queue-ticket-display.json`](templates/4.1-queue-ticket-display.json)
 
-**Scenario:** A reception camera monitors a doorbell button or card reader. When the input is pressed, the display shows a greeting message for 10 seconds so the visitor knows their ring was received — before a staff member responds.
+---
 
-**How it works:**
-- An **IO Input** trigger on port 1 (rising edge) fires when the button is pressed
-- A **Speaker Display** action shows a blue greeting message with a fixed 10-second duration (`time` mode, 10 000 ms)
-- A 12-second cooldown prevents re-triggering while the message is still on screen
+### 4.2 Air Quality Monitor
 
-**Template:** [`templates/4.1b-speaker-display-visitor-greeting.json`](templates/4.1b-speaker-display-visitor-greeting.json)
+An environmental sensor (or any MQTT-capable air quality device) publishes CO₂, PM2.5, temperature, and humidity readings continuously. Three rules keep the display accurate and safe at all times.
 
-#### 4.1c - Occupancy Capacity Warning
+#### 4.2a - Live Data Dashboard
 
-**Scenario:** A retail space uses AOA to count people. When occupancy exceeds the limit, show a scrolling capacity warning on the speaker-display screen. The message clears automatically when the space drops back below threshold — no manual intervention needed.
+**Scenario:** The display always shows the latest sensor readings so occupants can see current air quality at a glance. When readings are within safe limits, the display shows a calm green dashboard updated in real-time.
 
 **How it works:**
-- A **schedule** trigger fires every 30 seconds
-- An **AOA Occupancy** condition (`human >= 20`) gates execution
-- An **AOA Get Counts** action injects the live count as `{{aoa_human}}`
-- A **Speaker Display** action shows a scrolling orange warning with `while_active` enabled — clears when the next tick finds occupancy below 20
+- An **MQTT Message** trigger subscribes to `sensors/airquality/data` (JSON payload: `{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}`)
+- A **Variable Compare** condition checks `system.airquality_alert != active` so the dashboard does not overwrite an active critical alert
+- A **Speaker Display** action renders the four values on a green background, replacing the previous reading every time a new message arrives
 
-**Template:** [`templates/4.1c-speaker-display-occupancy-warning.json`](templates/4.1c-speaker-display-occupancy-warning.json)
+**Template:** [`templates/4.2a-air-quality-display.json`](templates/4.2a-air-quality-display.json)
+
+#### 4.2b - Critical Alert Override
+
+**Scenario:** When CO₂ rises above 1 000 ppm or PM2.5 exceeds 35 μg/m³, the publishing system flags the reading as critical. The display immediately switches to a red scrolling alert that stays on screen until explicitly cleared — staff cannot miss it.
+
+**How it works:**
+- An **MQTT Message** trigger fires on `sensors/airquality/status` with payload `critical`
+- A **Set Variable** action sets `system.airquality_alert = active`, which suppresses the normal dashboard rule (4.2a)
+- A **Speaker Display** action shows a red scrolling warning with `while_active` enabled — it persists until the 4.2c clear rule fires
+- A **60-second cooldown** prevents the alert re-triggering while already active
+
+**Template:** [`templates/4.2b-air-quality-alert.json`](templates/4.2b-air-quality-alert.json)
+
+#### 4.2c - All Clear / Resume Dashboard
+
+**Scenario:** Once ventilation brings CO₂ and PM2.5 back within safe limits, the sensor system publishes `clear`. The alert is dismissed, the `system.airquality_alert` variable is reset, and the live dashboard resumes automatically.
+
+**How it works:**
+- An **MQTT Message** trigger fires on `sensors/airquality/status` with payload `clear`
+- A **Set Variable** action resets `system.airquality_alert = inactive`
+- A **Speaker Display** action briefly shows a green "Air Quality Normal" confirmation for 15 seconds — after which the next data message from 4.2a takes over
+
+**Setup (4.2a–c):** Configure your air quality gateway or sensor to publish JSON readings to `sensors/airquality/data` and threshold status (`critical` / `clear`) to `sensors/airquality/status`. Adjust topic paths and threshold logic in your gateway to match your sensor model and acceptable limits.
+
+**Template:** [`templates/4.2c-air-quality-clear.json`](templates/4.2c-air-quality-clear.json)
 
 ---
 
 ## Use Case 5: System Management
 
-Control and observe the engine itself. These templates provide the building blocks needed by other rules: arm/disarm state via MQTT, audio deterrents, and routine hardware maintenance.
+Manage the state and health of the engine itself. These templates control the engine's operational mode, maintain counters and variables, and provide observability through MQTT — the building blocks that other rules depend on.
 
 ### 5.1 Arm / Disarm via MQTT
 
@@ -241,29 +287,59 @@ Control and observe the engine itself. These templates provide the building bloc
 
 ---
 
-### 5.2 Motion → Audio Clip
+### 5.2 Daily Counter Reset
 
-**Scenario:** When motion is detected, play a pre-uploaded audio clip through the camera speaker — useful as a deterrent (warning tone or voice message) or to alert on-site staff without sending a notification to a remote system.
+**Scenario:** Rules that count door access events, motion detections, or other occurrences store their totals in variables (e.g. `door_access`, `motion_count`). Reset all daily counters to zero at midnight so reports always reflect the current day — no accumulated drift across days.
 
 **How it works:**
-- A **Device Event** trigger subscribes to Motion Detection (active = true)
-- An **Audio Clip** action plays the selected clip by name or ID (clips are uploaded via the camera's Audio section)
-- A 10-second cooldown prevents the clip repeating on sustained motion
+- A **schedule** trigger fires daily at 00:00
+- A sequence of **Set Variable** actions resets each counter (`door_access = 0`, `motion_count = 0`) in a single rule pass
+- An optional **Syslog** action logs "Daily counters reset" for the audit trail
 
-**Template:** [`templates/5.2-motion-audio-clip.json`](templates/5.2-motion-audio-clip.json)
+**Template:** [`templates/5.2-daily-counter-reset.json`](templates/5.2-daily-counter-reset.json)
 
 ---
 
-### 5.3 Schedule → Wiper
+### 5.3 MQTT Heartbeat
 
-**Scenario:** An outdoor camera accumulates condensation or debris on its lens cover overnight. Run the wiper automatically every morning at 07:00 to restore a clear view before the working day begins — no manual intervention required.
+**Scenario:** External monitoring systems (Node-RED, Home Assistant, Zabbix, Grafana) need to know if the camera and engine are alive. Publish a lightweight status payload every 60 seconds — if the topic goes silent, the monitoring system raises an alert.
 
 **How it works:**
-- A **schedule** trigger fires daily at 07:00, every day of the week
-- A **Wiper** action starts wiper run 1 (the primary wiper service)
-- Adjust the time or restrict to weekdays only by changing the `days` array
+- A **schedule** trigger fires every 60 seconds
+- An **MQTT Publish** action sends `{"serial":"{{camera.serial}}","model":"{{camera.model}}","time":"{{timestamp}}","armed":"{{system.armed}}"}` to `cameras/{{camera.serial}}/heartbeat`
+- Monitoring software subscribes to the topic and alerts on silence — a timeout of ~120 seconds catches any unreachable device
 
-**Template:** [`templates/5.3-schedule-wiper.json`](templates/5.3-schedule-wiper.json)
+**Template:** [`templates/5.3-mqtt-heartbeat.json`](templates/5.3-mqtt-heartbeat.json)
+
+---
+
+### 5.4 Maintenance Mode via MQTT
+
+**Scenario:** Engineers arrive on-site for maintenance. A single MQTT publish activates maintenance mode — suppressing all alert rules that carry a `system.maintenance = false` condition. When work is done, a second MQTT command restores normal operation. The live-stream overlay confirms the active state at a glance.
+
+**How it works:**
+- Two rules listen on `cameras/{{camera.serial}}/maintenance` — one for payload `enable`, one for `disable`
+- The enable rule sets `system.maintenance = true` and adds an **Overlay Text** ("MAINTENANCE MODE ACTIVE" on channel 1) so the live stream makes the state visible
+- The disable rule sets `system.maintenance = false` and logs the restoration to syslog
+- Any alert rule that should be suppressed during maintenance needs a **Variable Compare** condition: `system.maintenance = false`
+
+**Templates:** [`templates/5.4a-maintenance-mode-enable.json`](templates/5.4a-maintenance-mode-enable.json) and [`templates/5.4b-maintenance-mode-disable.json`](templates/5.4b-maintenance-mode-disable.json)
+
+---
+
+### 5.5 Remote Rule Control via MQTT
+
+**Scenario:** A central automation system (Home Assistant, Node-RED, SCADA) needs to dynamically switch which rules are active on the camera — enabling seasonal alert rules in winter, disabling them in summer, or activating a high-security rule set outside business hours. A single MQTT publish targets any rule by ID.
+
+**How it works:**
+- Two rules listen on `cameras/{{camera.serial}}/rules/<target_rule_id>/enable` — one for payload `enable`, one for `disable`
+- Each rule runs an **Enable / Disable Rule** action that directly enables or disables the target rule and logs the change to syslog
+- Replace `REPLACE_WITH_TARGET_RULE_ID` in each template with the actual UUID of the rule you want to control (copy it from the rule editor's rule list)
+- The change takes effect immediately — the target rule's triggers are registered or unregistered in the same event cycle
+
+**Setup:** Replace the placeholder rule ID in the imported templates with the UUID from the target rule's settings panel. The MQTT topic embeds the rule ID so each enable/disable pair is scoped to a single rule — deploy multiple pairs to control multiple rules independently.
+
+**Templates:** [`templates/5.5a-enable-rule-via-mqtt.json`](templates/5.5a-enable-rule-via-mqtt.json) and [`templates/5.5b-disable-rule-via-mqtt.json`](templates/5.5b-disable-rule-via-mqtt.json)
 
 ---
 
@@ -318,18 +394,25 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 2.2c | `2.2c-privacy-mask-emergency-override.json` | Device Control | Emergency signal → disable masks + set override |
 | 2.2d | `2.2d-privacy-mask-emergency-clear.json` | Device Control | Emergency cleared → restore masks + resume schedule |
 | 2.3 | `2.3-ptz-track-and-resume-tour.json` | Device Control | AOA human → stop tour → PTZ → resume |
+| 2.4 | `2.4-motion-audio-clip.json` | Device Control | Motion → play audio clip (deterrent or on-site alert) |
+| 2.5 | `2.5-schedule-wiper.json` | Device Control | Daily 07:00 → run camera wiper |
 | 3.1 | `3.1-perimeter-intrusion-response.json` | Security | Human + armed + after-hours → full response |
 | 3.2a | `3.2a-access-control-business-hours.json` | Security | Card reader → door release + recording |
 | 3.2b | `3.2b-access-control-after-hours-alert.json` | Security | Card reader after hours → Telegram alert |
 | 3.3a | `3.3a-occupancy-warning.json` | Security | Occupancy ≥ 20 → warning overlay |
 | 3.3b | `3.3b-occupancy-critical.json` | Security | Occupancy ≥ 30 → Slack + IO output |
-| 4.1a | `4.1a-speaker-display-motion-alert.json` | Speaker Display | Motion → display alert while active, auto-clear when motion stops |
-| 4.1b | `4.1b-speaker-display-visitor-greeting.json` | Speaker Display | Doorbell/button press → greeting message for 10 s |
-| 4.1c | `4.1c-speaker-display-occupancy-warning.json` | Speaker Display | Occupancy ≥ 20 → capacity warning while active, auto-clear when clear |
+| 4.1 | `4.1-queue-ticket-display.json` | Speaker Display | MQTT ticket update → live queue number on display |
+| 4.2a | `4.2a-air-quality-display.json` | Speaker Display | MQTT sensor data → live CO₂/PM2.5/temp/humidity dashboard |
+| 4.2b | `4.2b-air-quality-alert.json` | Speaker Display | MQTT "critical" → red scrolling alert, suppress dashboard |
+| 4.2c | `4.2c-air-quality-clear.json` | Speaker Display | MQTT "clear" → dismiss alert, resume live dashboard |
 | 5.1a | `5.1a-arm-system-via-mqtt.json` | System Management | MQTT "arm" → set system.armed = true + syslog |
 | 5.1b | `5.1b-disarm-system-via-mqtt.json` | System Management | MQTT "disarm" → set system.armed = false + syslog |
-| 5.2 | `5.2-motion-audio-clip.json` | System Management | Motion → play audio clip (deterrent or on-site alert) |
-| 5.3 | `5.3-schedule-wiper.json` | System Management | Daily 07:00 → run camera wiper |
+| 5.2 | `5.2-daily-counter-reset.json` | System Management | Midnight → reset daily counters to zero |
+| 5.3 | `5.3-mqtt-heartbeat.json` | System Management | Every 60 s → publish status heartbeat to MQTT |
+| 5.4a | `5.4a-maintenance-mode-enable.json` | System Management | MQTT "enable" → activate maintenance mode + overlay |
+| 5.4b | `5.4b-maintenance-mode-disable.json` | System Management | MQTT "disable" → deactivate maintenance mode |
+| 5.5a | `5.5a-enable-rule-via-mqtt.json` | System Management | MQTT "enable" → enable target rule by ID + syslog |
+| 5.5b | `5.5b-disable-rule-via-mqtt.json` | System Management | MQTT "disable" → disable target rule by ID + syslog |
 | 6.1 | `6.1-cross-device-io-condition-speaker-display.json` | Cross-Device | I/O input → remote I/O state condition → remote speaker display |
 | 6.2 | `6.2-cross-device-aoa-condition-alert.json` | Cross-Device | AOA detection → remote AOA occupancy condition → speaker display + MQTT |
 

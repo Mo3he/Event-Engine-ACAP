@@ -1,0 +1,39 @@
+{
+  "name": "Speaker Display — Air Quality Live Readings",
+  "description": "Whenever an air quality sensor publishes a reading to MQTT, update the speaker-display screen with live CO₂, PM2.5, temperature, and humidity values. The display refreshes on every incoming message — staff and visitors always see current data.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "sensors/airquality/data"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "variable_compare",
+      "name": "system.airquality_alert",
+      "op": "neq",
+      "value": "active"
+    }
+  ],
+  "actions": [
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "Air Quality\nCO₂: {{trigger.co2}} ppm   PM2.5: {{trigger.pm25}} μg/m³\nTemp: {{trigger.temperature}}°C   Humidity: {{trigger.humidity}}%",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#004400",
+      "textSize": "medium",
+      "scrollDirection": "",
+      "scrollSpeed": 0,
+      "duration_type": "time",
+      "duration_value": 300000
+    }
+  ]
+}

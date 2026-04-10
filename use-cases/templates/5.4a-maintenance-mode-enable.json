@@ -1,0 +1,39 @@
+{
+  "name": "Maintenance Mode Enable",
+  "description": "Activate maintenance mode via MQTT. Sets system.maintenance = true and displays a live-stream overlay so operators know the camera is under maintenance. Any rule with a Variable Compare condition on system.maintenance = false will be suppressed while active.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "cameras/{{camera.serial}}/maintenance",
+      "payload_filter": "enable"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.maintenance",
+      "value": "true"
+    },
+    {
+      "type": "overlay_text",
+      "text": "MAINTENANCE MODE ACTIVE",
+      "channel": 1,
+      "position": "topLeft",
+      "text_color": "white",
+      "duration": 3600
+    },
+    {
+      "type": "send_syslog",
+      "message": "Maintenance mode ENABLED via MQTT at {{timestamp}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Speaker Display — Live Queue Ticket",
+  "description": "Show the current queue ticket number and wait count on the speaker-display screen whenever the ticketing system publishes an update over MQTT. The display refreshes instantly on every update — no polling needed.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic_filter": "queue/reception/update"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "NOW SERVING\n{{trigger.current}}\n{{trigger.waiting}} people waiting",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#003366",
+      "textSize": "large",
+      "scrollDirection": "",
+      "scrollSpeed": 0,
+      "duration_type": "time",
+      "duration_value": 300000
+    }
+  ]
+}

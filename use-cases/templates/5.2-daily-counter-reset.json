@@ -1,0 +1,37 @@
+{
+  "name": "Daily Counter Reset",
+  "description": "Reset daily activity counters (door_access, motion_count) to zero at midnight so reports always reflect the current day. Add more Set Variable actions for any additional counters your rules use.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "daily_time",
+      "time": "00:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "door_access",
+      "value": "0"
+    },
+    {
+      "type": "set_variable",
+      "name": "motion_count",
+      "value": "0"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Daily counters reset at {{timestamp}} on {{camera.model}} ({{camera.serial}})",
+      "level": "info"
+    }
+  ]
+}

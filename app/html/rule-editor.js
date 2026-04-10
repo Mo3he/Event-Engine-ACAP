@@ -1025,6 +1025,7 @@ const ACTION_GROUPS = [
     { value: 'set_variable',      label: 'Set Variable' },
     { value: 'increment_counter', label: 'Increment Counter' },
     { value: 'run_rule',          label: 'Run Rule' },
+    { value: 'set_rule_enabled',   label: 'Enable / Disable Rule' },
     { value: 'digest',            label: 'Notification Digest' },
   ]},
   { label: 'Advanced', types: [
@@ -2063,6 +2064,23 @@ function actionFields(a, rowIdx) {
         </select>
       </div>
     </div>`;
+  if (type === 'set_rule_enabled') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Target Rule</label>
+        <select data-k="rule_id">
+          <option value="">Select a rule...</option>
+          ${allRules.map(r => `<option value="${r.id}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Action</label>
+        <select data-k="enabled">
+          <option value="true"  ${a.enabled !== false ? 'selected' : ''}>Enable</option>
+          <option value="false" ${a.enabled === false  ? 'selected' : ''}>Disable</option>
+        </select>
+      </div>
+    </div>`;
   if (type === 'guard_tour') {
     const isStart = (a.operation || 'start') === 'start';
     let tourControl = '';
@@ -2703,6 +2721,8 @@ function normalizeAction(a) {
     out.while_active = a.while_active === true;
   if (a.type === 'privacy_mask')
     out.enabled = a.enabled === 'true' || a.enabled === true;
+  if (a.type === 'set_rule_enabled')
+    out.enabled = a.enabled !== 'false' && a.enabled !== false;
   if (a.type === 'light_control' && (a.operation || 'on') === 'on' && a.intensity !== '' && a.intensity !== undefined)
     out.intensity = parseInt(a.intensity);
   if (a.type === 'snapshot_upload' || a.type === 'guard_tour' || a.type === 'ir_cut_filter' || a.type === 'privacy_mask')
