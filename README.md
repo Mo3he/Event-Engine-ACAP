@@ -6,7 +6,7 @@ A powerful IFTTT (If This Then That)-style automation engine that runs directly 
 
 To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface.
 
-Want to know why you need this ACAP, take a look at [Use Cases](../../blob/main/use-cases/USE_CASES.md)  
+Want to know why you need this ACAP, take a look at [Use Cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html)  
 A full user manual is built in to the ACAP and available here [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)  
 API documentation can be found here [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json)
 
@@ -67,6 +67,8 @@ Conditions and actions marked **remote device** can target any reachable Axis de
 | AOA Occupancy condition | Yes — Load button fetches scenarios from remote |
 | Device Event State condition | Yes — Load button fetches event catalog from remote |
 | Speaker Display action | Yes |
+| Paging Console Execute action | Yes |
+| Paging Console Button action | Yes |
 | I/O Output action | Yes |
 
 ---
@@ -107,6 +109,8 @@ Actions are grouped by category in the rule editor.
 | Type | Description |
 |------|-------------|
 | **Audio Clip** | Play a named media clip on the camera |
+| **Paging Console Execute** | Execute a pre-configured action on an Axis Paging Console (e.g. Axis C6110) by action UUID. Supports **remote device** target |
+| **Paging Console Button** | Update a button slot on a Paging Console page to a specified action UUID, or clear it. GET the current layout, patch the slot, PUT it back atomically. Supports **remote device** target |
 | **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310) |
 | **Speaker Display** | Show text or a scrolling message on an Axis speaker display (e.g. Axis C1710). Configurable foreground/background colour, text size, scroll speed, and duration (indefinite, time, or repetitions). Supports `{{variable}}` substitution and `while_active` auto-clear. Supports **remote device** target |
 
@@ -177,7 +181,7 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 | `{{date}}` | YYYY-MM-DD |
 | `{{time}}` | HH:MM:SS |
 | `{{camera.serial}}` | Camera serial number |
-| `{{camera.model}}` | Camera model name |
+| `{{camera.name}}` | Camera model name |
 | `{{camera.ip}}` | Camera IP address |
 | `{{trigger_json}}` | Full trigger event data as a compact JSON string |
 | `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.CO2}}`) |

@@ -1113,6 +1113,10 @@ const ACTION_GROUPS = [
     { value: 'set_rule_enabled',   label: 'Enable / Disable Rule' },
     { value: 'digest',            label: 'Notification Digest' },
   ]},
+  { label: 'Paging Console', types: [
+    { value: 'paging_console_execute', label: 'Execute Paging Action' },
+    { value: 'paging_console_button',  label: 'Reassign Button' },
+  ]},
   { label: 'Advanced', types: [
     { value: 'fire_vapix_event',  label: 'Fire ACAP Event' },
     { value: 'vapix_query',       label: 'Device Event Query' },
@@ -1366,7 +1370,8 @@ const REMOTE_CAPABLE_ACTIONS = new Set([
   'recording', 'overlay_text', 'ptz_preset', 'io_output',
   'audio_clip', 'siren_light', 'guard_tour', 'set_device_param',
   'ir_cut_filter', 'privacy_mask', 'wiper', 'light_control',
-  'acap_control', 'speaker_display', 'vapix_query'
+  'acap_control', 'speaker_display', 'vapix_query',
+  'paging_console_execute', 'paging_console_button'
 ]);
 
 /* Reusable remote device section for triggers and conditions (uses rerenderFn callback name) */
@@ -2599,6 +2604,94 @@ function actionFields(a, rowIdx) {
       </label>
     </div></div>` : ''}` : ''}`;
   }
+  if (type === 'paging_console_execute') {
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const host = (a.remote_host || '').trim();
+    const cachedActions = isRemote && host ? (remoteCapCache[`${host}:::paging_actions`] || null) : null;
+    const srcActions = isRemote ? cachedActions : pagingActions;
+    const loadBtn = isRemote
+      ? `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="paging" onclick="loadRemotePagingCap('${rowIdx}')" style="white-space:nowrap;margin-left:6px" title="Fetch paging actions from the remote device">Load</button>`
+      : '';
+    let actionCtrl;
+    if (srcActions === null) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="${isRemote ? 'Click Load to fetch actions' : 'Loading…'}" ${isRemote ? '' : 'disabled'}>`;
+    } else if (!srcActions.length) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="UUID (no paging-console actions found)">`;
+    } else {
+      let opts = `<option value="">— select action —</option>`;
+      for (const act of srcActions) {
+        const sel = a.action_id === act.id ? 'selected' : '';
+        opts += `<option value="${escHtml(act.id)}" ${sel}>${escHtml(act.label)}</option>`;
+      }
+      actionCtrl = `<select data-k="action_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Paging Console Action</label>
+        <div style="display:flex;align-items:center;gap:4px">${actionCtrl}${loadBtn}</div>
+        <div class="form-hint">Executes the selected paging-console action immediately (callContact, announcement, showContacts, etc.).</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'paging_console_button') {
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const host = (a.remote_host || '').trim();
+    const cachedActions = isRemote && host ? (remoteCapCache[`${host}:::paging_actions`] || null) : null;
+    const cachedPages   = isRemote && host ? (remoteCapCache[`${host}:::paging_pages`]   || null) : null;
+    const srcActions = isRemote ? cachedActions : pagingActions;
+    const srcPages   = isRemote ? cachedPages   : pagingPages;
+    const loadBtn = isRemote
+      ? `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="paging" onclick="loadRemotePagingCap('${rowIdx}')" style="white-space:nowrap;margin-left:6px" title="Fetch paging data from the remote device">Load</button>`
+      : '';
+    let pageCtrl, actionCtrl;
+
+    if (srcPages === null) {
+      pageCtrl = `<input type="text" data-k="page_id" value="${escHtml(a.page_id || '')}" placeholder="${isRemote ? 'Click Load' : 'Loading…'}" ${isRemote ? '' : 'disabled'}>`;
+    } else if (!srcPages.length) {
+      pageCtrl = `<input type="text" data-k="page_id" value="${escHtml(a.page_id || '')}" placeholder="Page UUID">`;
+    } else {
+      let opts = `<option value="">— select page —</option>`;
+      for (const pg of srcPages) {
+        const sel = a.page_id === pg.id ? 'selected' : '';
+        opts += `<option value="${escHtml(pg.id)}" ${sel}>${escHtml(pg.name)}</option>`;
+      }
+      pageCtrl = `<select data-k="page_id">${opts}</select>`;
+    }
+
+    if (srcActions === null) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="${isRemote ? 'Click Load' : 'Loading…'}" ${isRemote ? '' : 'disabled'}>`;
+    } else if (!srcActions.length) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="Leave empty to clear slot">`;
+    } else {
+      let opts = `<option value="">— clear slot (empty) —</option>`;
+      for (const act of srcActions) {
+        const sel = a.action_id === act.id ? 'selected' : '';
+        opts += `<option value="${escHtml(act.id)}" ${sel}>${escHtml(act.label)}</option>`;
+      }
+      actionCtrl = `<select data-k="action_id">${opts}</select>`;
+    }
+
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:1;min-width:200px;">
+        <label>Page</label>
+        <div style="display:flex;align-items:center;gap:4px">${pageCtrl}${loadBtn}</div>
+      </div>
+      <div class="form-group" style="flex:0 0 80px;">
+        <label>Slot</label>
+        <input type="number" data-k="slot" value="${a.slot || 1}" min="1" max="32">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Assign Action</label>${actionCtrl}
+        <div class="form-hint">Select an action to assign to this button slot, or choose <em>clear slot</em> to leave it empty.</div>
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -2811,7 +2904,8 @@ function normalizeAction(a) {
                  'webhook_url','title','theme_color','version','database','org','bucket',
                  'measurement','tags','fields','bot_token','chat_id','parse_mode',
                  'smtp_server','from','to','subject','deliver_via','line',
-                 'event_key','data_key','expected','interval'];
+                 'event_key','data_key','expected','interval',
+                 'action_id','page_id','slot'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   /* Remote device support */
@@ -2824,6 +2918,7 @@ function normalizeAction(a) {
   }
   if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
   if (out.port     !== undefined) out.port     = parseInt(out.port)     || 1;
+  if (out.slot     !== undefined) out.slot     = parseInt(out.slot)     || 1;
   if (out.channel  !== undefined && a.type !== 'slack_webhook') out.channel = parseInt(out.channel) || 1;
   if (out.delta    !== undefined) out.delta    = parseFloat(out.delta)  || 1;
   if (out.value    !== undefined && a.type === 'increment_counter')

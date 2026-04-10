@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Engine — Use Cases &amp; Templates</title>
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --surface: #fff;
+      --surface2: #f0f2f5;
+      --border: #dde1e7;
+      --accent: #0071c5;
+      --accent-hover: #005ea3;
+      --text: #1c2630;
+      --text-muted: #556370;
+      --text-dim: #8694a2;
+      --tag-bg: #e9f1fb;
+      --tag-text: #1a5fa5;
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    }
+    [data-theme="dark"] {
+      --bg: #0f1419;
+      --surface: #1a2230;
+      --surface2: #212d3b;
+      --border: #2d3d50;
+      --accent: #4dabf0;
+      --accent-hover: #6dbef5;
+      --text: #e2eaf3;
+      --text-muted: #a4b5c6;
+      --text-dim: #6e8298;
+      --tag-bg: #122640;
+      --tag-text: #5bb8f0;
+      --shadow: 0 1px 3px rgba(0,0,0,.2);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+      font-size: 13px;
+    }
+    pre {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 12px 0;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    pre code { background: none; border: none; padding: 0; }
+
+    /* ── Header ─────────────────────────────────── */
+    .header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      height: 54px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-title { font-size: 16px; font-weight: 700; }
+    .header-sub { font-size: 13px; color: var(--text-muted); margin-left: 8px; }
+    .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .header-link {
+      font-size: 13px; font-weight: 600; color: var(--text-muted);
+      padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--surface); transition: .15s;
+    }
+    .header-link:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
+    .theme-btn {
+      background: none; border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 5px 9px; cursor: pointer; color: var(--text-muted); font-size: 15px; transition: .15s;
+    }
+    .theme-btn:hover { color: var(--text); background: var(--surface2); }
+
+    /* ── Layout ──────────────────────────────────── */
+    .page { display: flex; max-width: 1200px; margin: 0 auto; }
+    .sidebar {
+      width: 220px; flex-shrink: 0; position: sticky; top: 54px;
+      height: calc(100vh - 54px); overflow-y: auto; padding: 20px 0 40px;
+    }
+    .sidebar-group {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-dim); padding: 12px 16px 4px;
+    }
+    .sidebar a {
+      display: block; padding: 4px 16px; font-size: 13px; color: var(--text-muted);
+      border-left: 2px solid transparent; transition: .12s;
+    }
+    .sidebar a:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
+    .sidebar a.active { color: var(--accent); border-left-color: var(--accent); background: var(--surface2); }
+    .sidebar a.sub { padding-left: 28px; font-size: 12px; }
+
+    .main { flex: 1; min-width: 0; padding: 32px 40px 100px; }
+
+    /* ── Hero ────────────────────────────────────── */
+    .hero { margin-bottom: 40px; }
+    .hero h1 { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+    .hero p { color: var(--text-muted); font-size: 16px; max-width: 640px; }
+    .hero-import {
+      margin-top: 16px; padding: 14px 18px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      font-size: 13px; color: var(--text-muted);
+    }
+    .hero-import strong { color: var(--text); }
+
+    /* ── Section cards ──────────────────────────── */
+    .section-header {
+      margin-top: 48px; margin-bottom: 6px; padding-bottom: 8px;
+      border-bottom: 2px solid var(--border);
+      scroll-margin-top: 72px;
+    }
+    .section-header h2 { font-size: 20px; font-weight: 700; }
+    .section-header p { color: var(--text-muted); font-size: 14px; margin-top: 4px; }
+
+    .uc-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-top: 20px;
+      scroll-margin-top: 72px;
+    }
+    .uc-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+    .uc-card h4 {
+      font-size: 15px; font-weight: 600; margin-top: 18px; margin-bottom: 4px;
+      scroll-margin-top: 72px;
+    }
+    .uc-card .scenario { color: var(--text-muted); font-size: 14px; margin-bottom: 14px; }
+
+    /* Tags row */
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .tag {
+      display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 9px;
+      border-radius: 999px; background: var(--tag-bg); color: var(--tag-text);
+    }
+    .tag.trigger  { background: #e8f7ee; color: #1a7a42; }
+    .tag.condition { background: #fff5e0; color: #9a6a10; }
+    .tag.action   { background: #e9f1fb; color: #1a5fa5; }
+    .tag.feature  { background: #f3edfb; color: #6b3fa0; }
+    [data-theme="dark"] .tag.trigger  { background: #0e2818; color: #56c47a; }
+    [data-theme="dark"] .tag.condition { background: #261d08; color: #d4a83a; }
+    [data-theme="dark"] .tag.action   { background: #0c1e33; color: #5bb8f0; }
+    [data-theme="dark"] .tag.feature  { background: #1c1230; color: #b48de8; }
+
+    /* How-it-works list */
+    .how-list { padding-left: 0; list-style: none; margin: 10px 0; }
+    .how-list li {
+      position: relative; padding: 6px 0 6px 28px; font-size: 14px;
+      border-left: 2px solid var(--border); margin-left: 8px;
+    }
+    .how-list li::before {
+      content: attr(data-step);
+      position: absolute; left: -11px; top: 5px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      font-size: 11px; font-weight: 700; text-align: center; line-height: 20px;
+    }
+    .how-list li:last-child { border-left-color: transparent; }
+
+    /* Setup box */
+    .setup-box {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 16px; margin: 12px 0;
+      font-size: 13px; color: var(--text-muted);
+    }
+    .setup-box strong { color: var(--text); }
+
+    /* Download button */
+    .dl-row { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .dl-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; font-size: 13px; font-weight: 600;
+      background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
+      cursor: pointer; transition: background .15s;
+    }
+    .dl-btn:hover { background: var(--accent-hover); text-decoration: none; }
+    .dl-btn svg { width: 14px; height: 14px; fill: currentColor; }
+
+    /* Summary table */
+    .summary-table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px; }
+    .summary-table th {
+      background: var(--surface2); border: 1px solid var(--border);
+      padding: 8px 10px; text-align: left; font-weight: 600; font-size: 12px; color: var(--text-muted);
+    }
+    .summary-table td { border: 1px solid var(--border); padding: 8px 10px; vertical-align: top; }
+    .summary-table tr:nth-child(even) td { background: var(--surface2); }
+
+    /* Responsive */
+    @media (max-width: 800px) {
+      .sidebar { display: none; }
+      .main { padding: 20px 16px 60px; }
+      .page { display: block; }
+    }
+  </style>
+</head>
+<body>
+<script>
+  (function(){var t=localStorage.getItem('theme')||'light';document.documentElement.setAttribute('data-theme',t)})();
+</script>
+
+<div class="header">
+  <span class="header-title">Event Engine</span>
+  <span class="header-sub">Use Cases &amp; Templates</span>
+  <div class="header-actions">
+    <button class="theme-btn" id="theme-btn" title="Toggle theme">☀</button>
+    <a class="header-link" href="help.html">User Manual</a>
+    <a class="header-link" href="https://github.com/Mo3he/Event-Engine-ACAP">GitHub</a>
+  </div>
+</div>
+
+<div class="page">
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-group">Categories</div>
+    <a href="#uc1">1 — Notifications &amp; Data</a>
+    <a href="#uc1-1" class="sub">1.1 Sensor Data Transmission</a>
+    <a href="#uc1-2" class="sub">1.2 Multi-Platform Alerts</a>
+    <a href="#uc1-3" class="sub">1.3 Daily Digest</a>
+
+    <a href="#uc2">2 — Device Control</a>
+    <a href="#uc2-1" class="sub">2.1 Sunrise / Sunset</a>
+    <a href="#uc2-2" class="sub">2.2 Privacy Zones</a>
+    <a href="#uc2-3" class="sub">2.3 PTZ Track &amp; Resume</a>
+    <a href="#uc2-4" class="sub">2.4 Motion → Audio</a>
+    <a href="#uc2-5" class="sub">2.5 Scheduled Wiper</a>
+
+    <a href="#uc3">3 — Security</a>
+    <a href="#uc3-1" class="sub">3.1 Perimeter Intrusion</a>
+    <a href="#uc3-2" class="sub">3.2 Access Control</a>
+    <a href="#uc3-3" class="sub">3.3 Occupancy Monitoring</a>
+
+    <a href="#uc4">4 — Speaker Display</a>
+    <a href="#uc4-1" class="sub">4.1 Queue Ticket</a>
+    <a href="#uc4-2" class="sub">4.2 Air Quality (MQTT)</a>
+    <a href="#uc4-3" class="sub">4.3 Air Quality (Direct)</a>
+    <a href="#uc4-4" class="sub">4.4 Air Quality (Webhook)</a>
+
+    <a href="#uc5">5 — System Management</a>
+    <a href="#uc5-1" class="sub">5.1 Arm / Disarm</a>
+    <a href="#uc5-2" class="sub">5.2 Counter Reset</a>
+    <a href="#uc5-3" class="sub">5.3 Heartbeat</a>
+    <a href="#uc5-4" class="sub">5.4 Maintenance Mode</a>
+    <a href="#uc5-5" class="sub">5.5 Remote Rule Control</a>
+
+    <a href="#uc6">6 — Cross-Device</a>
+    <a href="#uc6-1" class="sub">6.1 I/O → Remote → Display</a>
+    <a href="#uc6-2" class="sub">6.2 AOA → Remote Occ.</a>
+    <a href="#uc6-3" class="sub">6.3 Remote Sensor Relay</a>
+
+    <a href="#uc7">7 — Advanced Patterns</a>
+    <a href="#uc7-1" class="sub">7.1 Counter Escalation</a>
+    <a href="#uc7-2" class="sub">7.2 Compound Tailgate</a>
+    <a href="#uc7-3" class="sub">7.3 Night-Only Recording</a>
+    <a href="#uc7-4" class="sub">7.4 Snapshot + FTP Fallback</a>
+    <a href="#uc7-5" class="sub">7.5 ACAP Watchdog</a>
+    <a href="#uc7-6" class="sub">7.6 Paging Announcement</a>
+    <a href="#uc7-7" class="sub">7.7 VMS Event Bridge</a>
+    <a href="#uc7-8" class="sub">7.8 Audit Logger</a>
+    <a href="#uc7-9" class="sub">7.9 Network-Gated Alert</a>
+    <a href="#uc7-10" class="sub">7.10 Raw Snapshot Upload</a>
+    <a href="#uc7-11" class="sub">7.11 Paging Button State</a>
+    <a href="#uc7-12" class="sub">7.12 Dual-Zone AND_ACTIVE</a>
+
+    <div class="sidebar-group">Reference</div>
+    <a href="#summary">Template Summary</a>
+    <a href="#customisation">Customisation Guide</a>
+  </nav>
+
+  <main class="main">
+    <!-- ═══════════ HERO ═══════════ -->
+    <div class="hero">
+      <h1>Use Cases &amp; Templates</h1>
+      <p>Ready-to-import rule templates demonstrating what Event Engine can do. Download a template, import it into the web UI, customise the placeholders, and you're running.</p>
+      <div class="hero-import">
+        <strong>How to import:</strong> Open the Event Engine web UI → Rules tab → click <strong>Import</strong> → select the downloaded <code>.json</code> file.
+        You can also POST directly to the API: <code>POST /local/acap_event_engine/rules?action=import</code>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 1 ═══════════════════════ -->
+    <div class="section-header" id="uc1">
+      <h2>1 — Notifications &amp; Data Transmission</h2>
+      <p>Push alerts to people and push data to systems. The camera becomes an edge sensor node that detects, formats, and delivers — over HTTP, MQTT, SMTP, or directly into time-series databases.</p>
+    </div>
+
+    <div class="uc-card" id="uc1-1">
+      <h3>1.1 Environmental Sensor Data Transmission</h3>
+      <p class="scenario">An Axis environmental sensor periodically reads sensor values and transmits them to external systems. Three templates cover the main approaches.</p>
+
+      <h4 id="uc1-1a">1.1a — Power BI Real-Time Dashboard</h4>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag action">vapix_query</span>
+        <span class="tag action">http_request</span>
+      </div>
+      <p>Push sensor data directly to a Power BI streaming dataset via its REST API — the camera feeds the dashboard with no gateway in between.</p>
+      <ol class="how-list">
+        <li data-step="1">A <strong>schedule</strong> trigger fires every 60 seconds</li>
+        <li data-step="2">A <strong>Device Event Query</strong> action fetches cached sensor data (temperature, humidity, CO₂) and injects them as <code>{{trigger.FIELD}}</code> variables</li>
+        <li data-step="3">An <strong>HTTP Request</strong> action POSTs a JSON array to the Power BI streaming dataset endpoint</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> In Power BI, create a Streaming dataset (API type) with columns: timestamp (DateTime), camera_serial (Text), camera_model (Text), temperature (Number), humidity (Number), co2 (Number). Copy the push URL into the template.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('1.1a-sensor-data-powerbi')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 1.1a — Power BI</button>
+      </div>
+
+      <h4 id="uc1-1b">1.1b — Direct InfluxDB Ingestion (Grafana)</h4>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag action">vapix_query</span>
+        <span class="tag action">influxdb_write</span>
+      </div>
+      <p>Write time-series data points directly into InfluxDB — the camera is the data pipeline, ready to query in Grafana.</p>
+      <ol class="how-list">
+        <li data-step="1">A <strong>schedule</strong> trigger fires every 60 seconds</li>
+        <li data-step="2">A <strong>Device Event Query</strong> fetches cached sensor data</li>
+        <li data-step="3">An <strong>InfluxDB Write</strong> action writes a data point with temperature, humidity, CO₂ as fields and the camera serial as a tag</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('1.1b-sensor-data-influxdb')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 1.1b — InfluxDB</button>
+      </div>
+
+      <h4 id="uc1-1c">1.1c — MQTT to Home Assistant</h4>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag action">vapix_query</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag feature">retain</span>
+      </div>
+      <p>Publish sensor data over MQTT using Home Assistant topic conventions — sensors appear in HA with retained state updates every 60 seconds.</p>
+      <ol class="how-list">
+        <li data-step="1">A <strong>schedule</strong> trigger fires every 60 seconds</li>
+        <li data-step="2">A <strong>Device Event Query</strong> fetches cached sensor data</li>
+        <li data-step="3">An <strong>MQTT Publish</strong> action sends a retained JSON payload to <code>homeassistant/sensor/&lt;serial&gt;/environment/state</code></li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('1.1c-sensor-data-mqtt-homeassistant')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 1.1c — MQTT / HA</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc1-2">
+      <h3>1.2 Multi-Platform Motion Alerts</h3>
+      <p class="scenario">When motion is detected during office hours, send an alert with a camera snapshot to Slack, Microsoft Teams, and email simultaneously.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">slack_webhook</span>
+        <span class="tag action">teams_webhook</span>
+        <span class="tag action">email</span>
+        <span class="tag feature">cooldown 30s</span>
+        <span class="tag feature">attach_snapshot</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>Device Event</strong> trigger subscribes to Motion Detection (active = true)</li>
+        <li data-step="2">A <strong>Time Window</strong> condition restricts to weekdays 08:00–18:00</li>
+        <li data-step="3">Three actions run in sequence: <strong>Slack webhook</strong>, <strong>Teams webhook</strong>, and <strong>Email</strong> — each with snapshot attachment</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('1.2-multi-platform-motion-alerts')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 1.2 — Motion Alerts</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc1-3">
+      <h3>1.3 Daily Activity Digest</h3>
+      <p class="scenario">Buffer all motion events throughout the day and send a single summary email at 18:00 — a daily activity report for facility managers.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag trigger">schedule (daily_time)</span>
+        <span class="tag action">digest</span>
+        <span class="tag feature">event buffering</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>Device Event</strong> trigger fires on motion detection</li>
+        <li data-step="2">A <strong>Notification Digest</strong> action buffers each event as one line with timestamp</li>
+        <li data-step="3">A second <strong>schedule</strong> trigger at 18:00 ensures the digest flushes daily</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('1.3-daily-activity-digest')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 1.3 — Daily Digest</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 2 ═══════════════════════ -->
+    <div class="section-header" id="uc2">
+      <h2>2 — Device Control</h2>
+      <p>Automate camera hardware: imaging, PTZ, overlays, privacy masks, illumination, audio, wiper — in response to events, schedules, or external commands.</p>
+    </div>
+
+    <div class="uc-card" id="uc2-1">
+      <h3>2.1 Sunrise / Sunset IR &amp; Light Management</h3>
+      <p class="scenario">At sunset, switch to night mode and turn on the IR illuminator. At sunrise, switch back to day mode. Times follow the sun — no fixed schedule.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (astronomical)</span>
+        <span class="tag action">ir_cut_filter</span>
+        <span class="tag action">light_control</span>
+        <span class="tag feature">max_executions 1/day</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Two rules use <strong>astronomical schedule</strong> triggers (sunset and sunrise)</li>
+        <li data-step="2">The sunset rule sets <strong>IR Cut Filter</strong> to night and <strong>Light Control</strong> on at 80% intensity</li>
+        <li data-step="3">The sunrise rule mirrors it: IR to day, light off</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('2.1a-sunset-night-mode')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.1a — Sunset</button>
+        <button class="dl-btn" onclick="downloadTemplate('2.1b-sunrise-day-mode')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.1b — Sunrise</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc2-2">
+      <h3>2.2 Event-Driven Privacy Zones</h3>
+      <p class="scenario">Privacy masks follow a GDPR schedule but can be overridden instantly during emergencies via MQTT or webhook.</p>
+
+      <h4>2.2a/b — Scheduled Privacy (Business Hours)</h4>
+      <div class="tags">
+        <span class="tag trigger">schedule (daily_time)</span>
+        <span class="tag condition">variable_compare</span>
+        <span class="tag action">privacy_mask</span>
+        <span class="tag feature">max_executions 1/day</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Two rules with <strong>daily schedule</strong> triggers — 08:00 and 18:00 weekdays</li>
+        <li data-step="2">A <strong>Variable Compare</strong> condition skips if emergency override is active</li>
+        <li data-step="3"><strong>Privacy Mask</strong> actions enable or disable the named mask</li>
+      </ol>
+
+      <h4>2.2c/d — Emergency Override</h4>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag trigger">http_webhook</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">privacy_mask</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag feature">cooldown 10s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">An <strong>MQTT Message</strong> trigger on <code>building/emergency/+</code> with an <strong>HTTP Webhook</strong> fallback</li>
+        <li data-step="2">The emergency rule sets <code>system.privacy_mode = override</code>, disables the mask, and shows a warning overlay</li>
+        <li data-step="3">The clear rule restores <code>system.privacy_mode = normal</code> — scheduled rules resume</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('2.2a-privacy-mask-enable')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.2a — Enable</button>
+        <button class="dl-btn" onclick="downloadTemplate('2.2b-privacy-mask-disable')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.2b — Disable</button>
+        <button class="dl-btn" onclick="downloadTemplate('2.2c-privacy-mask-emergency-override')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.2c — Emergency</button>
+        <button class="dl-btn" onclick="downloadTemplate('2.2d-privacy-mask-emergency-clear')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.2d — Clear</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc2-3">
+      <h3>2.3 PTZ Auto-Tracking with Guard Tour Resume</h3>
+      <p class="scenario">A PTZ camera runs a guard tour. On human detection, pause the tour, go to a close-up preset, hold 30 seconds, then resume.</p>
+      <div class="tags">
+        <span class="tag trigger">aoa_scenario</span>
+        <span class="tag action">guard_tour</span>
+        <span class="tag action">ptz_preset</span>
+        <span class="tag action">delay</span>
+        <span class="tag feature">cooldown 60s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">An <strong>AOA Scenario</strong> trigger fires on human detection</li>
+        <li data-step="2"><strong>Guard Tour</strong> stop → <strong>PTZ Preset</strong> go to close-up → <strong>Delay</strong> 30s → <strong>Guard Tour</strong> start</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('2.3-ptz-track-and-resume-tour')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.3 — PTZ Track</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc2-4">
+      <h3>2.4 Motion → Audio Clip</h3>
+      <p class="scenario">Play a pre-uploaded audio clip through the camera speaker when motion is detected — deterrent or staff alert.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag action">audio_clip</span>
+        <span class="tag feature">cooldown 10s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>Device Event</strong> trigger subscribes to Motion Detection</li>
+        <li data-step="2">An <strong>Audio Clip</strong> action plays the selected clip</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('2.4-motion-audio-clip')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.4 — Audio Clip</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc2-5">
+      <h3>2.5 Scheduled Wiper</h3>
+      <p class="scenario">Run the camera wiper every morning at 07:00 to clear overnight condensation or debris.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (daily_time)</span>
+        <span class="tag action">wiper</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>schedule</strong> trigger fires daily at 07:00</li>
+        <li data-step="2">A <strong>Wiper</strong> action starts the primary wiper</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('2.5-schedule-wiper')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 2.5 — Wiper</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 3 ═══════════════════════ -->
+    <div class="section-header" id="uc3">
+      <h2>3 — Security &amp; Surveillance Automation</h2>
+      <p>Combine detection triggers with conditions and multi-step action chains for intrusion response, access control, and occupancy monitoring — entirely on the edge.</p>
+    </div>
+
+    <div class="uc-card" id="uc3-1">
+      <h3>3.1 Perimeter Intrusion Response</h3>
+      <p class="scenario">Person detected in a restricted zone after hours while armed → full response: recording, siren, I/O alarm, Telegram snapshot, live-stream overlay.</p>
+      <div class="tags">
+        <span class="tag trigger">aoa_scenario</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag condition">variable_compare</span>
+        <span class="tag action">recording</span>
+        <span class="tag action">siren_light</span>
+        <span class="tag action">io_output</span>
+        <span class="tag action">telegram</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag feature">cooldown 120s</span>
+        <span class="tag feature">max_executions 10/hr</span>
+        <span class="tag feature">attach_snapshot</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">An <strong>AOA Scenario</strong> trigger detects humans in the perimeter</li>
+        <li data-step="2"><strong>Time Window</strong> (19:00–06:00) + <strong>Variable Compare</strong> (<code>system.armed = true</code>) must both pass</li>
+        <li data-step="3">Five actions: <strong>Recording</strong> → <strong>Siren/Light</strong> → <strong>IO Output</strong> (30s) → <strong>Telegram</strong> (snapshot) → <strong>Overlay Text</strong> (60s)</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('3.1-perimeter-intrusion-response')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 3.1 — Intrusion Response</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc3-2">
+      <h3>3.2 Smart Access Control</h3>
+      <p class="scenario">I/O input from a card reader. Business hours: release door, record, count. After hours: alert only.</p>
+      <div class="tags">
+        <span class="tag trigger">io_input</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">io_output</span>
+        <span class="tag action">recording</span>
+        <span class="tag action">increment_counter</span>
+        <span class="tag action">telegram</span>
+        <span class="tag feature">cooldown 3s</span>
+        <span class="tag feature">attach_snapshot</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">An <strong>I/O Input</strong> trigger on port 1 (rising edge) from the card reader</li>
+        <li data-step="2"><strong>Business hours rule:</strong> Time Window 08:00–18:00 → IO Output (door strike 5s) + Recording + Increment Counter</li>
+        <li data-step="3"><strong>After-hours rule:</strong> Time Window 18:00–08:00 → Recording + Telegram alert with snapshot</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('3.2a-access-control-business-hours')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 3.2a — Business Hours</button>
+        <button class="dl-btn" onclick="downloadTemplate('3.2b-access-control-after-hours-alert')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 3.2b — After Hours</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc3-3">
+      <h3>3.3 Occupancy Monitoring with Escalation</h3>
+      <p class="scenario">AOA counts people. Warning overlay at 20, Slack alert + I/O indicator at 30.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag condition">aoa_occupancy</span>
+        <span class="tag action">aoa_get_counts</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag action">slack_webhook</span>
+        <span class="tag action">io_output</span>
+        <span class="tag feature">cooldown 25s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Schedule triggers every 30 seconds poll AOA counts via <strong>AOA Get Counts</strong></li>
+        <li data-step="2"><strong>Warning rule:</strong> occupancy ≥ 20 → <strong>Overlay Text</strong></li>
+        <li data-step="3"><strong>Critical rule:</strong> occupancy ≥ 30 → <strong>Slack webhook</strong> + <strong>IO Output</strong></li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('3.3a-occupancy-warning')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 3.3a — Warning</button>
+        <button class="dl-btn" onclick="downloadTemplate('3.3b-occupancy-critical')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 3.3b — Critical</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 4 ═══════════════════════ -->
+    <div class="section-header" id="uc4">
+      <h2>4 — Speaker Display</h2>
+      <p>Drive the screen on Axis speaker-display devices (e.g. C1710). Data can come from <strong>MQTT messages</strong>, <strong>HTTP webhooks</strong>, or <strong>direct polling</strong> of another Axis device.</p>
+    </div>
+
+    <div class="uc-card" id="uc4-1">
+      <h3>4.1 Live Queue Ticket Display</h3>
+      <p class="scenario">Ticketing system publishes MQTT updates → display shows current ticket number and queue length instantly.</p>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag action">speaker_display</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">An <strong>MQTT Message</strong> trigger on <code>queue/reception/update</code></li>
+        <li data-step="2">A <strong>Speaker Display</strong> action renders ticket number and wait count on a dark-blue background</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Configure your ticketing system to publish <code>{"current":"A047","waiting":3}</code> to the topic. Adjust the topic in the template.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('4.1-queue-ticket-display')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 4.1 — Queue Ticket</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc4-2">
+      <h3>4.2 Air Quality Monitor (MQTT)</h3>
+      <p class="scenario">Three rules work together: live dashboard on green, critical alert override in red, all-clear to resume.</p>
+
+      <h4>4.2a — Live Data Dashboard</h4>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag condition">variable_compare</span>
+        <span class="tag action">speaker_display</span>
+      </div>
+      <p>MQTT trigger on <code>sensors/airquality/data</code> → display CO₂, PM2.5, temp, humidity on green background. Suppressed when alert is active.</p>
+
+      <h4>4.2b — Critical Alert Override</h4>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">speaker_display</span>
+        <span class="tag feature">while_active</span>
+        <span class="tag feature">cooldown 60s</span>
+      </div>
+      <p>MQTT payload <code>critical</code> → set <code>system.airquality_alert = active</code> → red scrolling alert that persists until cleared.</p>
+
+      <h4>4.2c — All Clear</h4>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">speaker_display</span>
+      </div>
+      <p>MQTT payload <code>clear</code> → reset variable → brief green confirmation → live dashboard resumes.</p>
+
+      <div class="setup-box">
+        <strong>Setup:</strong> Configure your air quality gateway to publish JSON readings to <code>sensors/airquality/data</code> and threshold status to <code>sensors/airquality/status</code>.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('4.2a-air-quality-display')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 4.2a — Dashboard</button>
+        <button class="dl-btn" onclick="downloadTemplate('4.2b-air-quality-alert')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 4.2b — Alert</button>
+        <button class="dl-btn" onclick="downloadTemplate('4.2c-air-quality-clear')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 4.2c — Clear</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc4-3">
+      <h3>4.3 Direct Axis Sensor → Speaker Display</h3>
+      <p class="scenario">The display polls an Axis air quality sensor directly every 60 seconds — no MQTT broker, no gateway, no middleware.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag action">vapix_query (remote)</span>
+        <span class="tag action">speaker_display</span>
+        <span class="tag feature">format specifier |N</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>schedule</strong> trigger fires every 60 seconds</li>
+        <li data-step="2">A <strong>Device Event Query</strong> targets the remote sensor and queries <code>Environment / AirQuality</code></li>
+        <li data-step="3">A <strong>Speaker Display</strong> action renders <code>{{trigger.CO2|0}}</code>, <code>{{trigger.Temperature|1}}</code>, <code>{{trigger.Humidity|0}}</code></li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>remote_host</code>, <code>remote_user</code>, <code>remote_pass</code> with the sensor's IP and credentials.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('4.3-direct-sensor-air-quality-display')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 4.3 — Direct Sensor</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc4-4">
+      <h3>4.4 Webhook-Driven Speaker Display</h3>
+      <p class="scenario">A BMS or automation platform POSTs air quality data over HTTP — no MQTT broker required. Each POST instantly updates the screen.</p>
+      <div class="tags">
+        <span class="tag trigger">http_webhook</span>
+        <span class="tag action">speaker_display</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">An <strong>HTTP Webhook</strong> trigger receives POSTs with a JSON payload</li>
+        <li data-step="2">A <strong>Speaker Display</strong> action renders the values, held for 5 minutes or until the next POST</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> POST to <code>http://&lt;ip&gt;/local/acap_event_engine/fire?token=airquality-display-update</code> with body <code>{"payload":{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}}</code>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('4.4-webhook-air-quality-display')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 4.4 — Webhook Display</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 5 ═══════════════════════ -->
+    <div class="section-header" id="uc5">
+      <h2>5 — System Management</h2>
+      <p>Control the engine's operational mode, maintain counters and variables, and provide observability — the building blocks that other rules depend on.</p>
+    </div>
+
+    <div class="uc-card" id="uc5-1">
+      <h3>5.1 Arm / Disarm via MQTT</h3>
+      <p class="scenario">A single MQTT publish arms or disarms all rules that gate on <code>system.armed</code>.</p>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">payload filter</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Two rules listen on <code>cameras/{{camera.serial}}/arm</code> — payload <code>arm</code> or <code>disarm</code></li>
+        <li data-step="2">Each sets <code>system.armed</code> and logs to syslog</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('5.1a-arm-system-via-mqtt')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.1a — Arm</button>
+        <button class="dl-btn" onclick="downloadTemplate('5.1b-disarm-system-via-mqtt')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.1b — Disarm</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc5-2">
+      <h3>5.2 Daily Counter Reset</h3>
+      <p class="scenario">Reset daily counters (door_access, motion_count) to zero at midnight.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (daily_time)</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">send_syslog</span>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('5.2-daily-counter-reset')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.2 — Counter Reset</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc5-3">
+      <h3>5.3 MQTT Heartbeat</h3>
+      <p class="scenario">Publish a status payload every 60 seconds so monitoring systems can detect device silence.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag action">mqtt_publish</span>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('5.3-mqtt-heartbeat')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.3 — Heartbeat</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc5-4">
+      <h3>5.4 Maintenance Mode via MQTT</h3>
+      <p class="scenario">MQTT enable/disable maintenance mode — suppresses alert rules and shows an overlay on the live stream.</p>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">payload filter</span>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('5.4a-maintenance-mode-enable')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.4a — Enable</button>
+        <button class="dl-btn" onclick="downloadTemplate('5.4b-maintenance-mode-disable')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.4b — Disable</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc5-5">
+      <h3>5.5 Remote Rule Control via MQTT</h3>
+      <p class="scenario">Dynamically enable or disable any rule by ID from a central automation system.</p>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message</span>
+        <span class="tag action">set_rule_enabled</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">payload filter</span>
+      </div>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>REPLACE_WITH_TARGET_RULE_ID</code> with the UUID from the target rule's settings panel.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('5.5a-enable-rule-via-mqtt')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.5a — Enable Rule</button>
+        <button class="dl-btn" onclick="downloadTemplate('5.5b-disable-rule-via-mqtt')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 5.5b — Disable Rule</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 6 ═══════════════════════ -->
+    <div class="section-header" id="uc6">
+      <h2>6 — Cross-Device Automation</h2>
+      <p>Detect on camera A, check state on camera B, act on device C. A single Event Engine instance orchestrates a multi-device workflow.</p>
+    </div>
+
+    <div class="uc-card" id="uc6-1">
+      <h3>6.1 I/O Input → Remote I/O State → Speaker Display</h3>
+      <p class="scenario">Door sensor opens on camera A. Only alarm if camera B's sensor is also active — then show alert on a remote speaker display.</p>
+      <div class="tags">
+        <span class="tag trigger">io_input</span>
+        <span class="tag condition">io_state (remote)</span>
+        <span class="tag action">speaker_display (remote)</span>
+        <span class="tag feature">cooldown 30s</span>
+        <span class="tag feature">cross-device</span>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('6.1-cross-device-io-condition-speaker-display')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 6.1 — Cross-Device I/O</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc6-2">
+      <h3>6.2 AOA → Remote Occupancy Condition → Alert</h3>
+      <p class="scenario">Camera A detects a person, but only alerts if camera B also counts occupancy &gt; 0 — confirming it's not a false positive.</p>
+      <div class="tags">
+        <span class="tag trigger">aoa_scenario</span>
+        <span class="tag condition">aoa_occupancy (remote)</span>
+        <span class="tag action">speaker_display (remote)</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag feature">cooldown 60s</span>
+        <span class="tag feature">cross-device</span>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('6.2-cross-device-aoa-condition-alert')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 6.2 — Cross-Device AOA</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc6-3">
+      <h3>6.3 Remote Sensor Data Relay</h3>
+      <p class="scenario">Poll environmental data from a remote Axis sensor every 60 seconds and publish over MQTT with decimal formatting.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (interval)</span>
+        <span class="tag action">vapix_query (remote)</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag feature">format specifier |N</span>
+        <span class="tag feature">retain</span>
+        <span class="tag feature">cross-device</span>
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('6.3-remote-sensor-data-relay')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 6.3 — Sensor Relay</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ UC 7 ═══════════════════════ -->
+    <div class="section-header" id="uc7">
+      <h2>7 — Advanced Patterns</h2>
+      <p>Templates demonstrating the full depth of the engine: compound triggers, counter-driven escalation, cron scheduling, evidence failover, ACAP lifecycle management, VMS integration, and network-aware conditions.</p>
+    </div>
+
+    <div class="uc-card" id="uc7-1">
+      <h3>7.1 Counter-Driven Escalation</h3>
+      <p class="scenario">Count every motion event during the day. When the count hits 50, escalate once — Slack alert, variable update, and optional rule chain.</p>
+
+      <h4>7.1a — Increment the Counter</h4>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag action">increment_counter</span>
+        <span class="tag feature">cooldown 5s</span>
+      </div>
+      <p>Every motion event increments <code>motion_count</code> by 1. Pair with 5.2 (midnight counter reset) to keep it daily.</p>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.1a-motion-count-increment')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.1a — Increment</button>
+      </div>
+
+      <h4>7.1b — Escalate at Threshold</h4>
+      <div class="tags">
+        <span class="tag trigger">counter_threshold</span>
+        <span class="tag condition">counter</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">slack_webhook</span>
+        <span class="tag action">run_rule</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">max_executions 1/day</span>
+      </div>
+      <p>When <code>motion_count &gt;= 50</code>, the counter_threshold trigger fires. A counter condition double-checks, then escalates via Slack and optionally chains to another rule.</p>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>REPLACE_WITH_TARGET_RULE_ID</code> with the UUID of a rule to chain to. Remove the <code>run_rule</code> action if chaining is not needed.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.1b-motion-count-escalate')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.1b — Escalate</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-2">
+      <h3>7.2 Compound Trigger — Tailgate Detection</h3>
+      <p class="scenario">A door sensor and motion detection each fire independently on legitimate events. A tailgate occurs when both happen within 8 seconds of each other.</p>
+      <div class="tags">
+        <span class="tag trigger">io_input</span>
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">recording</span>
+        <span class="tag action">telegram</span>
+        <span class="tag action">io_output</span>
+        <span class="tag feature">trigger_logic AND</span>
+        <span class="tag feature">trigger_window 8s</span>
+        <span class="tag feature">attach_snapshot</span>
+        <span class="tag feature">cooldown 30s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><code>trigger_logic: "AND"</code> + <code>trigger_window: 8</code> — both I/O input and motion must fire within 8 seconds</li>
+        <li data-step="2">Time Window restricts to after-hours (18:00–08:00)</li>
+        <li data-step="3">Recording (30s) → Telegram snapshot alert → IO Output (alarm relay 5s)</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.2-compound-trigger-tailgate')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.2 — Tailgate Alert</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-3">
+      <h3>7.3 Night-Only Recording</h3>
+      <p class="scenario">Record motion only during darkness. No fixed time window — adapts to actual sunrise/sunset at the camera's location across the year.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag condition">day_night (night)</span>
+        <span class="tag action">recording</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag feature">cooldown 30s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Device Event trigger on motion detection</li>
+        <li data-step="2"><strong>Day/Night</strong> condition passes only when the sun is below the horizon</li>
+        <li data-step="3">Recording (30s) + overlay text showing detection time</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.3-night-only-recording')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.3 — Night Recording</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-4">
+      <h3>7.4 Snapshot Evidence with FTP Fallback</h3>
+      <p class="scenario">POST a snapshot to the primary evidence server. If the upload fails, the <code>on_failure</code> chain automatically reroutes to FTP backup storage.</p>
+      <div class="tags">
+        <span class="tag trigger">aoa_scenario</span>
+        <span class="tag condition">variable_compare</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">http_request</span>
+        <span class="tag action">ftp_upload</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">on_failure chain</span>
+        <span class="tag feature">attach_snapshot</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">AOA human detection, armed + after-hours</li>
+        <li data-step="2"><strong>HTTP Request</strong> with <code>attach_snapshot: true</code> POSTs the base64 image to the evidence server</li>
+        <li data-step="3">If HTTP fails (any error) → <code>on_failure</code> runs: <strong>FTP Upload</strong> to backup + <strong>Send Syslog</strong> warning</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.4-snapshot-upload-ftp-fallback')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.4 — Snapshot + FTP Fallback</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-5">
+      <h3>7.5 ACAP Service Watchdog</h3>
+      <p class="scenario">A critical ACAP must stay running. Poll its state every 10 minutes; if it's inactive, restart it, restore a device parameter, and publish an alert.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (cron)</span>
+        <span class="tag condition">vapix_event_state</span>
+        <span class="tag action">acap_control</span>
+        <span class="tag action">set_device_param</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag feature">cron schedule</span>
+        <span class="tag feature">cooldown 300s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Cron trigger <code>*/10 * * * *</code> fires every 10 minutes</li>
+        <li data-step="2"><strong>Device Event State</strong> condition checks the ACAP's running event — passes only when the ACAP is NOT active</li>
+        <li data-step="3"><strong>ACAP Control</strong> start → <strong>Set Device Parameter</strong> restore → syslog warning → MQTT alert</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>event_key</code> with your ACAP's running event path, and <code>package</code> with its package name.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.5-acap-watchdog-cron')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.5 — ACAP Watchdog</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-6">
+      <h3>7.6 Paging Console Scheduled Announcement</h3>
+      <p class="scenario">Broadcast a pre-configured announcement on an Axis C6110 paging console at the top of every business hour.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (cron)</span>
+        <span class="tag action">paging_console_execute</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">cron schedule</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Cron trigger <code>0 8-17 * * 1-5</code> — top of every hour, 08:00–17:00, Mon–Fri</li>
+        <li data-step="2"><strong>Paging Console Execute</strong> triggers the pre-configured paging action by UUID</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>REPLACE_WITH_PAGING_ACTION_UUID</code> with the action UUID from the C6110 web interface.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.6-paging-scheduled-announcement')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.6 — Paging Announcement</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-7">
+      <h3>7.7 VMS Event Bridge</h3>
+      <p class="scenario">Trigger from the UI or any external system to emit a VAPIX event that your VMS (ACS, Milestone) is subscribed to — bridging Event Engine automation into VMS workflows.</p>
+      <div class="tags">
+        <span class="tag trigger">manual</span>
+        <span class="tag trigger">http_webhook</span>
+        <span class="tag action">fire_vapix_event</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag action">send_syslog</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Manual trigger (UI "Fire Now" or <code>POST /fire</code>) or HTTP Webhook from any system</li>
+        <li data-step="2"><strong>Fire VAPIX Event</strong> emits <code>RuleFired</code> — the VMS subscribes to this and triggers its own workflow</li>
+        <li data-step="3">MQTT Publish + Syslog provide parallel paths</li>
+      </ol>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.7-vms-event-bridge')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.7 — VMS Bridge</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-8">
+      <h3>7.8 Security Event Audit Logger</h3>
+      <p class="scenario">Whenever a critical security rule fires, log it — with <code>condition_logic: OR</code>, only when the system is armed OR any motion activity has been seen today.</p>
+      <div class="tags">
+        <span class="tag trigger">rule_fired</span>
+        <span class="tag condition">variable_compare</span>
+        <span class="tag condition">counter</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag feature">condition_logic OR</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><strong>Rule Fired</strong> trigger watches a security rule by UUID</li>
+        <li data-step="2"><code>condition_logic: "OR"</code> — logs if <code>system.armed = true</code> <em>or</em> <code>motion_count &gt; 0</code></li>
+        <li data-step="3">Syslog (warning) + MQTT audit topic with variable interpolation</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>REPLACE_WITH_SECURITY_RULE_ID</code> with the UUID of the rule to audit.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.8-security-audit-logger')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.8 — Audit Logger</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-9">
+      <h3>7.9 Network-Gated Motion Alert</h3>
+      <p class="scenario">Confirm the notification endpoint is reachable before acting. Silently skip when connectivity is lost — prevents dead-queue flooding in isolated or occasionally-connected deployments.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag condition">http_check</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">slack_webhook</span>
+        <span class="tag feature">attach_snapshot</span>
+        <span class="tag feature">cooldown 30s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Motion detection trigger fires</li>
+        <li data-step="2"><strong>HTTP Check</strong> condition GETs the health endpoint — passes only if HTTP 200 + body <code>ok</code> within 5 seconds</li>
+        <li data-step="3">Time Window + endpoint check both pass → Slack alert with snapshot fires</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace <code>url</code> and <code>expected_body</code> in the condition with your actual health endpoint.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.9-network-gated-alert')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.9 — Network-Gated Alert</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-10">
+      <h3>7.10 Raw Binary Snapshot Upload</h3>
+      <p class="scenario">POST a raw JPEG snapshot directly to an evidence archive. Unlike <code>http_request</code> with <code>attach_snapshot</code> (which encodes to base64 inside JSON), <code>snapshot_upload</code> sends an RFC-compliant binary <code>image/jpeg</code> body — smaller wire size, no decode step on the server.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag condition">variable_compare (armed)</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">snapshot_upload</span>
+        <span class="tag action">send_syslog</span>
+        <span class="tag feature">lifetime max_executions cap</span>
+        <span class="tag feature">cooldown 10s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">Motion trigger fires; armed + after-hours conditions must both pass</li>
+        <li data-step="2"><strong>Snapshot Upload</strong> GETs a warm JPEG from <code>channel 1</code> and POSTs it as raw binary with authorization header</li>
+        <li data-step="3"><code>max_executions: 500, max_exec_period: ""</code> — hard lifetime cap to prevent storage flooding</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Replace the <code>url</code> and <code>REPLACE_WITH_API_TOKEN</code> in the headers. The receiver must accept <code>Content-Type: image/jpeg</code> binary bodies.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.10-raw-snapshot-upload')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.10 — Raw Snapshot Upload</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-11">
+      <h3>7.11 Paging Console Context Button</h3>
+      <p class="scenario">Dynamically swap a paging console panel button between an Emergency All-Call action and normal operations — driven by MQTT alarm state. The button a security officer presses always reflects the current posture of the site.</p>
+
+      <h4>7.11a — Arm: Assign Emergency Action to Slot 1</h4>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message (armed)</span>
+        <span class="tag action">paging_console_button</span>
+        <span class="tag action">send_syslog</span>
+      </div>
+      <p>On <code>site/alarm/state</code> payload <code>armed</code>: GET the page layout, patch slot 1 to the emergency action UUID, PUT it back.</p>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.11a-paging-button-arm')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.11a — Arm: Emergency Button</button>
+      </div>
+
+      <h4>7.11b — Disarm: Restore Normal Action to Slot 1</h4>
+      <div class="tags">
+        <span class="tag trigger">mqtt_message (disarmed)</span>
+        <span class="tag action">paging_console_button</span>
+        <span class="tag action">send_syslog</span>
+      </div>
+      <p>On <code>site/alarm/state</code> payload <code>disarmed</code>: patch slot 1 back to the standard operations action UUID.</p>
+      <div class="setup-box">
+        <strong>Setup:</strong> In both templates replace <code>REPLACE_WITH_PAGE_UUID</code> with the C6110 page UUID and the action UUIDs with those from your paging console configuration.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.11b-paging-button-disarm')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.11b — Disarm: Restore Button</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-12">
+      <h3>7.12 Dual-Zone Breach — AND_ACTIVE</h3>
+      <p class="scenario">A door sensor and motion detection must be <em>simultaneously</em> active to trigger a breach alert. A door that briefly opens with no concurrent motion (delivery, false latch) is ignored. Motion with the door closed (cleaning staff, animals) is ignored. Only genuine co-occurrence raises the alarm.</p>
+      <div class="tags">
+        <span class="tag trigger">io_input (door sensor)</span>
+        <span class="tag trigger">vapix_event (Motion)</span>
+        <span class="tag condition">time_window</span>
+        <span class="tag action">recording</span>
+        <span class="tag action">mqtt_publish</span>
+        <span class="tag action">telegram</span>
+        <span class="tag feature">trigger_logic AND_ACTIVE</span>
+        <span class="tag feature">mqtt on_failure → syslog</span>
+        <span class="tag feature">attach_snapshot</span>
+        <span class="tag feature">cooldown 30s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><code>trigger_logic: "AND_ACTIVE"</code> — rule only fires while <em>both</em> triggers are simultaneously in their active state</li>
+        <li data-step="2">After-hours <strong>Time Window</strong> condition passes</li>
+        <li data-step="3">Recording (45s) starts; MQTT breach alert publishes (QoS 1)</li>
+        <li data-step="4">If MQTT broker is unreachable, <code>on_failure</code> logs a syslog error — so the alert is never silently lost</li>
+        <li data-step="5">Telegram snapshot notification sent in parallel</li>
+      </ol>
+      <div class="setup-box">
+        <strong>AND_ACTIVE vs AND:</strong> <code>AND</code> + <code>trigger_window</code> fires if both triggers fire within N seconds of each other (sequential OK). <code>AND_ACTIVE</code> requires genuine simultaneous presence — both trigger states must be active at the same moment.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.12-dual-zone-and-active')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.12 — Dual-Zone AND_ACTIVE</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════ SUMMARY ═══════════════════════ -->
+    <div class="section-header" id="summary">
+      <h2>Template Summary</h2>
+    </div>
+
+    <table class="summary-table">
+      <thead>
+        <tr><th>#</th><th>Template</th><th>Category</th><th>Description</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>1.1a</td><td>sensor-data-powerbi</td><td>Data</td><td>Sensor → Power BI streaming dataset</td></tr>
+        <tr><td>1.1b</td><td>sensor-data-influxdb</td><td>Data</td><td>Sensor → InfluxDB for Grafana</td></tr>
+        <tr><td>1.1c</td><td>sensor-data-mqtt-homeassistant</td><td>Data</td><td>Sensor → MQTT to Home Assistant</td></tr>
+        <tr><td>1.2</td><td>multi-platform-motion-alerts</td><td>Notifications</td><td>Motion → Slack + Teams + Email with snapshot</td></tr>
+        <tr><td>1.3</td><td>daily-activity-digest</td><td>Notifications</td><td>Buffer events → daily email summary</td></tr>
+        <tr><td>2.1a</td><td>sunset-night-mode</td><td>Control</td><td>Sunset → IR night + illuminator on</td></tr>
+        <tr><td>2.1b</td><td>sunrise-day-mode</td><td>Control</td><td>Sunrise → IR day + illuminator off</td></tr>
+        <tr><td>2.2a</td><td>privacy-mask-enable</td><td>Control</td><td>08:00 → enable privacy mask</td></tr>
+        <tr><td>2.2b</td><td>privacy-mask-disable</td><td>Control</td><td>18:00 → disable privacy mask</td></tr>
+        <tr><td>2.2c</td><td>privacy-mask-emergency-override</td><td>Control</td><td>Emergency → disable masks + override</td></tr>
+        <tr><td>2.2d</td><td>privacy-mask-emergency-clear</td><td>Control</td><td>Emergency cleared → restore masks</td></tr>
+        <tr><td>2.3</td><td>ptz-track-and-resume-tour</td><td>Control</td><td>AOA → stop tour → PTZ → resume</td></tr>
+        <tr><td>2.4</td><td>motion-audio-clip</td><td>Control</td><td>Motion → play audio deterrent</td></tr>
+        <tr><td>2.5</td><td>schedule-wiper</td><td>Control</td><td>Daily 07:00 → camera wiper</td></tr>
+        <tr><td>3.1</td><td>perimeter-intrusion-response</td><td>Security</td><td>Human + armed + after-hours → full response</td></tr>
+        <tr><td>3.2a</td><td>access-control-business-hours</td><td>Security</td><td>Card reader → door release + recording</td></tr>
+        <tr><td>3.2b</td><td>access-control-after-hours-alert</td><td>Security</td><td>Card reader after hours → Telegram alert</td></tr>
+        <tr><td>3.3a</td><td>occupancy-warning</td><td>Security</td><td>Occupancy ≥ 20 → warning overlay</td></tr>
+        <tr><td>3.3b</td><td>occupancy-critical</td><td>Security</td><td>Occupancy ≥ 30 → Slack + IO output</td></tr>
+        <tr><td>4.1</td><td>queue-ticket-display</td><td>Display</td><td>MQTT ticket → live queue number</td></tr>
+        <tr><td>4.2a</td><td>air-quality-display</td><td>Display</td><td>MQTT sensor → live dashboard</td></tr>
+        <tr><td>4.2b</td><td>air-quality-alert</td><td>Display</td><td>MQTT critical → red scrolling alert</td></tr>
+        <tr><td>4.2c</td><td>air-quality-clear</td><td>Display</td><td>MQTT clear → resume dashboard</td></tr>
+        <tr><td>4.3</td><td>direct-sensor-air-quality-display</td><td>Display</td><td>Direct vapix_query → speaker display</td></tr>
+        <tr><td>4.4</td><td>webhook-air-quality-display</td><td>Display</td><td>HTTP webhook → speaker display</td></tr>
+        <tr><td>5.1a</td><td>arm-system-via-mqtt</td><td>System</td><td>MQTT arm → set system.armed = true</td></tr>
+        <tr><td>5.1b</td><td>disarm-system-via-mqtt</td><td>System</td><td>MQTT disarm → set system.armed = false</td></tr>
+        <tr><td>5.2</td><td>daily-counter-reset</td><td>System</td><td>Midnight → reset counters to zero</td></tr>
+        <tr><td>5.3</td><td>mqtt-heartbeat</td><td>System</td><td>Every 60s → publish status heartbeat</td></tr>
+        <tr><td>5.4a</td><td>maintenance-mode-enable</td><td>System</td><td>MQTT → activate maintenance mode</td></tr>
+        <tr><td>5.4b</td><td>maintenance-mode-disable</td><td>System</td><td>MQTT → deactivate maintenance mode</td></tr>
+        <tr><td>5.5a</td><td>enable-rule-via-mqtt</td><td>System</td><td>MQTT → enable target rule by ID</td></tr>
+        <tr><td>5.5b</td><td>disable-rule-via-mqtt</td><td>System</td><td>MQTT → disable target rule by ID</td></tr>
+        <tr><td>6.1</td><td>cross-device-io-condition-speaker-display</td><td>Cross-Device</td><td>I/O → remote I/O condition → display</td></tr>
+        <tr><td>6.2</td><td>cross-device-aoa-condition-alert</td><td>Cross-Device</td><td>AOA → remote occupancy → display + MQTT</td></tr>
+        <tr><td>6.3</td><td>remote-sensor-data-relay</td><td>Cross-Device</td><td>Schedule → remote query → MQTT with |N</td></tr>
+        <tr><td>4.3</td><td>direct-sensor-display</td><td>Displays</td><td>VAPIX query → overlay text + MQTT</td></tr>
+        <tr><td>4.4</td><td>webhook-display</td><td>Displays</td><td>HTTP Webhook → overlay text + MQTT</td></tr>
+        <tr><td>7.1a</td><td>motion-count-increment</td><td>Advanced</td><td>Motion → increment_counter (+1)</td></tr>
+        <tr><td>7.1b</td><td>motion-count-escalate</td><td>Advanced</td><td>counter_threshold → Slack + run_rule, 1/day</td></tr>
+        <tr><td>7.2</td><td>compound-trigger-tailgate</td><td>Advanced</td><td>I/O AND Motion (8s window) → recording + Telegram</td></tr>
+        <tr><td>7.3</td><td>night-only-recording</td><td>Advanced</td><td>Motion + day_night(night) → recording</td></tr>
+        <tr><td>7.4</td><td>snapshot-upload-ftp-fallback</td><td>Advanced</td><td>AOA → http_request + on_failure → ftp_upload</td></tr>
+        <tr><td>7.5</td><td>acap-watchdog-cron</td><td>Advanced</td><td>Cron + vapix_event_state → acap_control + set_device_param</td></tr>
+        <tr><td>7.6</td><td>paging-scheduled-announcement</td><td>Advanced</td><td>Cron → paging_console_execute</td></tr>
+        <tr><td>7.7</td><td>vms-event-bridge</td><td>Advanced</td><td>Manual/Webhook → fire_vapix_event + MQTT</td></tr>
+        <tr><td>7.8</td><td>security-audit-logger</td><td>Advanced</td><td>rule_fired → condition_logic OR → syslog + MQTT</td></tr>
+        <tr><td>7.9</td><td>network-gated-alert</td><td>Advanced</td><td>Motion + http_check → Slack with snapshot</td></tr>
+        <tr><td>7.10</td><td>raw-snapshot-upload</td><td>Advanced</td><td>Motion + armed → snapshot_upload (binary JPEG), lifetime cap</td></tr>
+        <tr><td>7.11a</td><td>paging-button-arm</td><td>Advanced</td><td>MQTT armed → paging_console_button (set emergency slot)</td></tr>
+        <tr><td>7.11b</td><td>paging-button-disarm</td><td>Advanced</td><td>MQTT disarmed → paging_console_button (restore normal slot)</td></tr>
+        <tr><td>7.12</td><td>dual-zone-and-active</td><td>Advanced</td><td>Door + Motion AND_ACTIVE → recording + MQTT (on_failure → syslog)</td></tr>
+      </tbody>
+    </table>
+
+    <!-- ═══════════════════════ CUSTOMISATION ═══════════════════════ -->
+    <div class="section-header" id="customisation">
+      <h2>Customisation Guide</h2>
+    </div>
+
+    <div class="uc-card">
+      <p>Every template is designed to be imported and then customised in the web UI:</p>
+      <table class="summary-table">
+        <tr><th>What to change</th><th>Where</th></tr>
+        <tr><td>Webhook URLs (Slack, Teams)</td><td>Replace placeholder URLs with your actual endpoints</td></tr>
+        <tr><td>MQTT topics</td><td>Adjust the topic hierarchy to match your broker structure</td></tr>
+        <tr><td>InfluxDB</td><td>Set server URL, database/bucket, and credentials</td></tr>
+        <tr><td>Telegram</td><td>Insert your bot token and chat ID</td></tr>
+        <tr><td>Email (SMTP)</td><td>Configure SMTP in Settings tab; only recipients need changing per rule</td></tr>
+        <tr><td>I/O ports</td><td>Match port numbers to your camera's physical wiring</td></tr>
+        <tr><td>AOA scenarios</td><td>Match scenario IDs to your configured analytics scenarios</td></tr>
+        <tr><td>PTZ presets / Guard tours / Privacy masks</td><td>Use names matching your camera configuration</td></tr>
+        <tr><td>Thresholds and timings</td><td>Adjust cooldowns, hold durations, and value thresholds</td></tr>
+        <tr><td>Remote device credentials</td><td>Set IP, username, and password for cross-device rules</td></tr>
+        <tr><td>Decimal formatting</td><td>Append <code>|N</code> to numeric variables for precision (e.g. <code>{{trigger.Temperature|2}}</code>)</td></tr>
+      </table>
+    </div>
+
+  </main>
+</div>
+
+<!-- ═══════════════════════ JS ═══════════════════════ -->
+<script>
+/* Theme toggle */
+document.getElementById('theme-btn').addEventListener('click', function() {
+  var t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('theme', t);
+  this.textContent = t === 'dark' ? '☀' : '☾';
+});
+(function() {
+  var t = document.documentElement.getAttribute('data-theme');
+  document.getElementById('theme-btn').textContent = t === 'dark' ? '☀' : '☾';
+})();
+
+/* Sidebar active state on scroll */
+(function() {
+  var links = document.querySelectorAll('.sidebar a[href^="#"]');
+  var sections = [];
+  links.forEach(function(a) {
+    var el = document.getElementById(a.getAttribute('href').slice(1));
+    if (el) sections.push({ link: a, el: el });
+  });
+  function update() {
+    var scrollY = window.scrollY + 80;
+    var active = sections[0];
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].el.offsetTop <= scrollY) active = sections[i];
+    }
+    links.forEach(function(a) { a.classList.remove('active'); });
+    if (active) active.link.classList.add('active');
+  }
+  window.addEventListener('scroll', update, { passive: true });
+  update();
+})();
+
+/* Template download — fetches from GitHub raw or relative path */
+var TEMPLATE_BASE = 'https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/use-cases/templates/';
+
+function downloadTemplate(name) {
+  var url = TEMPLATE_BASE + name + '.json';
+  fetch(url)
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    })
+    .then(function(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name + '.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 100);
+    })
+    .catch(function(err) {
+      alert('Download failed: ' + err.message + '\n\nYou can download templates directly from the GitHub repository.');
+    });
+}
+</script>
+</body>
+</html>

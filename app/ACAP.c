@@ -2440,6 +2440,60 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body) {
     return response;
 }
 
+char* ACAP_VAPIX_Put_Path(const char* path, const char* body) {
+    if (!VAPIX_CURL || !path || !body) {
+        LOG_WARN("%s: Invalid input\n", __func__);
+        return NULL;
+    }
+
+    char* response = NULL;
+    const char* host = VAPIX_Credentials ? "127.0.0.12" : "127.0.0.1";
+    size_t url_size = strlen("http://") + strlen(host) + strlen(path) + 1;
+    char* url = malloc(url_size);
+    if (!url) return NULL;
+    snprintf(url, url_size, "http://%s%s", host, path);
+
+    pthread_mutex_lock(&vapix_mutex);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_URL, url);
+    if (VAPIX_Credentials) {
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_USERPWD, VAPIX_Credentials);
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    } else {
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPAUTH, 0L);
+    }
+    struct curl_slist* headers = NULL;
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_CUSTOMREQUEST, "PUT");
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEFUNCTION, append_to_buffer_callback);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &response);
+
+    CURLcode res = curl_easy_perform(VAPIX_CURL);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_CUSTOMREQUEST, NULL);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
+    pthread_mutex_unlock(&vapix_mutex);
+    curl_slist_free_all(headers);
+    free(url);
+
+    if (res != CURLE_OK) {
+        LOG_WARN("%s: %d: %s", __func__, res, curl_easy_strerror(res));
+        free(response);
+        return NULL;
+    }
+
+    long response_code;
+    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    if (response_code >= 300) {
+        LOG_WARN("%s: Code %ld\n", __func__, response_code);
+        free(response);
+        return NULL;
+    }
+
+    return response;
+}
+
 char* ACAP_VAPIX_Post_Path_Raw(const char* path, const char* body, long* http_code_out) {
     if (!VAPIX_CURL || !path || !body) return NULL;
 

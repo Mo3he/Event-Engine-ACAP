@@ -1,0 +1,41 @@
+{
+  "name": "Speaker Display — Direct Axis Sensor Air Quality",
+  "description": "Every 60 seconds, pull air quality data (CO₂, temperature, humidity) directly from a remote Axis environmental sensor using vapix_query and display it on the speaker-display screen. No MQTT broker or middleware needed — the display polls the sensor itself.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval_seconds": 60
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tns1": "Environment" },
+      "topic1": { "tnsaxis": "AirQuality" },
+      "remote_host": "192.168.1.50",
+      "remote_user": "root",
+      "remote_pass": "pass"
+    },
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "Air Quality\nCO₂: {{trigger.CO2|0}} ppm\nTemp: {{trigger.Temperature|1}}°C   Humidity: {{trigger.Humidity|0}}%",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#004400",
+      "textSize": "medium",
+      "scrollDirection": "",
+      "scrollSpeed": 0,
+      "duration_type": "time",
+      "duration_value": 65000
+    }
+  ]
+}

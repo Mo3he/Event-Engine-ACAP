@@ -826,6 +826,11 @@ char* ACAP_VAPIX_Get_Path(const char* path);
 char* ACAP_VAPIX_Post_Path(const char* path, const char* body);
 
 /**
+ * @brief PUT JSON body to an arbitrary path on the local device.
+ */
+char* ACAP_VAPIX_Put_Path(const char* path, const char* body);
+
+/**
  * @brief POST to an arbitrary local path, returning the response body even on
  *        HTTP error codes (for debugging). http_code_out receives the HTTP
  *        status code; pass NULL to ignore.

@@ -87,6 +87,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         "delay", "set_variable", "increment_counter", "run_rule", "fire_vapix_event",
         "vapix_query", "set_device_param", "acap_control", "influxdb_write", "aoa_get_counts",
         "speaker_display",
+        "paging_console_execute", "paging_console_button",
         NULL
     };
     static const char* const trigger_logic_values[] = {"OR", "AND", "AND_ACTIVE", NULL};
@@ -1411,6 +1412,63 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
             cJSON_AddItemToArray(result, item);
             free(raw);
         }
+
+    } else if (strcmp(query, "paging") == 0) {
+        /* Fetch paging-console actions and pages from a remote device.
+         * Returns [{ "actions": [...], "pages": [...] }]. */
+        cJSON* paging = cJSON_CreateObject();
+        cJSON* actions_arr = cJSON_AddArrayToObject(paging, "actions");
+        cJSON* pages_arr   = cJSON_AddArrayToObject(paging, "pages");
+
+        char* raw_a = rc_get(host, user, pass, "/config/rest/paging-console-actions/v1/actions");
+        if (raw_a) {
+            cJSON* ja = cJSON_Parse(raw_a); free(raw_a);
+            if (ja) {
+                cJSON* da = cJSON_GetObjectItem(ja, "data");
+                if (!da) da = ja;
+                if (cJSON_IsArray(da)) {
+                    cJSON* item;
+                    cJSON_ArrayForEach(item, da) {
+                        const char* id = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+                        const char* lbl = cJSON_GetStringValue(cJSON_GetObjectItem(item, "label"));
+                        const char* desc = cJSON_GetStringValue(cJSON_GetObjectItem(item, "description"));
+                        const char* tp = cJSON_GetStringValue(cJSON_GetObjectItem(item, "type"));
+                        if (!id) continue;
+                        cJSON* o = cJSON_CreateObject();
+                        cJSON_AddStringToObject(o, "id", id);
+                        cJSON_AddStringToObject(o, "label", lbl ? lbl : (desc ? desc : (tp ? tp : id)));
+                        cJSON_AddItemToArray(actions_arr, o);
+                    }
+                }
+                cJSON_Delete(ja);
+            }
+        }
+
+        char* raw_p = rc_get(host, user, pass, "/config/rest/paging-console-button-layout/v1/pages");
+        if (raw_p) {
+            cJSON* jp = cJSON_Parse(raw_p); free(raw_p);
+            if (jp) {
+                cJSON* dp = cJSON_GetObjectItem(jp, "data");
+                if (!dp) dp = jp;
+                if (cJSON_IsArray(dp)) {
+                    int pi = 0;
+                    cJSON* item;
+                    cJSON_ArrayForEach(item, dp) {
+                        const char* pid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+                        if (!pid && cJSON_IsString(item)) pid = item->valuestring;
+                        if (!pid) continue;
+                        cJSON* o = cJSON_CreateObject();
+                        cJSON_AddStringToObject(o, "id", pid);
+                        char pname[32]; snprintf(pname, sizeof(pname), "Page %d", ++pi);
+                        cJSON_AddStringToObject(o, "name", pname);
+                        cJSON_AddItemToArray(pages_arr, o);
+                    }
+                }
+                cJSON_Delete(jp);
+            }
+        }
+
+        cJSON_AddItemToArray(result, paging);
 
     } else {
         cJSON_Delete(result);

@@ -1,0 +1,39 @@
+{
+  "name": "Night-Only Motion Recording",
+  "description": "Record motion events only during darkness using the day_night condition — avoids unnecessary storage usage during daylight hours. Night/day thresholds follow the sun position calculated from the camera's configured latitude and longitude, not a fixed clock time.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 30,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [
+    {
+      "type": "day_night",
+      "state": "night"
+    }
+  ],
+  "actions": [
+    {
+      "type": "recording",
+      "operation": "start",
+      "duration": 30
+    },
+    {
+      "type": "overlay_text",
+      "text": "Night motion detected — {{time}}",
+      "channel": 1,
+      "duration": 12000
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Paging Console — Assign Emergency Button",
+  "description": "When an alarm armed MQTT message arrives, dynamically update slot 1 on the paging console panel to the Emergency All-Call action. The paging_console_button action GETs the current page layout, patches the target slot with the provided action UUID, and PUTs it back — so operators pressing that button immediately reach the emergency broadcast. Pair with 7.11b to restore normal operations on disarm.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 5,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic": "site/alarm/state",
+      "payload_contains": "armed"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "paging_console_button",
+      "page_id": "REPLACE_WITH_PAGE_UUID",
+      "slot": 1,
+      "action_id": "REPLACE_WITH_EMERGENCY_ACTION_UUID"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Paging console slot 1 updated to Emergency All-Call (alarm armed at {{timestamp}})",
+      "level": "warning"
+    }
+  ]
+}

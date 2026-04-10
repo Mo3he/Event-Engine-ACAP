@@ -1,0 +1,32 @@
+{
+  "name": "Speaker Display — Webhook Air Quality Dashboard",
+  "description": "An external system (BMS, sensor gateway, or automation platform) POSTs air quality readings to the speaker display via HTTP webhook. The display updates instantly on each POST — no MQTT broker required.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "http_webhook",
+      "token": "airquality-display-update"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "speaker_display",
+      "operation": "show",
+      "message": "Air Quality\nCO₂: {{trigger.co2}} ppm   PM2.5: {{trigger.pm25}} μg/m³\nTemp: {{trigger.temperature}}°C   Humidity: {{trigger.humidity}}%",
+      "textColor": "#FFFFFF",
+      "backgroundColor": "#004400",
+      "textSize": "medium",
+      "scrollDirection": "",
+      "scrollSpeed": 0,
+      "duration_type": "time",
+      "duration_value": 300000
+    }
+  ]
+}

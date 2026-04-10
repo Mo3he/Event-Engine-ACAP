@@ -1,0 +1,40 @@
+{
+  "name": "VMS Event Bridge — Manual Trigger + VAPIX Event",
+  "description": "Trigger from the Event Engine UI (Fire Now button) or the REST API to instantly emit a VAPIX event that your VMS (e.g. AXIS Camera Station, Milestone) is subscribed to — allowing Event Engine rules to initiate VMS actions. Also accepts an HTTP webhook as a trigger so any external system can initiate the bridge. Demonstrates the manual trigger, http_webhook trigger, and fire_vapix_event action.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 5,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "manual"
+    },
+    {
+      "type": "http_webhook",
+      "token": "vms-bridge-trigger"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "fire_vapix_event",
+      "event_id": "RuleFired",
+      "state": true
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "cameras/{{camera.serial}}/events/vms_bridge",
+      "payload": "{\"event\":\"vms_bridge\",\"camera\":\"{{camera.serial}}\",\"time\":\"{{timestamp}}\"}",
+      "qos": 1,
+      "retain": false
+    },
+    {
+      "type": "send_syslog",
+      "message": "VMS bridge triggered on {{camera.model}} ({{camera.serial}}) at {{timestamp}}",
+      "level": "info"
+    }
+  ]
+}

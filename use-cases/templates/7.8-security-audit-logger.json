@@ -1,0 +1,45 @@
+{
+  "name": "Security Event Audit Logger",
+  "description": "Fires whenever a specified security rule executes (rule_fired trigger), then logs the event to syslog and MQTT — but only if the system is armed OR the motion counter is above zero (condition_logic: OR). Demonstrates the rule_fired trigger, condition_logic OR, counter condition, and variable_compare condition used together.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "OR",
+  "cooldown": 2,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "rule_fired",
+      "rule_id": "REPLACE_WITH_SECURITY_RULE_ID"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "variable_compare",
+      "name": "system.armed",
+      "op": "eq",
+      "value": "true"
+    },
+    {
+      "type": "counter",
+      "name": "motion_count",
+      "op": "gt",
+      "value": 0
+    }
+  ],
+  "actions": [
+    {
+      "type": "send_syslog",
+      "message": "Security audit: rule fired on {{camera.serial}} at {{timestamp}} — armed={{var.system.armed}}, motion_count={{counter.motion_count}}",
+      "level": "warning"
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "cameras/{{camera.serial}}/audit/security",
+      "payload": "{\"event\":\"security_rule_fired\",\"camera\":\"{{camera.serial}}\",\"time\":\"{{timestamp}}\",\"armed\":\"{{var.system.armed}}\"}",
+      "qos": 1,
+      "retain": false
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "Paging Console — Restore Normal Button",
+  "description": "When an alarm disarmed MQTT message arrives, restore slot 1 on the paging console panel to the standard operations action. Pair with 7.11a which sets the emergency action on arm. Together they form a stateful paging console button that reflects the current security posture of the site.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 5,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "mqtt_message",
+      "topic": "site/alarm/state",
+      "payload_contains": "disarmed"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "paging_console_button",
+      "page_id": "REPLACE_WITH_PAGE_UUID",
+      "slot": 1,
+      "action_id": "REPLACE_WITH_NORMAL_ACTION_UUID"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Paging console slot 1 restored to Normal Operations (alarm disarmed at {{timestamp}})",
+      "level": "info"
+    }
+  ]
+}

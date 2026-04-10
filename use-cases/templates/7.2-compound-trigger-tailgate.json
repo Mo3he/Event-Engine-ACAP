@@ -1,0 +1,54 @@
+{
+  "name": "Tailgate Alert — Door + Motion Within 8 Seconds",
+  "description": "Fires only when both a door I/O input AND motion detection occur within 8 seconds of each other — a compound trigger pattern. A single event alone (door with no motion, or background motion with no door) does not fire the rule. Demonstrates trigger_logic AND with trigger_window.",
+  "enabled": true,
+  "trigger_logic": "AND",
+  "trigger_window": 8,
+  "condition_logic": "AND",
+  "cooldown": 30,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "rising"
+    },
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [
+    {
+      "type": "time_window",
+      "start": "18:00",
+      "end": "08:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "actions": [
+    {
+      "type": "recording",
+      "operation": "start",
+      "duration": 30
+    },
+    {
+      "type": "telegram",
+      "bot_token": "YOUR_BOT_TOKEN",
+      "chat_id": "YOUR_CHAT_ID",
+      "message": "🚨 Possible tailgating on {{camera.model}} ({{camera.serial}}) at {{time}} — door opened with simultaneous motion detected.",
+      "parse_mode": "HTML",
+      "attach_snapshot": true
+    },
+    {
+      "type": "io_output",
+      "port": 2,
+      "state": "active",
+      "duration": 5
+    }
+  ]
+}

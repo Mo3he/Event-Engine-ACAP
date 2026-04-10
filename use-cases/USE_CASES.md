@@ -210,7 +210,7 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 
 ## Use Case 4: Speaker Display
 
-Drive the built-in screen on Axis speaker-display devices (e.g. C1710) directly from rules using live data pushed over MQTT or HTTP webhooks — no VMS or middleware required. The display becomes a live information board that updates the moment new data arrives.
+Drive the built-in screen on Axis speaker-display devices (e.g. C1710) directly from rules. Data can come from three sources: **MQTT messages** pushed by a broker, **HTTP webhooks** POSTed by any system, or **direct polling** of another Axis device via `vapix_query` — no VMS or middleware required. The display becomes a live information board updated in real time.
 
 ### 4.1 Live Queue Ticket Display
 
@@ -267,6 +267,43 @@ An environmental sensor (or any MQTT-capable air quality device) publishes CO₂
 **Setup (4.2a–c):** Configure your air quality gateway or sensor to publish JSON readings to `sensors/airquality/data` and threshold status (`critical` / `clear`) to `sensors/airquality/status`. Adjust topic paths and threshold logic in your gateway to match your sensor model and acceptable limits.
 
 **Template:** [`templates/4.2c-air-quality-clear.json`](templates/4.2c-air-quality-clear.json)
+
+---
+
+### 4.3 Direct Axis Sensor → Speaker Display
+
+**Scenario:** An Axis speaker-display (e.g. C1710) polls an Axis environmental sensor directly — no MQTT broker, no gateway, no middleware. Every 60 seconds the display pulls CO₂, temperature, and humidity readings straight from the remote sensor's ONVIF event stream and updates its screen.
+
+**How it works:**
+- A **schedule** trigger fires every 60 seconds
+- A **Device Event Query** (`vapix_query`) action targets the remote Axis sensor (IP, user, password) and queries the `Environment / AirQuality` event topic — the latest readings are injected as `{{trigger.CO2}}`, `{{trigger.Temperature}}`, and `{{trigger.Humidity}}`
+- A **Speaker Display** action renders the values on a green background with a 65-second duration (slightly longer than the poll interval so the display never goes blank between updates)
+
+**Setup:** Replace `remote_host`, `remote_user`, and `remote_pass` in the template with the IP and credentials of your Axis air quality sensor. The sensor must support `tns1:Environment / tnsaxis:AirQuality` events (e.g. any Axis device with an environmental sensor module).
+
+**Template:** [`templates/4.3-direct-sensor-air-quality-display.json`](templates/4.3-direct-sensor-air-quality-display.json)
+
+---
+
+### 4.4 Webhook-Driven Speaker Display
+
+**Scenario:** A building management system, sensor gateway, or automation platform pushes air quality readings to the speaker display over HTTP — no MQTT broker required. Each POST instantly updates the screen with fresh data.
+
+**How it works:**
+- An **HTTP Webhook** trigger listens for POSTs to `/local/acap_event_engine/fire?token=airquality-display-update` with a JSON payload: `{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}` — fields become `{{trigger.co2}}`, `{{trigger.pm25}}`, etc.
+- A **Speaker Display** action renders the four values on a green background, held for 5 minutes (or until the next webhook POST overwrites it)
+- Zero cooldown so every POST updates the display immediately
+
+**Setup:** Configure your sensor gateway or BMS to HTTP POST to:
+```
+POST http://<speaker-ip>/local/acap_event_engine/fire?token=airquality-display-update
+Content-Type: application/json
+
+{"payload":{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}}
+```
+Change the token in the template to a unique value for your deployment.
+
+**Template:** [`templates/4.4-webhook-air-quality-display.json`](templates/4.4-webhook-air-quality-display.json)
 
 ---
 
@@ -431,6 +468,147 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 6.1 | `6.1-cross-device-io-condition-speaker-display.json` | Cross-Device | I/O input → remote I/O state condition → remote speaker display |
 | 6.2 | `6.2-cross-device-aoa-condition-alert.json` | Cross-Device | AOA detection → remote AOA occupancy condition → speaker display + MQTT |
 | 6.3 | `6.3-remote-sensor-data-relay.json` | Cross-Device | Schedule → remote sensor query → MQTT publish with `\|N` formatting |
+| 4.3 | `4.3-direct-sensor-air-quality-display.json` | Speaker Display | Direct sensor poll → speaker display (no broker) |
+| 4.4 | `4.4-webhook-air-quality-display.json` | Speaker Display | HTTP webhook → speaker display |
+| 7.1a | `7.1a-motion-count-increment.json` | Advanced | Motion → increment counter |
+| 7.1b | `7.1b-motion-count-escalate.json` | Advanced | Counter threshold → Slack + run_rule escalation |
+| 7.2 | `7.2-compound-trigger-tailgate.json` | Advanced | Door I/O AND motion within 8s → tailgate alert |
+| 7.3 | `7.3-night-only-recording.json` | Advanced | Motion + night condition → recording |
+| 7.4 | `7.4-snapshot-upload-ftp-fallback.json` | Advanced | HTTP snapshot upload with FTP on_failure fallback |
+| 7.5 | `7.5-acap-watchdog-cron.json` | Advanced | Cron → ACAP watchdog via vapix_event_state + acap_control |
+| 7.6 | `7.6-paging-scheduled-announcement.json` | Advanced | Cron → paging console announcement |
+| 7.7 | `7.7-vms-event-bridge.json` | Advanced | Manual trigger + webhook → fire VAPIX event for VMS |
+| 7.8 | `7.8-security-audit-logger.json` | Advanced |  rule_fired trigger + condition_logic OR → audit log |
+| 7.9 | `7.9-network-gated-alert.json` | Advanced | http_check condition → motion alert only when endpoint reachable |
+
+---
+
+## Use Case 7: Advanced Patterns
+
+Templates demonstrating advanced Engine capabilities: compound triggers, counter-driven logic, dynamic scheduling, evidence failover, ACAP lifecycle management, and VMS integration.
+
+### 7.1 Counter-Driven Escalation
+
+**Scenario:** Low-level motion detection is normal, but 50 events in a single day suggests something unusual — a crowd, a fault, or a threat. Count every motion event throughout the day and escalate automatically when the threshold is crossed.
+
+**How it works:**
+- **7.1a:** A **Device Event** trigger (motion active) fires the **Increment Counter** action on every detection, accumulating `motion_count`
+- **7.1b:** A **Counter Threshold** trigger watches `motion_count >= 50`; a **Counter Compare** condition double-checks before acting; a **Slack** alert fires once per day, optionally **Run Rule** chains to a downstream response rule
+- Pair with template **5.2** to reset `motion_count` to zero at midnight
+
+**Templates:** [`templates/7.1a-motion-count-increment.json`](templates/7.1a-motion-count-increment.json) and [`templates/7.1b-motion-count-escalate.json`](templates/7.1b-motion-count-escalate.json)
+
+---
+
+### 7.2 Compound Trigger — Tailgate Detection
+
+**Scenario:** A door I/O sensor triggers frequently for legitimate access events. Motion detection fires frequently on its own. Neither signal alone is meaningful — but if both occur within 8 seconds of each other, that strongly indicates someone followed someone else through the door without badging.
+
+**How it works:**
+- `trigger_logic: "AND"` and `trigger_window: 8` require both an **I/O Input** (door rising edge) and a **Device Event** (motion active) to fire within 8 seconds
+- A **Time Window** condition restricts to after-hours (18:00–08:00)
+- Actions: **Recording** (30s), **Telegram** alert with snapshot, **IO Output** (alarm relay 5s)
+
+**Template:** [`templates/7.2-compound-trigger-tailgate.json`](templates/7.2-compound-trigger-tailgate.json)
+
+---
+
+### 7.3 Night-Only Recording
+
+**Scenario:** A camera should only record motion events during darkness — daytime recordings are unneeded and consume storage. Rather than using a fixed time window, use the sun's actual position so the schedule adapts to sunrise/sunset automatically across the year.
+
+**How it works:**
+- A **Device Event** trigger fires on motion detection
+- A **Day/Night** condition (`state: "night"`) passes only when the sun is below the horizon, using the camera's configured latitude/longitude
+- A **Recording** action starts a 30-second clip, with a live-stream overlay showing the detection time
+
+**Template:** [`templates/7.3-night-only-recording.json`](templates/7.3-night-only-recording.json)
+
+---
+
+### 7.4 Snapshot Evidence with FTP Fallback
+
+**Scenario:** Critical evidence snapshots must be preserved even when the primary upload server is unreachable. An `on_failure` action chain automatically reroutes to FTP backup storage if the HTTP POST fails for any reason.
+
+**How it works:**
+- AOA human detection (armed + after-hours) triggers a **HTTP Request** with `attach_snapshot: true`, posting a JSON body including the base64 image
+- If the request fails (curl error or non-2xx status), the `on_failure` array runs: **FTP Upload** to backup storage + **Send Syslog** warning
+- The failure path is transparent — no logic branching needed in the rule itself
+
+**Template:** [`templates/7.4-snapshot-upload-ftp-fallback.json`](templates/7.4-snapshot-upload-ftp-fallback.json)
+
+---
+
+### 7.5 ACAP Service Watchdog
+
+**Scenario:** A critical ACAP application (analytics, access control, etc.) must stay running. Poll its VAPIX event state every 10 minutes; if it reports as inactive, restart it, restore a known-good device parameter, and publish an alert.
+
+**How it works:**
+- A **cron** schedule trigger fires every 10 minutes (`*/10 * * * *`)
+- A **Device Event State** condition checks the ACAP's running event; the condition passes (and actions run) only when the ACAP is NOT active
+- Actions: **ACAP Control** (start), **Set Device Parameter** (restore to known-good value), **Send Syslog** (warning), **MQTT Publish** (monitoring alert)
+
+**Setup:** Replace the `event_key` with the actual VAPIX event path of your ACAP, and `package` with its package name (e.g. `com.axis.objectanalytics`).
+
+**Template:** [`templates/7.5-acap-watchdog-cron.json`](templates/7.5-acap-watchdog-cron.json)
+
+---
+
+### 7.6 Paging Console Scheduled Announcement
+
+**Scenario:** An Axis C6110 paging console should broadcast a pre-recorded announcement at the top of every business hour — a safety reminder, a shift change call, or a building-wide notification — without any manual intervention.
+
+**How it works:**
+- A **cron** schedule trigger fires at `0 8-17 * * 1-5` (top of every hour, 08:00–17:00, Mon–Fri)
+- A **Paging Console Execute** action triggers the pre-configured paging action by its UUID
+- A **Send Syslog** action provides an audit trail
+
+**Setup:** Replace `REPLACE_WITH_PAGING_ACTION_UUID` with the UUID of the action configured in the C6110 web interface.
+
+**Template:** [`templates/7.6-paging-scheduled-announcement.json`](templates/7.6-paging-scheduled-announcement.json)
+
+---
+
+### 7.7 VMS Event Bridge
+
+**Scenario:** Event Engine detects something (or receives an external command) and needs to notify a VMS (AXIS Camera Station, Milestone, Genetec). Rather than polling, the VMS subscribes to VAPIX events from the camera — the **Fire VAPIX Event** action emits the signal the VMS is waiting for.
+
+**How it works:**
+- A **manual** trigger (UI "Fire Now" button or `POST /fire` API call) or an **HTTP Webhook** from any external system starts the rule
+- A **Fire VAPIX Event** action emits a `RuleFired` VAPIX event that the VMS is subscribed to
+- An **MQTT Publish** action provides a parallel notification path
+- Replace the webhook token with a unique value for your deployment
+
+**Template:** [`templates/7.7-vms-event-bridge.json`](templates/7.7-vms-event-bridge.json)
+
+---
+
+### 7.8 Security Event Audit Logger
+
+**Scenario:** Whenever a critical security rule fires, log it — but only if the system state warrants it. Using `condition_logic: OR`, the log fires if the system is armed OR if any motion activity has occurred today (counter > 0). Either condition is sufficient.
+
+**How it works:**
+- A **Rule Fired** trigger watches a specified security rule by UUID
+- Two conditions with `condition_logic: OR`: **Variable Compare** (`system.armed = true`) and **Counter Compare** (`motion_count > 0`) — either passing is enough
+- Actions: **Send Syslog** (warning level with variable interpolation) + **MQTT Publish** (to an audit topic)
+
+**Setup:** Replace `REPLACE_WITH_SECURITY_RULE_ID` with the UUID of the security rule you want to audit (e.g. rule 3.1 Perimeter Intrusion Response).
+
+**Template:** [`templates/7.8-security-audit-logger.json`](templates/7.8-security-audit-logger.json)
+
+---
+
+### 7.9 Network-Gated Motion Alert
+
+**Scenario:** A camera in an isolated network segment sends alerts to a cloud endpoint. When connectivity drops, the alert queue fills with undeliverable requests. Using an **http_check** condition, the rule verifies the endpoint is UP before acting — silently skipping when it's unreachable rather than flooding failed queues.
+
+**How it works:**
+- A **Device Event** trigger fires on motion detection
+- An **HTTP Check** condition makes a quick GET to `https://alerts.example.com/health` — the condition passes only if the response is HTTP 200 with body `ok`
+- A **Time Window** condition restricts to office hours
+- A **Slack Webhook** action fires only when both conditions pass
+
+**Template:** [`templates/7.9-network-gated-alert.json`](templates/7.9-network-gated-alert.json)
 
 ---
 

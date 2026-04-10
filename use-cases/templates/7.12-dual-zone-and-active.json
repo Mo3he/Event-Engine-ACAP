@@ -1,0 +1,61 @@
+{
+  "name": "Dual-Zone Perimeter Breach — AND_ACTIVE",
+  "description": "Fires only when a door I/O sensor is actively open AND motion is simultaneously active — both triggers must be in their active state at the same time. Unlike AND+trigger_window (which fires if both events occur within N seconds of each other, even sequentially), AND_ACTIVE requires genuine simultaneous presence. A door that opens and closes cleanly with no overlap with active motion is ignored. Demonstrates trigger_logic AND_ACTIVE and mqtt_publish on_failure fallback.",
+  "enabled": true,
+  "trigger_logic": "AND_ACTIVE",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 30,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "both"
+    },
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [
+    {
+      "type": "time_window",
+      "start": "18:00",
+      "end": "08:00",
+      "days": [0, 1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "actions": [
+    {
+      "type": "recording",
+      "operation": "start",
+      "duration": 45
+    },
+    {
+      "type": "mqtt_publish",
+      "topic": "security/breach/{{camera.serial}}",
+      "payload": "{\"type\":\"dual_zone_breach\",\"camera\":\"{{camera.serial}}\",\"model\":\"{{camera.model}}\",\"timestamp\":\"{{timestamp}}\"}",
+      "qos": 1,
+      "retain": false,
+      "on_failure": [
+        {
+          "type": "send_syslog",
+          "message": "BREACH ALERT: MQTT publish failed — dual-zone breach on {{camera.model}} ({{camera.serial}}) at {{timestamp}}",
+          "level": "error"
+        }
+      ]
+    },
+    {
+      "type": "telegram",
+      "bot_token": "YOUR_BOT_TOKEN",
+      "chat_id": "YOUR_CHAT_ID",
+      "message": "🚨 Perimeter breach: door open with simultaneous motion on {{camera.model}} at {{timestamp}}",
+      "attach_snapshot": true
+    }
+  ]
+}

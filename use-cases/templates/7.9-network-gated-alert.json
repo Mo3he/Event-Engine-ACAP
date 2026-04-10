@@ -1,0 +1,45 @@
+{
+  "name": "Network-Gated Motion Alert",
+  "description": "Only send an alert when the notification endpoint is confirmed to be reachable. Before acting on a motion event, the http_check condition makes a quick GET to the target server's health endpoint — if it returns HTTP 200 the alert fires, if the server is unreachable the rule silently skips. Prevents alert storms filling dead queues when upstream connectivity is lost.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 30,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "RuleEngine" },
+      "topic1": { "tnsaxis": "MotionDetection" },
+      "filter_key": "active",
+      "filter_value": true
+    }
+  ],
+  "conditions": [
+    {
+      "type": "http_check",
+      "url": "https://alerts.example.com/health",
+      "method": "GET",
+      "expected_status": 200,
+      "expected_body": "ok"
+    },
+    {
+      "type": "time_window",
+      "start": "08:00",
+      "end": "18:00",
+      "days": [1, 2, 3, 4, 5]
+    }
+  ],
+  "actions": [
+    {
+      "type": "slack_webhook",
+      "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+      "message": "Motion detected on {{camera.model}} ({{camera.serial}}) at {{time}}.",
+      "channel": "#alerts",
+      "username": "Event Engine",
+      "attach_snapshot": true
+    }
+  ]
+}

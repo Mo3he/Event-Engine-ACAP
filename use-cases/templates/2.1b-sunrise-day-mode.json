@@ -11,8 +11,9 @@
   "triggers": [
     {
       "type": "schedule",
-      "schedule_type": "sunrise",
-      "offset": 0
+      "schedule_type": "astronomical",
+      "event": "sunrise",
+      "offset_minutes": 0
     }
   ],
   "conditions": [],

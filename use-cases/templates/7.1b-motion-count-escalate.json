@@ -1,0 +1,50 @@
+{
+  "name": "Motion Counter — Escalate at 50 Events",
+  "description": "Fires once per day when the motion_count counter reaches 50, indicating unusually high activity. Uses the counter_threshold trigger and counter condition together, escalates via Slack, and optionally chains to another rule. Pair with 7.1a to accumulate the count.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 3600,
+  "max_executions": 1,
+  "max_exec_period": "day",
+  "triggers": [
+    {
+      "type": "counter_threshold",
+      "counter_name": "motion_count",
+      "op": "gte",
+      "value": 50
+    }
+  ],
+  "conditions": [
+    {
+      "type": "counter",
+      "name": "motion_count",
+      "op": "gte",
+      "value": 50
+    }
+  ],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "system.alert_level",
+      "value": "elevated"
+    },
+    {
+      "type": "slack_webhook",
+      "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+      "message": "⚠ High motion activity on {{camera.model}} ({{camera.serial}}): {{trigger.counter_value}} motion events today as of {{time}}.",
+      "channel": "#security",
+      "username": "Event Engine"
+    },
+    {
+      "type": "run_rule",
+      "rule_id": "REPLACE_WITH_TARGET_RULE_ID"
+    },
+    {
+      "type": "send_syslog",
+      "message": "Motion count threshold reached: {{trigger.counter_value}} events on {{camera.serial}} at {{timestamp}}",
+      "level": "warning"
+    }
+  ]
+}
