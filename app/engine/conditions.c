@@ -97,46 +97,111 @@ static int cond_day_night(cJSON* cfg) {
     return (strcmp(want, "day") == 0) ? is_day : !is_day;
 }
 
+/* Forward declaration — defined after remote helpers */
+static cJSON* cond_remote_pullpoint(const char* host, const char* user,
+                                     const char* pass, const char* event_key);
+static cJSON* cond_local_pullpoint(const char* event_key);
+
 /*-----------------------------------------------------
  * vapix_event_state
- * config: { "event_key": "tns1:Device/tnsaxis:IO/VirtualInput",
- *            "data_key": "active", "expected": "1" }
  * Checks the current state of a VAPIX event by querying
  * the event instance list.
+ *
+ * Match modes (determined by "op" field):
+ *   op absent / "eq_str"  → string equality (legacy "expected")
+ *   "boolean"             → boolean match (expected "true"/"false"/"1"/"0")
+ *   "gt","lt","gte","lte","eq","between" → numeric comparison
+ *   "contains"            → substring match
  *-----------------------------------------------------*/
+static int value_passes_cond(double actual, const char* op, double thr, double thr2) {
+    if (strcmp(op, "gt")      == 0) return actual >  thr;
+    if (strcmp(op, "lt")      == 0) return actual <  thr;
+    if (strcmp(op, "gte")     == 0) return actual >= thr;
+    if (strcmp(op, "lte")     == 0) return actual <= thr;
+    if (strcmp(op, "eq")      == 0) return actual == thr;
+    if (strcmp(op, "between") == 0) return actual >= thr && actual <= thr2;
+    return 0;
+}
+
 static int cond_vapix_event_state(cJSON* cfg) {
     const char* event_key = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "event_key"));
     const char* data_key  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "data_key"));
+    if (!event_key || !data_key) return 0;
+
+    const char* op        = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "op"));
     const char* expected  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "expected"));
-    if (!event_key || !data_key || !expected) return 0;
+    double threshold  = 0, threshold2 = 0;
+    if (op && (strcmp(op, "gt") == 0 || strcmp(op, "lt") == 0 ||
+               strcmp(op, "gte") == 0 || strcmp(op, "lte") == 0 ||
+               strcmp(op, "eq") == 0 || strcmp(op, "between") == 0)) {
+        cJSON* thr = cJSON_GetObjectItem(cfg, "threshold");
+        if (thr && cJSON_IsNumber(thr)) threshold = thr->valuedouble;
+        cJSON* thr2 = cJSON_GetObjectItem(cfg, "threshold2");
+        if (thr2 && cJSON_IsNumber(thr2)) threshold2 = thr2->valuedouble;
+    }
+
+    /* Legacy fallback: if no op specified, require expected for string equality */
+    if (!op && !expected) return 0;
 
     const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
     const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
     const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
-    const char* body =
-        "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\"}";
-    char* resp = (rh && rh[0])
-        ? cond_remote_post(rh, ru, rp, "eventhandler.cgi", body)
-        : ACAP_VAPIX_Post("eventhandler.cgi", body);
-    if (!resp) return 0;
 
-    cJSON* root = cJSON_Parse(resp);
-    free(resp);
-    if (!root) return 0;
+    /* Remote: use ONVIF PullPoint to get current event state.
+     * Local: use internal eventhandler.cgi (accessible on 127.0.0.12). */
+    cJSON* root = NULL;
+    cJSON* val  = NULL;
+    int    remote_mode = (rh && rh[0]);
+
+    if (remote_mode) {
+        cJSON* pp_data = cond_remote_pullpoint(rh, ru, rp, event_key);
+        if (!pp_data) return 0;
+        val = cJSON_GetObjectItem(pp_data, data_key);
+        /* val points inside pp_data — keep pp_data alive as root */
+        root = pp_data;
+    } else {
+        const char* body =
+            "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\"}";
+        char* resp = ACAP_VAPIX_Post("eventhandler.cgi", body);
+        if (resp) {
+            root = cJSON_Parse(resp);
+            free(resp);
+            if (root) {
+                cJSON* data = cJSON_GetObjectItem(root, "data");
+                cJSON* instances = data ? cJSON_GetObjectItem(data, "instances") : NULL;
+                if (instances && cJSON_IsArray(instances)) {
+                    cJSON* inst;
+                    cJSON_ArrayForEach(inst, instances) {
+                        const char* topic = cJSON_GetStringValue(cJSON_GetObjectItem(inst, "topic"));
+                        if (!topic || !strstr(topic, event_key)) continue;
+                        cJSON* d = cJSON_GetObjectItem(inst, "data");
+                        if (!d) continue;
+                        val = cJSON_GetObjectItem(d, data_key);
+                        if (val) break;
+                    }
+                }
+            }
+        }
+        /* Fallback: if eventhandler.cgi is unavailable (404 on some devices),
+         * use local PullPoint via /vapix/services. */
+        if (!val) {
+            if (root) { cJSON_Delete(root); root = NULL; }
+            cJSON* pp_data = cond_local_pullpoint(event_key);
+            if (pp_data) {
+                val = cJSON_GetObjectItem(pp_data, data_key);
+                root = pp_data;
+            }
+        }
+    }
 
     int result = 0;
-    /* Response: { "data": { "instances": [ { "topic": "...", "data": { "key": "value" } } ] } } */
-    cJSON* data = cJSON_GetObjectItem(root, "data");
-    cJSON* instances = data ? cJSON_GetObjectItem(data, "instances") : NULL;
-    if (instances && cJSON_IsArray(instances)) {
-        cJSON* inst;
-        cJSON_ArrayForEach(inst, instances) {
-            const char* topic = cJSON_GetStringValue(cJSON_GetObjectItem(inst, "topic"));
-            if (!topic || !strstr(topic, event_key)) continue;
-            cJSON* d = cJSON_GetObjectItem(inst, "data");
-            if (!d) continue;
-            cJSON* val = cJSON_GetObjectItem(d, data_key);
-            if (!val) continue;
+    if (!val) { cJSON_Delete(root); return 0; }
+
+    /* For remote mode, val is always a cJSON string (from PullPoint XML).
+     * For local mode, val may be string, number, or bool from JSON. */
+    if (!op || strcmp(op, "eq_str") == 0) {
+        /* Legacy string equality (backward compatible) */
+        if (expected) {
             char val_str[128] = "";
             if (cJSON_IsString(val))
                 snprintf(val_str, sizeof(val_str), "%s", val->valuestring);
@@ -144,9 +209,46 @@ static int cond_vapix_event_state(cJSON* cfg) {
                 snprintf(val_str, sizeof(val_str), "%g", val->valuedouble);
             else if (cJSON_IsBool(val))
                 snprintf(val_str, sizeof(val_str), "%s", cJSON_IsTrue(val) ? "1" : "0");
-            if (strcmp(val_str, expected) == 0) { result = 1; break; }
+            if (strcmp(val_str, expected) == 0) result = 1;
         }
+    } else if (strcmp(op, "boolean") == 0) {
+        /* Boolean match: expected is "true"/"1" or "false"/"0" */
+        if (expected) {
+            int want = (strcmp(expected, "true") == 0 || strcmp(expected, "1") == 0) ? 1 : 0;
+            int actual = 0;
+            if (cJSON_IsBool(val)) actual = cJSON_IsTrue(val) ? 1 : 0;
+            else if (cJSON_IsString(val)) actual = (strcmp(val->valuestring, "true") == 0 || strcmp(val->valuestring, "1") == 0) ? 1 : 0;
+            else if (cJSON_IsNumber(val)) actual = val->valuedouble != 0 ? 1 : 0;
+            if (actual == want) result = 1;
+        }
+    } else if (strcmp(op, "contains") == 0) {
+        /* Substring match */
+        if (expected) {
+            const char* sval = cJSON_GetStringValue(val);
+            char num_buf[64] = "";
+            if (!sval && cJSON_IsNumber(val)) {
+                snprintf(num_buf, sizeof(num_buf), "%g", val->valuedouble);
+                sval = num_buf;
+            }
+            if (sval && strstr(sval, expected) != NULL) result = 1;
+        }
+    } else {
+        /* Numeric comparison */
+        double actual_num;
+        int valid = 0;
+        if (cJSON_IsNumber(val)) {
+            actual_num = val->valuedouble; valid = 1;
+        } else if (cJSON_IsString(val)) {
+            char* endp;
+            actual_num = strtod(val->valuestring, &endp);
+            if (endp != val->valuestring) valid = 1;
+        } else if (cJSON_IsBool(val)) {
+            actual_num = cJSON_IsTrue(val) ? 1.0 : 0.0; valid = 1;
+        }
+        if (valid && value_passes_cond(actual_num, op, threshold, threshold2))
+            result = 1;
     }
+
     cJSON_Delete(root);
     return result;
 }
@@ -232,6 +334,288 @@ static char* cond_remote_post(const char* host, const char* user, const char* pa
     explicit_bzero(userpwd, sizeof(userpwd));
     if (res != CURLE_OK) { free(buf.data); return NULL; }
     return buf.data;
+}
+
+/* POST SOAP to a remote Axis device (e.g. /vapix/services) */
+static char* cond_remote_soap_post(const char* host, const char* user, const char* pass,
+                                    const char* path, const char* soap_body) {
+    char url[512], userpwd[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user ? user : "", pass ? pass : "");
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    struct curl_buf buf = {NULL, 0};
+    struct curl_slist* hdrs = curl_slist_append(NULL,
+        "Content-Type: application/soap+xml; charset=utf-8");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, soap_body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(buf.data); return NULL; }
+    return buf.data;
+}
+
+/* Extract an XML attribute value from within a tag region.
+ * Looks for attr="value" between xml and end pointers. */
+static size_t cond_xml_attr(const char* xml, const char* end,
+                             const char* attr, char* out, size_t out_sz) {
+    char needle[64];
+    snprintf(needle, sizeof(needle), "%s=\"", attr);
+    const char* p = strstr(xml, needle);
+    if (!p || p >= end) return 0;
+    p += strlen(needle);
+    const char* q = strchr(p, '"');
+    if (!q || q >= end) return 0;
+    size_t len = (size_t)(q - p);
+    if (len >= out_sz) len = out_sz - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return len;
+}
+
+/* Query current event state from a remote device using ONVIF PullPoint.
+ * Returns a cJSON object with all SimpleItem Name/Value pairs from the
+ * first NotificationMessage whose Topic contains event_key, or NULL. */
+static cJSON* cond_remote_pullpoint(const char* host, const char* user,
+                                     const char* pass, const char* event_key) {
+    static const char create_soap[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\">"
+        "<soap:Body><tev:CreatePullPointSubscription>"
+        "<tev:InitialTerminationTime>PT60S</tev:InitialTerminationTime>"
+        "</tev:CreatePullPointSubscription></soap:Body></soap:Envelope>";
+
+    char* resp = cond_remote_soap_post(host, user, pass, "/vapix/services", create_soap);
+    if (!resp) return NULL;
+
+    char* sid_tag = strstr(resp, "SubscriptionId");
+    if (!sid_tag || strstr(resp, "Fault")) { free(resp); return NULL; }
+    char* sid_gt = strchr(sid_tag, '>');
+    if (!sid_gt) { free(resp); return NULL; }
+    sid_gt++;
+    char* sid_lt = strchr(sid_gt, '<');
+    if (!sid_lt) { free(resp); return NULL; }
+    char sub_id[32];
+    size_t sid_len = (size_t)(sid_lt - sid_gt);
+    if (sid_len >= sizeof(sub_id)) sid_len = sizeof(sub_id) - 1;
+    memcpy(sub_id, sid_gt, sid_len);
+    sub_id[sid_len] = '\0';
+    free(resp);
+    if (strspn(sub_id, "0123456789") != sid_len) return NULL;
+
+    cJSON* result = NULL;
+    int drained = 0;
+    for (int attempt = 0; attempt < 53 && !result; attempt++) {
+        const char* timeout_str = drained ? "PT5S" : "PT1S";
+        char pull_soap[1024];
+        snprintf(pull_soap, sizeof(pull_soap),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+            " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+            " xmlns:dom0=\"http://www.axis.com/2009/event\">"
+            "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
+            "<soap:Body><tev:PullMessages>"
+            "<tev:Timeout>%s</tev:Timeout>"
+            "<tev:MessageLimit>200</tev:MessageLimit>"
+            "</tev:PullMessages></soap:Body></soap:Envelope>",
+            sub_id, timeout_str);
+
+        resp = cond_remote_soap_post(host, user, pass, "/vapix/services", pull_soap);
+        if (!resp) break;
+        if (strstr(resp, "Fault")) { free(resp); break; }
+
+        const char* pos = resp;
+        while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
+            const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
+            if (!msg_end) break;
+            msg_end += strlen("</wsnt:NotificationMessage>");
+
+            const char* t_start = strstr(pos, "<wsnt:Topic");
+            if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
+            t_start = strchr(t_start, '>');
+            if (!t_start) { pos = msg_end; continue; }
+            t_start++;
+            const char* t_end = strchr(t_start, '<');
+            if (!t_end || t_end >= msg_end) { pos = msg_end; continue; }
+
+            char topic[512];
+            size_t tlen = (size_t)(t_end - t_start);
+            if (tlen >= sizeof(topic)) tlen = sizeof(topic) - 1;
+            memcpy(topic, t_start, tlen);
+            topic[tlen] = '\0';
+
+            if (!strstr(topic, event_key)) { pos = msg_end; continue; }
+
+            result = cJSON_CreateObject();
+            const char* si = pos;
+            while ((si = strstr(si, "SimpleItem")) != NULL && si < msg_end) {
+                const char* tag_lt = si;
+                while (tag_lt > pos && *tag_lt != '<') tag_lt--;
+                const char* tag_gt = strchr(si, '>');
+                if (!tag_gt || tag_gt >= msg_end) break;
+
+                char name[128] = "", value[256] = "";
+                cond_xml_attr(tag_lt, tag_gt + 1, "Name", name, sizeof(name));
+                cond_xml_attr(tag_lt, tag_gt + 1, "Value", value, sizeof(value));
+                if (name[0] && value[0]) {
+                    cJSON_DeleteItemFromObject(result, name);
+                    cJSON_AddStringToObject(result, name, value);
+                }
+                si = tag_gt + 1;
+            }
+            break;
+        }
+
+        if (!strstr(resp, "NotificationMessage")) {
+            free(resp);
+            if (drained) break;
+            drained = attempt + 1;
+            continue;
+        }
+        free(resp);
+    }
+
+    char unsub_soap[512];
+    snprintf(unsub_soap, sizeof(unsub_soap),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+        " xmlns:dom0=\"http://www.axis.com/2009/event\">"
+        "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
+        "<soap:Body><wsnt:Unsubscribe/></soap:Body></soap:Envelope>",
+        sub_id);
+    char* unsub_resp = cond_remote_soap_post(host, user, pass, "/vapix/services", unsub_soap);
+    if (!unsub_resp || strstr(unsub_resp, "Fault"))
+        LOG_WARN("PullPoint unsubscribe failed for %s (sub %s)", host, sub_id);
+    free(unsub_resp);
+
+    return result;
+}
+
+/* Local PullPoint: uses ACAP_VAPIX_Soap_Post via the loopback (no external
+ * credentials needed). Same drain-then-wait logic as the remote version but
+ * the subscription is already authenticated by the ACAP framework. */
+static cJSON* cond_local_pullpoint(const char* event_key) {
+    static const char create_soap[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\">"
+        "<soap:Body><tev:CreatePullPointSubscription>"
+        "<tev:InitialTerminationTime>PT60S</tev:InitialTerminationTime>"
+        "</tev:CreatePullPointSubscription></soap:Body></soap:Envelope>";
+
+    char* resp = ACAP_VAPIX_Soap_Post("/vapix/services", create_soap);
+    if (!resp) return NULL;
+
+    char* sid_tag = strstr(resp, "SubscriptionId");
+    if (!sid_tag || strstr(resp, "Fault")) { free(resp); return NULL; }
+    char* sid_gt = strchr(sid_tag, '>');
+    if (!sid_gt) { free(resp); return NULL; }
+    sid_gt++;
+    char* sid_lt = strchr(sid_gt, '<');
+    if (!sid_lt) { free(resp); return NULL; }
+    char sub_id[32];
+    size_t sid_len = (size_t)(sid_lt - sid_gt);
+    if (sid_len >= sizeof(sub_id)) sid_len = sizeof(sub_id) - 1;
+    memcpy(sub_id, sid_gt, sid_len);
+    sub_id[sid_len] = '\0';
+    free(resp);
+    if (strspn(sub_id, "0123456789") != sid_len) return NULL;
+
+    cJSON* result = NULL;
+    int drained = 0;
+    for (int attempt = 0; attempt < 53 && !result; attempt++) {
+        const char* timeout_str = drained ? "PT5S" : "PT1S";
+        char pull_soap[1024];
+        snprintf(pull_soap, sizeof(pull_soap),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+            " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+            " xmlns:dom0=\"http://www.axis.com/2009/event\">"
+            "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
+            "<soap:Body><tev:PullMessages>"
+            "<tev:Timeout>%s</tev:Timeout>"
+            "<tev:MessageLimit>200</tev:MessageLimit>"
+            "</tev:PullMessages></soap:Body></soap:Envelope>",
+            sub_id, timeout_str);
+
+        resp = ACAP_VAPIX_Soap_Post("/vapix/services", pull_soap);
+        if (!resp) break;
+        if (strstr(resp, "Fault")) { free(resp); break; }
+
+        const char* pos = resp;
+        while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
+            const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
+            if (!msg_end) break;
+            msg_end += strlen("</wsnt:NotificationMessage>");
+
+            const char* t_start = strstr(pos, "<wsnt:Topic");
+            if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
+            t_start = strchr(t_start, '>');
+            if (!t_start) { pos = msg_end; continue; }
+            t_start++;
+            const char* t_end = strchr(t_start, '<');
+            if (!t_end || t_end >= msg_end) { pos = msg_end; continue; }
+
+            char topic[512];
+            size_t tlen = (size_t)(t_end - t_start);
+            if (tlen >= sizeof(topic)) tlen = sizeof(topic) - 1;
+            memcpy(topic, t_start, tlen);
+            topic[tlen] = '\0';
+
+            if (!strstr(topic, event_key)) { pos = msg_end; continue; }
+
+            result = cJSON_CreateObject();
+            const char* si = pos;
+            while ((si = strstr(si, "SimpleItem")) != NULL && si < msg_end) {
+                const char* tag_lt = si;
+                while (tag_lt > pos && *tag_lt != '<') tag_lt--;
+                const char* tag_gt = strchr(si, '>');
+                if (!tag_gt || tag_gt >= msg_end) break;
+
+                char name[128] = "", value[256] = "";
+                cond_xml_attr(tag_lt, tag_gt + 1, "Name", name, sizeof(name));
+                cond_xml_attr(tag_lt, tag_gt + 1, "Value", value, sizeof(value));
+                if (name[0] && value[0]) {
+                    cJSON_DeleteItemFromObject(result, name);
+                    cJSON_AddStringToObject(result, name, value);
+                }
+                si = tag_gt + 1;
+            }
+            break;
+        }
+
+        if (!strstr(resp, "NotificationMessage")) {
+            free(resp);
+            if (drained) break;
+            drained = attempt + 1;
+            continue;
+        }
+        free(resp);
+    }
+
+    char unsub_soap[512];
+    snprintf(unsub_soap, sizeof(unsub_soap),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+        " xmlns:dom0=\"http://www.axis.com/2009/event\">"
+        "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
+        "<soap:Body><wsnt:Unsubscribe/></soap:Body></soap:Envelope>",
+        sub_id);
+    char* unsub_resp = ACAP_VAPIX_Soap_Post("/vapix/services", unsub_soap);
+    free(unsub_resp);
+
+    return result;
 }
 
 static int cond_http_check(cJSON* cfg) {

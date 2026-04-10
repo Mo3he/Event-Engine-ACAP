@@ -132,7 +132,7 @@ Actions are grouped by category in the rule editor.
 | Type | Description |
 |------|-------------|
 | **Fire ACAP Event** | Fire an ACAP event visible to the built in event system and other Axis applications |
-| **Device Event Query** | Fetch the latest cached data from a device event and inject it as `{{trigger.FIELD}}` variables for subsequent actions - useful for polling sensor values on a schedule trigger |
+| **Device Event Query** | Fetch the latest data from a device event and inject it as `{{trigger.FIELD}}` variables for subsequent actions. Supports querying a **remote Axis device** (via IP/credentials) or the local passive subscription cache |
 | **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only - incorrect values can disrupt camera operation** |
 | **ACAP Control** | Start, stop, or restart another installed ACAP application |
 
@@ -181,6 +181,7 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 | `{{camera.ip}}` | Camera IP address |
 | `{{trigger_json}}` | Full trigger event data as a compact JSON string |
 | `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.CO2}}`) |
+| `{{trigger.KEY\|N}}` | Numeric value rounded to N decimal places (e.g. `{{trigger.Temperature\|2}}` → `20.35`) |
 | `{{var.NAME}}` | Value of a named variable |
 | `{{counter.NAME}}` | Value of a named counter |
 | `{{trigger.snapshot_base64}}` | Base64-encoded JPEG snapshot (only when **Attach snapshot** is enabled on the HTTP Request action) |

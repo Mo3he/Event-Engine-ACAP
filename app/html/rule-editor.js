@@ -856,96 +856,181 @@ function conditionFields(c, rowIdx) {
     const isRemote = c.remote_host_toggle === 'remote'
       || (c.remote_host && c.remote_host_toggle !== 'local');
 
+    /* --- Resolve event catalog, topic control, and data keys for both local and remote --- */
+    let topicSection, dataKeys = [], dataTypes = {};
     if (isRemote) {
-      /* Remote: show Load button + topic dropdown from cached results */
       const host = (c.remote_host || '').trim();
       const cachedEvents = host ? remoteCapCache[`${host}:::vapix_events`] : null;
+      const fullCatalog = host ? remoteCapCache[`${host}:::vapix_events_catalog`] : null;
       const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="vapix_events" onclick="loadRemoteCondCap('${rowIdx}','vapix_events')" style="white-space:nowrap;margin-left:6px" title="Fetch event instances from the remote device">Load</button>`;
-      let topicCtrl, dataKeyCtrl;
       if (cachedEvents && cachedEvents.length) {
         const topicOpts = cachedEvents.map(ev => {
           const sel = c.event_key && ev.topic && ev.topic.includes(c.event_key) ? 'selected' : '';
           return `<option value="${escHtml(ev.topic)}" ${sel}>${escHtml(ev.topic)}</option>`;
         }).join('');
-        topicCtrl = `<div style="display:flex;align-items:center;gap:4px">
-          <select data-k="event_key" onchange="rerenderCondition(this)" style="flex:1">
-            <option value="">— select event —</option>
-            ${topicOpts}
-          </select>${loadBtn}</div>`;
-        /* Populate data key dropdown from matched event */
+        topicSection = `
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Event Topic (partial match)</label>
+            <div style="display:flex;align-items:center;gap:4px">
+              <select data-k="event_key" onchange="rerenderCondition(this)" style="flex:1">
+                <option value="">— select event —</option>
+                ${topicOpts}
+              </select>${loadBtn}</div>
+            <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
+          </div>
+        </div>`;
         const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic.includes(c.event_key));
-        const dks = matchedEv && matchedEv.dataKeys && matchedEv.dataKeys.length ? matchedEv.dataKeys : [];
-        dataKeyCtrl = dks.length
-          ? `<select data-k="data_key">${dks.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
-          : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
+        dataKeys = matchedEv && matchedEv.dataKeys ? matchedEv.dataKeys : [];
+        /* Get types from the full catalog if available */
+        if (fullCatalog && matchedEv) {
+          const catEv = fullCatalog.find(ev => {
+            const p = vapixCatalogTopicPath(ev);
+            return p && matchedEv.topic && p.includes(c.event_key);
+          });
+          if (catEv) dataTypes = catEv.dataTypes || {};
+        }
       } else {
-        topicCtrl = `<div style="display:flex;align-items:center;gap:4px">
-          <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput" style="flex:1">${loadBtn}</div>`;
-        dataKeyCtrl = `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
+        topicSection = `
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Event Topic (partial match)</label>
+            <div style="display:flex;align-items:center;gap:4px">
+              <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput" style="flex:1">${loadBtn}</div>
+            <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
+          </div>
+        </div>`;
       }
-      return `
+    } else {
+      /* Local device: show catalog quick-select if available */
+      const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
+        ? vapixEventCatalog.map((ev, i) => {
+            const path = vapixCatalogTopicPath(ev);
+            const sel = c.event_key && path && path.includes(c.event_key) ? 'selected' : '';
+            return `<option value="${i}" ${sel}>${escHtml(ev.label)}</option>`;
+          }).join('')
+        : '';
+      const matchIdx = vapixEventCatalog
+        ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p.includes(c.event_key); })
+        : -1;
+      if (matchIdx >= 0) {
+        dataKeys = vapixEventCatalog[matchIdx].dataKeys || [];
+        dataTypes = vapixEventCatalog[matchIdx].dataTypes || {};
+      }
+      topicSection = `
+      ${catalogOpts ? `
       <div class="form-row">
-        <div class="form-group" style="flex:1">
+        <div class="form-group">
+          <label>Event <span style="color:var(--text-muted);font-weight:400;">(pick to auto-fill fields below)</span></label>
+          <select onchange="applyVapixEventState(${rowIdx}, this.value)">
+            <option value="-1" ${matchIdx < 0 ? 'selected' : ''}>— custom / enter manually —</option>
+            ${catalogOpts}
+          </select>
+        </div>
+      </div>` : ''}
+      <div class="form-row">
+        <div class="form-group">
           <label>Event Topic (partial match)</label>
-          ${topicCtrl}
-          <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Data Key</label>
-          ${dataKeyCtrl}
-        </div>
-        <div class="form-group">
-          <label>Expected Value</label>
-          <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1 or true">
+          <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput">
+          <div class="form-hint">Substring matched against the event topic path returned by the camera</div>
         </div>
       </div>`;
     }
 
-    /* Local device: show catalog quick-select if available */
-    const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
-      ? vapixEventCatalog.map((ev, i) => {
-          const path = vapixCatalogTopicPath(ev);
-          const sel = c.event_key && path && path.includes(c.event_key) ? 'selected' : '';
-          return `<option value="${i}" ${sel}>${escHtml(ev.label)}</option>`;
-        }).join('')
-      : '';
-    const matchIdx = vapixEventCatalog
-      ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p.includes(c.event_key); })
-      : -1;
-    const dataKeys = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys : [];
+    /* --- Data key dropdown (shared by both local/remote) --- */
     const dataKeyCtrl = dataKeys.length
-      ? `<select data-k="data_key">${dataKeys.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
+      ? `<select data-k="data_key" onchange="rerenderCondition(this)">${dataKeys.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
       : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
-    return `
-    ${catalogOpts ? `
+
+    /* --- Determine selected key's type from catalog --- */
+    const selKey = c.data_key || (dataKeys[0] || '');
+    const selType = dataTypes[selKey] || '';
+
+    /* Partition keys by type for operator-aware dropdowns */
+    const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
+    const numericKeys = dataKeys.filter(k => dataTypes[k] === 'numeric');
+    const stringKeys  = dataKeys.filter(k => dataTypes[k] === 'string');
+    const unknownKeys = dataKeys.filter(k => !dataTypes[k]);
+    const boolOpts    = [...boolKeys,    ...unknownKeys];
+    const numericOpts = [...numericKeys, ...unknownKeys];
+    const stringOpts  = [...stringKeys,  ...unknownKeys];
+
+    /* Determine match mode: infer from saved fields or catalog type */
+    let matchMode = c.match_mode || '';
+    if (!matchMode) {
+      if (c.op === 'boolean')  matchMode = 'boolean';
+      else if (c.op === 'contains') matchMode = 'string';
+      else if (c.op && c.op !== 'eq_str') matchMode = 'numeric';
+      else if (c.expected !== undefined && c.expected !== '') matchMode = 'exact';
+      else if (selType === 'boolean') matchMode = 'boolean';
+      else if (selType === 'numeric') matchMode = 'numeric';
+      else matchMode = 'exact';
+    }
+
+    const showBoolean = boolOpts.length > 0 || selType === 'boolean' || !dataKeys.length;
+    const showNumeric = numericOpts.length > 0 || selType === 'numeric' || !dataKeys.length;
+    const showString  = stringOpts.length > 0 || selType === 'string' || !dataKeys.length;
+
+    const boolExpected = c.expected || 'true';
+    const numOp   = c.op || 'gt';
+    const numThr  = c.threshold !== undefined ? c.threshold : '';
+    const numThr2 = c.threshold2 !== undefined ? c.threshold2 : '';
+    const strExpected = c.expected || '';
+
+    const matchSection = `
     <div class="form-row">
-      <div class="form-group">
-        <label>Event <span style="color:var(--text-muted);font-weight:400;">(pick to auto-fill fields below)</span></label>
-        <select onchange="applyVapixEventState(${rowIdx}, this.value)">
-          <option value="-1" ${matchIdx < 0 ? 'selected' : ''}>— custom / enter manually —</option>
-          ${catalogOpts}
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Match Mode</label>
+        <select data-k="match_mode" onchange="rerenderCondition(this)">
+          ${showBoolean ? `<option value="boolean" ${matchMode==='boolean'?'selected':''}>Boolean (true / false)</option>` : ''}
+          ${showNumeric ? `<option value="numeric" ${matchMode==='numeric'?'selected':''}>Numeric threshold</option>` : ''}
+          ${showString  ? `<option value="string"  ${matchMode==='string' ?'selected':''}>String contains</option>` : ''}
+          <option value="exact" ${matchMode==='exact'?'selected':''}>Exact value</option>
         </select>
       </div>
-    </div>` : ''}
-    <div class="form-row">
-      <div class="form-group">
-        <label>Event Topic (partial match)</label>
-        <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput">
-        <div class="form-hint">Substring matched against the event topic path returned by the camera</div>
+      <div class="form-group" style="flex:1;">
+        ${matchMode === 'boolean' ? `
+        <label>Expected</label>
+        <select data-k="expected">
+          <option value="true"  ${boolExpected==='true' ||boolExpected==='1' ?'selected':''}>true (active / on)</option>
+          <option value="false" ${boolExpected==='false'||boolExpected==='0'?'selected':''}>false (inactive / off)</option>
+        </select>` : ''}
+        ${matchMode === 'numeric' ? `
+        <label>Operator &amp; Threshold</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select data-k="op" onchange="rerenderCondition(this)" style="flex:0 0 auto;">
+            <option value="gt"      ${numOp==='gt'      ?'selected':''}>is above</option>
+            <option value="lt"      ${numOp==='lt'      ?'selected':''}>is below</option>
+            <option value="gte"     ${numOp==='gte'     ?'selected':''}>≥</option>
+            <option value="lte"     ${numOp==='lte'     ?'selected':''}>≤</option>
+            <option value="eq"      ${numOp==='eq'      ?'selected':''}>equals</option>
+            <option value="between" ${numOp==='between' ?'selected':''}>is between</option>
+          </select>
+          ${numOp === 'between' ? `
+          <input type="number" data-k="threshold" step="any" value="${escHtml(String(numThr))}" placeholder="min" style="width:80px">
+          <span style="opacity:.7;font-size:12px">and</span>
+          <input type="number" data-k="threshold2" step="any" value="${escHtml(String(numThr2))}" placeholder="max" style="width:80px">
+          ` : `
+          <input type="number" data-k="threshold" step="any" value="${escHtml(String(numThr))}" placeholder="0" style="width:90px">
+          `}
+        </div>` : ''}
+        ${matchMode === 'string' ? `
+        <label>Contains substring</label>
+        <input type="text" data-k="expected" value="${escHtml(strExpected)}" placeholder="match substring">` : ''}
+        ${matchMode === 'exact' ? `
+        <label>Expected Value</label>
+        <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1 or true">` : ''}
       </div>
-    </div>
+    </div>`;
+
+    return `${topicSection}
     <div class="form-row">
       <div class="form-group">
         <label>Data Key</label>
         ${dataKeyCtrl}
       </div>
-      <div class="form-group">
-        <label>Expected Value</label>
-        <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1 or true">
-      </div>
-    </div>`;
+    </div>
+    ${matchSection}`;
   }
   return '';
 }
@@ -1069,6 +1154,36 @@ function getTriggerTokens() {
     } else if (t.type === 'rule_fired') {
       tokens.push('{{trigger.fired_rule_id}}');
     }
+  }
+  /* vapix_query actions inject event data as {{trigger.FIELD}} — resolve from catalog */
+  for (const a of actionRows) {
+    if (a.type !== 'vapix_query') continue;
+    const host = (a.remote_host || '').trim();
+    const topicKeys = ['topic0','topic1','topic2','topic3'];
+    /* Topics may be stored as objects {topicN: {ns: val}} or flat {topicN_ns, topicN_val} */
+    const getTopic = k => {
+      if (a[k] && typeof a[k] === 'object') return a[k];
+      if (a[`${k}_val`]) return { [a[`${k}_ns`] || '']: a[`${k}_val`] };
+      return null;
+    };
+    const cmp = (x, y) => {
+      if (!x && !y) return true; if (!x || !y) return false;
+      const ak = Object.keys(x)[0], bk = Object.keys(y)[0];
+      return ak === bk && x[ak] === y[bk];
+    };
+    let keys = [];
+    if (host) {
+      const cached = (typeof remoteCapCache !== 'undefined')
+        ? remoteCapCache[`${host}:::vapix_events_catalog`] : null;
+      if (cached) {
+        const ev = cached.find(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
+        if (ev && ev.dataKeys) keys = ev.dataKeys;
+      }
+    } else if (vapixEventCatalog) {
+      const idx = vapixEventCatalog.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
+      if (idx >= 0 && vapixEventCatalog[idx].dataKeys) keys = vapixEventCatalog[idx].dataKeys;
+    }
+    for (const k of keys) tokens.push(`{{trigger.${k}}}`);
   }
   return [...new Set(tokens)];
 }
@@ -1201,7 +1316,7 @@ function getTokenInsertWidget() {
             onclick="toggleTokenPicker(this)"
             title="Insert a dynamic value placeholder — e.g. {{timestamp}} or {{trigger.Temperature}}"
             style="font-size:11px;padding:2px 8px;font-family:monospace;">&#123;&#125; Insert variable</button>
-    <span style="margin-left:6px;opacity:0.6;font-size:11px;">— dynamically replaced when the rule fires</span>
+    <span style="margin-left:6px;opacity:0.6;font-size:11px;">— dynamically replaced when the rule fires. Append <code>|N</code> to round decimals, e.g. <code>{{trigger.Temperature|2}}</code></span>
   </div>`;
 }
 
@@ -1251,7 +1366,7 @@ const REMOTE_CAPABLE_ACTIONS = new Set([
   'recording', 'overlay_text', 'ptz_preset', 'io_output',
   'audio_clip', 'siren_light', 'guard_tour', 'set_device_param',
   'ir_cut_filter', 'privacy_mask', 'wiper', 'light_control',
-  'acap_control', 'speaker_display'
+  'acap_control', 'speaker_display', 'vapix_query'
 ]);
 
 /* Reusable remote device section for triggers and conditions (uses rerenderFn callback name) */
@@ -1659,28 +1774,53 @@ function actionFields(a, rowIdx) {
       `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
       `<input type="hidden" data-k="${k}_val" value="${escHtml(val(k))}">`
     ).join('');
-    const matchIdx = vapixEventCatalog
-      ? vapixEventCatalog.findIndex((ev, _i) => {
-          const keys = ['topic0','topic1','topic2','topic3'];
-          const cmp = (x, y) => {
-            if (!x && !y) return true; if (!x || !y) return false;
-            const ak = Object.keys(x)[0], bk = Object.keys(y)[0];
-            return ak === bk && x[ak] === y[bk];
-          };
-          return keys.every(k => cmp(ev.topics[k], a[k]));
-        })
-      : -1;
-    return `${hiddenTopics}
-    <div class="form-row">
-      <div class="form-group">
-        <label>Device Event to Query</label>
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const host = (a.remote_host || '').trim();
+    const cmp = (x, y) => {
+      if (!x && !y) return true; if (!x || !y) return false;
+      const ak = Object.keys(x)[0], bk = Object.keys(y)[0];
+      return ak === bk && x[ak] === y[bk];
+    };
+    const topicKeys = ['topic0','topic1','topic2','topic3'];
+    let eventDropdown;
+    if (isRemote) {
+      const cacheKey = `${host}:::vapix_events_catalog`;
+      const cached = host && (typeof remoteCapCache !== 'undefined') ? remoteCapCache[cacheKey] : null;
+      if (cached && cached.length) {
+        const matchIdx = cached.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], a[k])));
+        eventDropdown = `
+        <select onchange="applyRemoteVapixEventAction(this, '${escHtml(host)}')">
+          <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
+          ${cached.map((ev, i) =>
+            `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
+          ).join('')}
+        </select>`;
+      } else {
+        eventDropdown = `
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="text" value="${escHtml(val('topic0') ? vapixCatalogTopicPath({topics:{topic0:a.topic0,topic1:a.topic1,topic2:a.topic2,topic3:a.topic3}}) : '')}" placeholder="Enter IP and click Load Events" readonly style="flex:1;opacity:.7;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="loadRemoteActionVapixEvents('${rowIdx}')" style="white-space:nowrap">Load Events</button>
+        </div>`;
+      }
+    } else {
+      const matchIdx = vapixEventCatalog
+        ? vapixEventCatalog.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], a[k])))
+        : -1;
+      eventDropdown = `
         <select onchange="applyVapixEventAction(this)">
           <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
           ${(vapixEventCatalog || []).map((ev, i) =>
             `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
           ).join('')}
-        </select>
-        <div class="form-hint">Fetches the latest data from this event and injects it as <code>{{trigger.FIELD}}</code> tokens for all subsequent actions in this rule. Useful with a Schedule trigger to poll current sensor values on demand.</div>
+        </select>`;
+    }
+    return `${hiddenTopics}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device Event to Query</label>
+        ${eventDropdown}
+        <div class="form-hint">Fetches the latest data from this event and injects it as <code>{{trigger.FIELD}}</code> tokens for all subsequent actions in this rule.${isRemote ? ' When targeting a remote device, click <strong>Load Events</strong> to browse available events.' : ' Useful with a Schedule trigger to poll current sensor values on demand.'}</div>
       </div>
     </div>`;
   }
@@ -2639,7 +2779,21 @@ function normalizeCondition(c) {
   } else if (c.type === 'vapix_event_state') {
     out.event_key = c.event_key || '';
     out.data_key  = c.data_key || '';
-    out.expected  = c.expected || '';
+    const mode = c.match_mode || 'exact';
+    if (mode === 'boolean') {
+      out.op = 'boolean';
+      out.expected = c.expected || 'true';
+    } else if (mode === 'numeric') {
+      out.op = c.op || 'gt';
+      out.threshold = parseFloat(c.threshold) || 0;
+      if (out.op === 'between') out.threshold2 = parseFloat(c.threshold2) || 0;
+    } else if (mode === 'string') {
+      out.op = 'contains';
+      out.expected = c.expected || '';
+    } else {
+      /* exact / legacy */
+      out.expected = c.expected || '';
+    }
     { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
       if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
   }

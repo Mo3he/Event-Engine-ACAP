@@ -2301,6 +2301,44 @@ char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
     return response;
 }
 
+char* ACAP_VAPIX_Soap_Post(const char* path, const char* soap_body) {
+    if (!VAPIX_CURL || !path || !soap_body) return NULL;
+
+    char* response = NULL;
+    const char* host = VAPIX_Credentials ? "127.0.0.12" : "127.0.0.1";
+    size_t url_size = strlen("http://") + strlen(host) + strlen(path) + 1;
+    char* url = malloc(url_size);
+    if (!url) return NULL;
+    snprintf(url, url_size, "http://%s%s", host, path);
+
+    struct curl_slist* hdrs = curl_slist_append(NULL,
+        "Content-Type: application/soap+xml; charset=utf-8");
+
+    pthread_mutex_lock(&vapix_mutex);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_URL, url);
+    if (VAPIX_Credentials) {
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_USERPWD, VAPIX_Credentials);
+        curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+    }
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_POSTFIELDS, soap_body);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEFUNCTION, append_to_buffer_callback);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &response);
+
+    CURLcode res = curl_easy_perform(VAPIX_CURL);
+    long code = 0;
+    if (res == CURLE_OK)
+        curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &code);
+    curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
+    pthread_mutex_unlock(&vapix_mutex);
+    curl_slist_free_all(hdrs);
+    free(url);
+
+    if (res != CURLE_OK || code >= 300) { free(response); return NULL; }
+
+    return response;
+}
+
 char* ACAP_VAPIX_Get_Path(const char* path) {
     if (!VAPIX_CURL || !path) {
         LOG_WARN("%s: Invalid input\n", __func__);

@@ -308,13 +308,17 @@ static gboolean do_subscribe(gpointer data) {
             Triggers_Subscribe_Rule(rules[i].id, rules[i].triggers_json);
 
             /* Register passive subscriptions for any vapix_query actions so
-             * their event data is cached and available when the action runs. */
+             * their event data is cached and available when the action runs.
+             * Skip for remote vapix_query — those fetch live via getEventInstances. */
             int aidx = 0;
             cJSON* action;
             cJSON_ArrayForEach(action, rules[i].actions_json) {
                 const char* atype = cJSON_GetStringValue(cJSON_GetObjectItem(action, "type"));
-                if (atype && strcmp(atype, "vapix_query") == 0)
-                    Triggers_Subscribe_Passive(rules[i].id, aidx, action);
+                if (atype && strcmp(atype, "vapix_query") == 0) {
+                    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(action, "remote_host"));
+                    if (!rh || !rh[0])
+                        Triggers_Subscribe_Passive(rules[i].id, aidx, action);
+                }
                 aidx++;
             }
             break;

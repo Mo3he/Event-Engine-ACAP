@@ -589,6 +589,31 @@ const RULE_TEMPLATES = [
       cooldown: 60,
     }
   },
+  {
+    name: 'Cross-Device: Remote Sensor → MQTT',
+    icon: '🔗',
+    desc: 'Schedule → query remote sensor data → MQTT publish with |N decimal formatting',
+    rule: {
+      name: 'Cross-Device: Remote Sensor Data Relay',
+      enabled: false, trigger_logic: 'OR', condition_logic: 'AND',
+      triggers: [{ type: 'schedule', schedule_type: 'interval', interval_seconds: 60 }],
+      conditions: [],
+      actions: [
+        {
+          type: 'vapix_query',
+          topic0: { tns1: 'Environment' }, topic1: { tnsaxis: 'AirQuality' },
+          remote_host: '192.168.1.50', remote_user: 'root', remote_pass: 'pass'
+        },
+        {
+          type: 'mqtt_publish',
+          topic: 'sensors/{{camera.serial}}/environment',
+          payload: '{"temperature":{{trigger.Temperature|2}},"humidity":{{trigger.Humidity|1}},"co2":{{trigger.CO2|0}},"source":"{{camera.serial}}","timestamp":"{{timestamp}}"}',
+          qos: 1, retain: true
+        }
+      ],
+      cooldown: 0,
+    }
+  },
 ];
 
 function openTemplateModal() {

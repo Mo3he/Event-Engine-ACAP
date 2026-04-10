@@ -792,6 +792,18 @@ char* ACAP_VAPIX_Get(const char* request);
 char* ACAP_VAPIX_Post(const char* request, const char* body);
 
 /**
+ * @brief POST a SOAP XML envelope to a local path (e.g. /vapix/services).
+ *
+ * Uses the ACAP loopback with Content-Type: application/soap+xml.
+ *
+ * @param path Full URL path, e.g. "/vapix/services"
+ * @param soap_body SOAP XML envelope string
+ * @return Response body on success (HTTP 2xx), NULL on failure.
+ * @warning Caller MUST free() the returned string.
+ */
+char* ACAP_VAPIX_Soap_Post(const char* path, const char* soap_body);
+
+/**
  * @brief Make a GET request to an arbitrary local path (not under axis-cgi/).
  *
  * Use this for REST APIs such as /config/rest/... that are not under the
@@ -806,7 +818,7 @@ char* ACAP_VAPIX_Get_Path(const char* path);
 /**
  * @brief Make a POST request to an arbitrary local path (not under axis-cgi/).
  *
- * @param path Full URL path, e.g. "/config/rest/airqualitymonitor/v1beta/sensors/x/getHistoryData"
+ * @param path Full URL path
  * @param body JSON body string
  * @return Response body as string on success, NULL on failure.
  * @warning Caller MUST free() the returned string.

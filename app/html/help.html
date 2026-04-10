@@ -886,10 +886,11 @@ Content-Type: application/json
       </div>
 
       <h3 id="act-vapix-query">Device Event Query</h3>
-      <p>Fetch the latest cached data from any device event and inject it as <span class="var">{{trigger.FIELD}}</span> variables for subsequent actions. Used for polling sensor values on a schedule trigger.</p>
+      <p>Fetch the latest data from any device event and inject it as <span class="var">{{trigger.FIELD}}</span> variables for subsequent actions. When targeting the local camera, reads from the passive subscription cache. When targeting a remote Axis device, queries the remote device's event API on demand.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><strong>Topic filter</strong></td><td>Partial topic string to identify the event to query (e.g. <code>AirQuality</code>).</td></tr>
+        <tr><td><strong>Device Event to Query</strong></td><td>Select an event from the dropdown. For remote devices, click <strong>Load Events</strong> to fetch the available events from the target camera.</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Choose <em>Local</em> (this camera) or <em>Remote device</em>. When remote, provide the IP/hostname, username, and password.</td></tr>
       </table>
 
       <h3 id="act-param">Set Device Parameter</h3>
@@ -1022,6 +1023,16 @@ Content-Type: application/json
         <tr><td><span class="var">{{trigger.fired_rule_id}}</span></td><td>ID of the rule that fired (Rule Chain trigger)</td></tr>
         <tr><td><span class="var">{{trigger.snapshot_base64}}</span></td><td>Base64-encoded JPEG (when <em>Attach snapshot</em> is enabled on HTTP Request)</td></tr>
       </table>
+
+      <h4>Decimal formatting</h4>
+      <p>Append <code>|N</code> to any numeric variable to round it to N decimal places:</p>
+      <table>
+        <tr><th>Example</th><th>Result</th></tr>
+        <tr><td><span class="var">{{trigger.Temperature|2}}</span></td><td><code>20.35</code> (from <code>20.3456789</code>)</td></tr>
+        <tr><td><span class="var">{{trigger.CO2|0}}</span></td><td><code>412</code> (no decimals)</td></tr>
+        <tr><td><span class="var">{{var.avg_temp|1}}</span></td><td><code>22.5</code> (one decimal)</td></tr>
+      </table>
+      <p>Non-numeric values pass through unchanged.</p>
 
       <h4>Named variables and counters</h4>
       <table>

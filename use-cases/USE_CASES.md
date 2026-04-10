@@ -378,6 +378,21 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 
 ---
 
+### 6.3 Remote Sensor Data Relay
+
+**Scenario:** Camera A (running Event Engine) periodically queries environmental sensor data from a remote Camera B and publishes it over MQTT with formatted decimal values — no Event Engine installation needed on Camera B.
+
+**How it works:**
+- A **Schedule** trigger fires every 60 seconds
+- A **Device Event Query** action with a remote target queries Camera B's air quality event data (temperature, humidity, CO₂) via the VAPIX event API
+- An **MQTT Publish** action sends the sensor values as a JSON object, using the `|N` format specifier to round decimals (e.g. `{{trigger.Temperature|2}}` → `20.35`)
+
+**Setup:** Set Camera B's IP, username, and password in the Device Event Query action. Click **Load Events** to browse available events and select the correct one. Adjust the MQTT topic and broker settings under Settings → MQTT.
+
+**Template:** [`templates/6.3-remote-sensor-data-relay.json`](templates/6.3-remote-sensor-data-relay.json)
+
+---
+
 ## Template Summary
 
 | # | Template File | Use Case | Description |
@@ -415,6 +430,7 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 5.5b | `5.5b-disable-rule-via-mqtt.json` | System Management | MQTT "disable" → disable target rule by ID + syslog |
 | 6.1 | `6.1-cross-device-io-condition-speaker-display.json` | Cross-Device | I/O input → remote I/O state condition → remote speaker display |
 | 6.2 | `6.2-cross-device-aoa-condition-alert.json` | Cross-Device | AOA detection → remote AOA occupancy condition → speaker display + MQTT |
+| 6.3 | `6.3-remote-sensor-data-relay.json` | Cross-Device | Schedule → remote sensor query → MQTT publish with `\|N` formatting |
 
 ---
 
@@ -431,3 +447,4 @@ Every template is designed to be imported and then customised in the web UI:
 - **AOA scenarios** - match scenario IDs to your configured analytics scenarios
 - **PTZ presets / Guard tours / Privacy masks** - use names that match your camera configuration
 - **Thresholds and timings** - adjust cooldowns, hold durations, and value thresholds to your environment
+- **Decimal formatting** - append `|N` to any numeric variable to control precision (e.g. `{{trigger.Temperature|2}}` for 2 decimal places)

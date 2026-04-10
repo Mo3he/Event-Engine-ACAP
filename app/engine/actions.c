@@ -288,6 +288,19 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
                 key[key_len] = '\0';
             }
 
+            /* Split optional |N decimal format specifier BEFORE lookup.
+             * e.g. "trigger.Temperature|2" → key="trigger.Temperature", dp=2 */
+            int has_fmt = 0;
+            int dp = 0;
+            char* pipe = strchr(key, '|');
+            if (pipe) {
+                *pipe = '\0';
+                dp = atoi(pipe + 1);
+                if (dp < 0) dp = 0;
+                if (dp > 15) dp = 15;
+                has_fmt = 1;
+            }
+
             const char* replacement = NULL;
             char  tmp[256];
             char* dyn_replacement = NULL; /* malloc'd; freed after copying */
@@ -325,6 +338,18 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
             } else if (strncmp(key, "counter.", 8) == 0) {
                 snprintf(tmp, sizeof(tmp), "%g", Counter_Get(key + 8));
                 replacement = tmp;
+            }
+
+            /* Apply |N decimal formatting if requested and value is numeric */
+            if (has_fmt && replacement && replacement[0]) {
+                char* endp;
+                double numval = strtod(replacement, &endp);
+                if (endp != replacement && *endp == '\0') {
+                    snprintf(tmp, sizeof(tmp), "%.*f", dp, numval);
+                    /* If replacement was a dyn_replacement, we can still
+                     * safely switch to tmp since we copy below */
+                    replacement = tmp;
+                }
             }
 
             if (!replacement) replacement = "";
@@ -534,6 +559,29 @@ static int get_remote_target(cJSON* cfg,
     return 1;
 }
 
+/* Build a topic path string from topic0–topic3 in a cfg object.
+ * Each topicN is { "ns": "value" } — concatenated as "ns:value/ns:value/…".
+ * Returns the number of characters written (excluding NUL). */
+static int build_topic_path(cJSON* cfg, char* buf, size_t size) {
+    buf[0] = '\0';
+    size_t pos = 0;
+    const char* keys[] = {"topic0","topic1","topic2","topic3",NULL};
+    for (int i = 0; keys[i]; i++) {
+        cJSON* t = cJSON_GetObjectItem(cfg, keys[i]);
+        if (!t || !t->child || !t->child->valuestring || !t->child->valuestring[0]) continue;
+        const char* ns  = t->child->string ? t->child->string : "";
+        const char* val = t->child->valuestring;
+        if (pos > 0 && pos < size - 1) buf[pos++] = '/';
+        int n;
+        if (ns[0])
+            n = snprintf(buf + pos, size - pos, "%s:%s", ns, val);
+        else
+            n = snprintf(buf + pos, size - pos, "%s", val);
+        if (n > 0) pos += (size_t)n;
+    }
+    return (int)pos;
+}
+
 /* Accumulate response into a dynamically growing buffer */
 static size_t remote_write_cb(void* ptr, size_t sz, size_t n, void* ud) {
     char** buf = (char**)ud;
@@ -625,6 +673,194 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
     explicit_bzero(userpwd, sizeof(userpwd));
     if (res != CURLE_OK) { free(response); return NULL; }
     return response;
+}
+
+/* POST SOAP to a remote Axis device (e.g. /vapix/services) */
+static char* remote_soap_post(const char* host, const char* user, const char* pass,
+                               const char* path, const char* soap_body) {
+    char url[512];
+    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) return NULL;
+    char* response = NULL;
+    struct curl_slist* hdrs = curl_slist_append(NULL,
+        "Content-Type: application/soap+xml; charset=utf-8");
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+    curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, soap_body);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(curl);
+    explicit_bzero(userpwd, sizeof(userpwd));
+    if (res != CURLE_OK) { free(response); return NULL; }
+    return response;
+}
+
+/* Extract a text value between > and < following an attribute marker in XML.
+ * Returns length written, or 0 on failure. */
+static size_t xml_extract_attr(const char* xml, const char* end,
+                                const char* attr, char* out, size_t out_sz) {
+    char needle[64];
+    snprintf(needle, sizeof(needle), "%s=\"", attr);
+    const char* p = strstr(xml, needle);
+    if (!p || p >= end) return 0;
+    p += strlen(needle);
+    const char* q = strchr(p, '"');
+    if (!q || q >= end) return 0;
+    size_t len = (size_t)(q - p);
+    if (len >= out_sz) len = out_sz - 1;
+    memcpy(out, p, len);
+    out[len] = '\0';
+    return len;
+}
+
+/* Query current event state from a remote Axis device using ONVIF PullPoint.
+ * Creates a temporary subscription, pulls state messages, finds the first
+ * NotificationMessage whose Topic contains topic_filter, and returns all
+ * SimpleItem Name/Value pairs as a flat cJSON object.
+ * Returns NULL on failure or no match. */
+static cJSON* remote_pullpoint_query(const char* host, const char* user,
+                                      const char* pass, const char* topic_filter) {
+    /* Step 1: CreatePullPointSubscription (unfiltered — Axis devices do not
+     * reliably support topic filters for vendor-specific root topics). */
+    static const char create_soap[] =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\">"
+        "<soap:Body><tev:CreatePullPointSubscription>"
+        "<tev:InitialTerminationTime>PT60S</tev:InitialTerminationTime>"
+        "</tev:CreatePullPointSubscription></soap:Body></soap:Envelope>";
+
+    char* resp = remote_soap_post(host, user, pass, "/vapix/services", create_soap);
+    if (!resp) return NULL;
+
+    /* Extract SubscriptionId from response */
+    char* sid_tag = strstr(resp, "SubscriptionId");
+    if (!sid_tag || strstr(resp, "Fault")) { free(resp); return NULL; }
+    char* sid_gt = strchr(sid_tag, '>');
+    if (!sid_gt) { free(resp); return NULL; }
+    sid_gt++;
+    char* sid_lt = strchr(sid_gt, '<');
+    if (!sid_lt) { free(resp); return NULL; }
+    char sub_id[32];
+    size_t sid_len = (size_t)(sid_lt - sid_gt);
+    if (sid_len >= sizeof(sub_id)) sid_len = sizeof(sub_id) - 1;
+    memcpy(sub_id, sid_gt, sid_len);
+    sub_id[sid_len] = '\0';
+    free(resp);
+    /* Validate sub_id contains only safe characters (digits) */
+    if (strspn(sub_id, "0123456789") != sid_len) return NULL;
+
+    /* Step 2: PullMessages — fast-drain initial property state, then
+     * switch to longer polls to catch periodic/transient events.
+     * Phase 1 (drain): PT1S pulls until empty or 50 attempts.
+     * Phase 2 (wait):  PT5S polls for up to 3 attempts. */
+    cJSON* result = NULL;
+    int drained = 0;
+    for (int attempt = 0; attempt < 53 && !result; attempt++) {
+        const char* timeout_str;
+        if (!drained)
+            timeout_str = "PT1S";
+        else
+            timeout_str = "PT5S";
+        char pull_soap[1024];
+        snprintf(pull_soap, sizeof(pull_soap),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+            " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+            " xmlns:dom0=\"http://www.axis.com/2009/event\">"
+            "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
+            "<soap:Body><tev:PullMessages>"
+            "<tev:Timeout>%s</tev:Timeout>"
+            "<tev:MessageLimit>200</tev:MessageLimit>"
+            "</tev:PullMessages></soap:Body></soap:Envelope>",
+            sub_id, timeout_str);
+
+        resp = remote_soap_post(host, user, pass, "/vapix/services", pull_soap);
+        if (!resp) break;
+        if (strstr(resp, "Fault")) { free(resp); break; }
+
+        /* Scan for NotificationMessage blocks with matching topic */
+        const char* pos = resp;
+        while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
+            /* Find end of this NotificationMessage */
+            const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
+            if (!msg_end) break;
+            msg_end += strlen("</wsnt:NotificationMessage>");
+
+            /* Extract Topic text */
+            const char* t_start = strstr(pos, "<wsnt:Topic");
+            if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
+            t_start = strchr(t_start, '>');
+            if (!t_start) { pos = msg_end; continue; }
+            t_start++;
+            const char* t_end = strchr(t_start, '<');
+            if (!t_end || t_end >= msg_end) { pos = msg_end; continue; }
+
+            char topic[512];
+            size_t tlen = (size_t)(t_end - t_start);
+            if (tlen >= sizeof(topic)) tlen = sizeof(topic) - 1;
+            memcpy(topic, t_start, tlen);
+            topic[tlen] = '\0';
+
+            if (!strstr(topic, topic_filter)) { pos = msg_end; continue; }
+
+            /* Matched — collect all SimpleItem Name/Value pairs */
+            result = cJSON_CreateObject();
+            const char* si = pos;
+            while ((si = strstr(si, "SimpleItem")) != NULL && si < msg_end) {
+                /* Skip the tag name itself, find the enclosing < > */
+                const char* tag_lt = si;
+                while (tag_lt > pos && *tag_lt != '<') tag_lt--;
+                const char* tag_gt = strchr(si, '>');
+                if (!tag_gt || tag_gt >= msg_end) break;
+
+                char name[128] = "", value[256] = "";
+                xml_extract_attr(tag_lt, tag_gt + 1, "Name", name, sizeof(name));
+                xml_extract_attr(tag_lt, tag_gt + 1, "Value", value, sizeof(value));
+                if (name[0] && value[0]) {
+                    cJSON_DeleteItemFromObject(result, name);
+                    cJSON_AddStringToObject(result, name, value);
+                }
+                si = tag_gt + 1;
+            }
+            break; /* use first matching message */
+        }
+
+        /* Empty pull: initial state fully drained — switch to long waits */
+        if (!strstr(resp, "NotificationMessage")) {
+            free(resp);
+            if (drained) break;
+            drained = attempt + 1;
+            continue;
+        }
+        free(resp);
+    }
+
+    /* Step 3: Unsubscribe */
+    char unsub_soap[512];
+    snprintf(unsub_soap, sizeof(unsub_soap),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
+        " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+        " xmlns:dom0=\"http://www.axis.com/2009/event\">"
+        "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
+        "<soap:Body><wsnt:Unsubscribe/></soap:Body></soap:Envelope>",
+        sub_id);
+    char* unsub_resp = remote_soap_post(host, user, pass, "/vapix/services", unsub_soap);
+    if (!unsub_resp || strstr(unsub_resp, "Fault"))
+        LOG_WARN("PullPoint unsubscribe failed for %s (sub %s)", host, sub_id);
+    free(unsub_resp);
+
+    return result;
 }
 
 /* Convenience macros: call remote or local VAPIX based on cfg */
@@ -1857,8 +2093,36 @@ static void action_set_rule_enabled(cJSON* cfg) {
 
 /* vapix_query — fetch cached VAPIX event data and inject into trigger_data
  * so subsequent actions in the same rule can use {{trigger.FIELD}} tokens.
- * Requires a passive subscription to be active (registered at rule load time). */
+ * Local: uses a passive subscription cache (registered at rule load time).
+ * Remote: uses ONVIF PullPoint to get current event state from the device. */
 static void action_vapix_query(cJSON* cfg, cJSON* trigger_data) {
+    const char* host; const char* user; const char* pass;
+    if (get_remote_target(cfg, &host, &user, &pass)) {
+        /* ---- Remote path: ONVIF PullPoint subscription ---- */
+        char topic_path[256];
+        if (!build_topic_path(cfg, topic_path, sizeof(topic_path)) || !topic_path[0]) {
+            LOG_WARN("vapix_query remote: no topic path configured");
+            return;
+        }
+        cJSON* fields = remote_pullpoint_query(host, user, pass, topic_path);
+        if (!fields) {
+            LOG_WARN("vapix_query remote: no event matching '%s' on %s",
+                     topic_path, host);
+            return;
+        }
+        /* Inject all fields into trigger_data */
+        cJSON* field;
+        cJSON_ArrayForEach(field, fields) {
+            if (!field->string) continue;
+            cJSON_DeleteItemFromObject(trigger_data, field->string);
+            cJSON_AddStringToObject(trigger_data, field->string,
+                cJSON_IsString(field) ? field->valuestring : "");
+        }
+        cJSON_Delete(fields);
+        return;
+    }
+
+    /* ---- Local path: passive subscription cache ---- */
     cJSON* cached = Triggers_Get_Cached(cfg);
     if (!cached) {
         LOG_WARN("vapix_query: no cached data yet (event may not have fired since startup)");

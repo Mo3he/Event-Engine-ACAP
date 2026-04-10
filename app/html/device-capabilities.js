@@ -75,6 +75,7 @@ async function loadRemoteCondCap(rowIndexStr, query) {
   /* vapix_events returns [{soap: "<raw xml>"}] — parse with existing catalog parser */
   if (query === 'vapix_events' && result[0] && result[0].soap) {
     const parsed = parseVapixEventCatalog(result[0].soap);
+    remoteCapCache[`${host}:::vapix_events_catalog`] = parsed;  /* full catalog — shared with action loader */
     remoteCapCache[`${host}:::vapix_events`] = parsed
       .map(ev => ({ topic: vapixCatalogTopicPath(ev), dataKeys: ev.dataKeys }))
       .filter(ev => ev.topic);
@@ -84,6 +85,82 @@ async function loadRemoteCondCap(rowIndexStr, query) {
 
   collectConditionRow(rowIndex);
   renderConditionList();
+}
+
+/* Called by "Load Events" button in a remote vapix_query action row.
+ * Reuses the full catalog cached by the condition loader when available;
+ * otherwise fetches directly (not via fetchRemoteCaps, whose cache key
+ * gets overwritten by loadRemoteCondCap with condition-formatted data). */
+async function loadRemoteActionVapixEvents(rowIndexStr) {
+  const rowIndex = parseInt(rowIndexStr);
+  const row = document.getElementById('arow-' + rowIndex);
+  if (!row) return;
+  const hostEl = row.querySelector('[data-k="remote_host"]');
+  const userEl = row.querySelector('[data-k="remote_user"]');
+  const passEl = row.querySelector('[data-k="remote_pass"]');
+  if (!hostEl || !hostEl.value.trim()) { toast('Enter remote device IP first', 'warning'); return; }
+  const host = hostEl.value.trim();
+  const cacheKey = `${host}:::vapix_events_catalog`;
+
+  /* If already cached (e.g. condition side loaded it), skip the fetch */
+  let parsed = remoteCapCache[cacheKey];
+  if (!parsed) {
+    const btn = row.querySelector('.btn-ghost[onclick*="loadRemoteActionVapixEvents"]');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+      const resp = await fetch('/local/acap_event_engine/remote-caps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host,
+          user: (userEl ? userEl.value.trim() : '') || 'root',
+          pass: passEl ? passEl.value : '',
+          query: 'vapix_events'
+        })
+      });
+      if (btn) { btn.disabled = false; btn.textContent = 'Load Events'; }
+      if (!resp.ok) { toast('Could not fetch event catalog from remote device', 'error'); return; }
+      const raw = await resp.json();
+      if (!Array.isArray(raw) || !raw[0] || !raw[0].soap) {
+        toast('Could not fetch event catalog from remote device', 'error'); return;
+      }
+      parsed = parseVapixEventCatalog(raw[0].soap);
+      remoteCapCache[cacheKey] = parsed;
+    } catch(e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Load Events'; }
+      toast('Could not fetch event catalog from remote device', 'error'); return;
+    }
+  }
+  if (!parsed.length) { toast('No events found on remote device', 'warning'); return; }
+  /* Preserve current form values then re-render */
+  const data = { type: actionRows[rowIndex].type };
+  row.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[rowIndex] = data;
+  renderActionList();
+}
+
+/* Called from the remote vapix_query action dropdown — updates the hidden topic inputs
+ * using the remote event catalog instead of the local vapixEventCatalog. */
+function applyRemoteVapixEventAction(sel, host) {
+  const idx = parseInt(sel.value);
+  const cacheKey = `${host}:::vapix_events_catalog`;
+  const catalog = (typeof remoteCapCache !== 'undefined') ? remoteCapCache[cacheKey] : null;
+  const ev = catalog && catalog[idx];
+  if (!ev) return;
+  const row = sel.closest('.tca-row');
+  ['topic0','topic1','topic2','topic3'].forEach(k => {
+    const nsEl  = row.querySelector(`[data-k="${k}_ns"]`);
+    const valEl = row.querySelector(`[data-k="${k}_val"]`);
+    if (!nsEl || !valEl) return;
+    if (ev.topics[k]) {
+      nsEl.value  = Object.keys(ev.topics[k])[0]   || '';
+      valEl.value = Object.values(ev.topics[k])[0] || '';
+    } else {
+      nsEl.value = ''; valEl.value = '';
+    }
+  });
 }
 
 async function loadVapixEventCatalog() {
