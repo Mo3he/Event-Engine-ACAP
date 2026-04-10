@@ -216,6 +216,8 @@
       66% { transform: translate(-20px, 30px) scale(0.95); }
     }
 
+
+
     .hero-content {
       position: relative;
       z-index: 1;
@@ -1200,7 +1202,7 @@
   <div class="cta-glow"></div>
   <div class="section-inner" style="position:relative;z-index:1;">
     <div class="section-label" style="text-align:center">Get Started</div>
-    <h2 class="section-title" style="text-align:center;max-width:600px">Ready to automate<br>your Axis cameras?</h2>
+    <h2 class="section-title" style="text-align:center;max-width:600px">Ready to automate<br>your Axis <span id="ctaWord" style="color:var(--accent);display:inline-block;transition:opacity 0.25s,transform 0.25s;">cameras</span>?</h2>
     <p class="section-desc" style="text-align:center;margin-left:auto;margin-right:auto">
       Download the ACAP, install it on your camera, and start building rules in minutes.
       No licenses. No subscriptions. Free forever.
@@ -1293,6 +1295,24 @@ function cycleWord() {
 
 heroWord.style.display = 'inline-block';
 setInterval(cycleWord, 3000);
+
+// Cycle CTA device word (synced with hero)
+const ctaWord = document.getElementById('ctaWord');
+const ctaDevices = ['cameras', 'speakers', 'strobe sirens', 'paging consoles', 'air quality sensors', 'display speakers', 'radars', 'door stations', 'I/O relay modules', 'intercoms'];
+let ctaIdx = 0;
+
+function cycleCta() {
+  ctaIdx = (ctaIdx + 1) % ctaDevices.length;
+  ctaWord.style.opacity = '0';
+  ctaWord.style.transform = 'translateY(8px)';
+  setTimeout(() => {
+    ctaWord.textContent = ctaDevices[ctaIdx];
+    ctaWord.style.opacity = '1';
+    ctaWord.style.transform = 'translateY(0)';
+  }, 250);
+}
+
+setInterval(cycleCta, 3000);
 
 // Theme toggle
 const toggle = document.getElementById('themeToggle');
