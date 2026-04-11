@@ -935,23 +935,39 @@ function applyTemplate(i) {
 }
 
 /* ===================================================
- * Tags — stored in localStorage, keyed by rule ID
+ * Tags & Rule Order — synced to camera via settings API
  * =================================================== */
-function getRuleTag(id) {
-  try { const m = JSON.parse(localStorage.getItem('ee_rule_tags') || '{}'); return m[id] || ''; } catch(_) { return ''; }
-}
-function setRuleTag(id, tag) {
+let _uiSettings = { rule_order: [], rule_tags: {} };
+let _uiSettingsLoaded = false;
+let _uiSaveTimer = null;
+
+async function loadUiSettings() {
   try {
-    const m = JSON.parse(localStorage.getItem('ee_rule_tags') || '{}');
-    if (tag) m[id] = tag; else delete m[id];
-    localStorage.setItem('ee_rule_tags', JSON.stringify(m));
+    const s = await API.get('settings');
+    if (s && s.ui) {
+      _uiSettings.rule_order = s.ui.rule_order || [];
+      _uiSettings.rule_tags  = s.ui.rule_tags  || {};
+    }
+    _uiSettingsLoaded = true;
   } catch(_) {}
 }
+
+function _saveUiSettingsDebounced() {
+  if (_uiSaveTimer) clearTimeout(_uiSaveTimer);
+  _uiSaveTimer = setTimeout(() => {
+    API.post('settings', { ui: _uiSettings }).catch(() => {});
+  }, 500);
+}
+
+function getRuleTag(id) {
+  return _uiSettings.rule_tags[id] || '';
+}
+function setRuleTag(id, tag) {
+  if (tag) _uiSettings.rule_tags[id] = tag; else delete _uiSettings.rule_tags[id];
+  _saveUiSettingsDebounced();
+}
 function getAllTags() {
-  try {
-    const m = JSON.parse(localStorage.getItem('ee_rule_tags') || '{}');
-    return [...new Set(Object.values(m))].sort();
-  } catch(_) { return []; }
+  return [...new Set(Object.values(_uiSettings.rule_tags))].sort();
 }
 function refreshTagFilter() {
   const sel = document.getElementById('rule-tag-filter');
@@ -963,13 +979,14 @@ function refreshTagFilter() {
 }
 
 /* ===================================================
- * Rule Sort Order — stored in localStorage
+ * Rule Sort Order — synced to camera
  * =================================================== */
 function getRuleSortOrder() {
-  try { return JSON.parse(localStorage.getItem('ee_rule_order') || '[]'); } catch(_) { return []; }
+  return _uiSettings.rule_order || [];
 }
 function setRuleSortOrder(ids) {
-  localStorage.setItem('ee_rule_order', JSON.stringify(ids));
+  _uiSettings.rule_order = ids;
+  _saveUiSettingsDebounced();
 }
 function sortRulesByStoredOrder(rules) {
   const order = getRuleSortOrder();
@@ -1443,7 +1460,15 @@ function downloadJSON(filename, data) {
 async function exportRules() {
   try {
     const full = await API.exportRules();
-    downloadJSON('event_engine_rules.json', full);
+    /* Inject tags and sort order into exported data */
+    const rules = Array.isArray(full) ? full : [full];
+    for (const r of rules) {
+      const tag = getRuleTag(r.id);
+      if (tag) r.tag = tag;
+    }
+    const order = getRuleSortOrder();
+    const exportData = { rules, rule_order: order.length ? order : undefined };
+    downloadJSON('event_engine_rules.json', exportData);
   } catch(e) {
     toast('Export failed: ' + e.message, 'error');
   }
@@ -1455,10 +1480,37 @@ async function importRules(input) {
   input.value = '';
   try {
     const text = await file.text();
-    const rules = JSON.parse(text);
+    const parsed = JSON.parse(text);
+    /* Support both new format { rules, rule_order } and legacy array format */
+    const rawRules = Array.isArray(parsed) ? parsed : (parsed.rules || [parsed]);
+    const importedOrder = Array.isArray(parsed.rule_order) ? parsed.rule_order : [];
+    /* Extract tags before stripping IDs */
+    const tagMap = {};
+    for (const r of rawRules) {
+      if (r.tag && r.id) tagMap[r.id] = r.tag;
+    }
     /* Strip ids so the engine assigns new ones */
-    const list = (Array.isArray(rules) ? rules : [rules]).map(({ id: _id, ...r }) => r);
+    const list = rawRules.map(({ id: _id, tag: _tag, ...r }) => r);
     const result = await API.importRules(list);
+    /* If tags or order were present, remap old IDs → new IDs by matching rule name */
+    if (Object.keys(tagMap).length || importedOrder.length) {
+      const newRules = await API.getRules();
+      /* Build old-id → new-id map via name matching */
+      const idMap = {};
+      for (const nr of newRules) {
+        const orig = rawRules.find(r => r.name === nr.name && r.id && !idMap[r.id]);
+        if (orig) idMap[orig.id] = nr.id;
+      }
+      /* Restore tags */
+      for (const [oldId, tag] of Object.entries(tagMap)) {
+        if (idMap[oldId]) setRuleTag(idMap[oldId], tag);
+      }
+      /* Restore sort order */
+      if (importedOrder.length) {
+        const newOrder = importedOrder.map(oldId => idMap[oldId]).filter(Boolean);
+        if (newOrder.length) setRuleSortOrder(newOrder);
+      }
+    }
     toast(`Imported ${result.success} rule(s)${result.failed ? ', ' + result.failed + ' failed' : ''}`);
     loadRules();
   } catch(e) {
@@ -1574,7 +1626,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const appIcon = document.getElementById('app-icon');
     if (appIcon) appIcon.src = initTheme === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
 
-    loadRules();
+    loadUiSettings().then(() => loadRules());
     loadStatus();
     startPoll();
     loadVapixEventCatalog();

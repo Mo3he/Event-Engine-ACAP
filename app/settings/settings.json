@@ -22,5 +22,9 @@
     "password": "",
     "keepalive": 60,
     "use_tls": false
+  },
+  "ui": {
+    "rule_order": [],
+    "rule_tags": {}
   }
 }
