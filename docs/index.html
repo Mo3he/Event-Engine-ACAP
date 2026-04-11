@@ -950,7 +950,7 @@
   <div class="hero-content">
     <div class="hero-badge">
       <span class="hero-badge-dot"></span>
-      <span id="hero-version">v1.9.3</span>
+      <span id="hero-version">v1.9.4 - Update Checker + UI Enhancements</span>
     </div>
     <h1><span class="gradient">Automate your</span><br>Axis <span class="hero-word" id="heroWord">camera</span></h1>
     <p class="hero-sub">
@@ -1422,7 +1422,7 @@ toggle.addEventListener('click', () => {
     const ver = tag.replace(/^v/, '');
     if (!ver) return;
     const badge = document.getElementById('hero-version');
-    if (badge) badge.textContent = tag;
+    if (badge) badge.textContent = d.name || tag;
     const underscored = ver.replace(/\./g, '_');
     document.querySelectorAll('a.eap-link').forEach(a => {
       const arch = a.dataset.arch;
