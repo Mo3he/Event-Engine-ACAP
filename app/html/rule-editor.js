@@ -2,6 +2,9 @@
 
 function openRuleEditor(rule) {
   editingRule = rule;
+  _ruleEditorDirty = false;
+  /* Inject tag from localStorage if not already in the rule object */
+  if (rule && rule.id && !rule.tag) rule.tag = getRuleTag(rule.id);
   triggerLogic = rule && rule.trigger_logic ? rule.trigger_logic : 'OR';
   conditionLogic = rule && rule.condition_logic ? rule.condition_logic : 'AND';
   triggerRows = rule ? (rule.triggers || []).map(t => ({ ...t })) : [];
@@ -13,15 +16,28 @@ function openRuleEditor(rule) {
     return { ...a };
   }) : [];
 
-  document.getElementById('modal-title').textContent = rule ? 'Edit Rule' : 'New Rule';
+  document.getElementById('modal-title').textContent = rule && rule.name ? 'Edit Rule — ' + rule.name : 'New Rule';
   document.getElementById('modal-body').innerHTML = buildRuleForm(rule);
   document.getElementById('modal-overlay').classList.remove('hidden');
   renderTriggerList();
   renderConditionList();
   renderActionList();
+
+  /* Mark dirty on any input change inside the modal */
+  setTimeout(() => {
+    const body = document.getElementById('modal-body');
+    if (body) body.addEventListener('input', _markRuleEditorDirty, { capture: true });
+  }, 0);
 }
 
+let _ruleEditorDirty = false;
+function _markRuleEditorDirty() { _ruleEditorDirty = true; }
+
 function closeModal() {
+  if (_ruleEditorDirty && !confirm('You have unsaved changes. Discard?')) return;
+  _ruleEditorDirty = false;
+  const body = document.getElementById('modal-body');
+  if (body) body.removeEventListener('input', _markRuleEditorDirty, { capture: true });
   document.getElementById('modal-overlay').classList.add('hidden');
   editingRule = null;
 }
@@ -33,31 +49,16 @@ function buildRuleForm(rule) {
         <label>Rule Name</label>
         <input id="f-name" type="text" value="${rule ? escHtml(rule.name) : ''}" placeholder="e.g. Motion → Record">
       </div>
+      <div class="form-group" style="flex:1">
+        <label>Tag <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input id="f-tag" type="text" value="${rule && rule.tag ? escHtml(rule.tag) : ''}" placeholder="e.g. Security" list="tag-datalist">
+        <datalist id="tag-datalist">${getAllTags().map(t => `<option value="${escHtml(t)}">`).join('')}</datalist>
+      </div>
       <div class="form-group" style="flex:0 0 auto; justify-content:flex-end; padding-top:18px;">
         <label class="toggle" style="align-self:center">
           <input type="checkbox" id="f-enabled" ${(!rule || rule.enabled !== false) ? 'checked' : ''}>
           <span class="toggle-slider"></span>
         </label>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Cooldown (s, 0 = off)</label>
-        <input id="f-cooldown" type="number" min="0" value="${rule ? rule.cooldown || 0 : 0}" placeholder="0 = no cooldown">
-        <div class="form-hint">Prevents the rule from firing again for this many seconds after it triggers. Useful to avoid alert floods.</div>
-      </div>
-      <div class="form-group">
-        <label>Max Executions</label>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <input id="f-maxex" type="number" min="0" value="${rule ? rule.max_executions || 0 : 0}" placeholder="0 = unlimited" style="width:80px;">
-          <select id="f-maxex-period">
-            <option value=""       ${!(rule && rule.max_exec_period) ? 'selected' : ''}>lifetime</option>
-            <option value="minute" ${rule && rule.max_exec_period === 'minute' ? 'selected' : ''}>per minute</option>
-            <option value="hour"   ${rule && rule.max_exec_period === 'hour'   ? 'selected' : ''}>per hour</option>
-            <option value="day"    ${rule && rule.max_exec_period === 'day'    ? 'selected' : ''}>per day</option>
-          </select>
-        </div>
-        <div class="form-hint">0 = unlimited. Period resets automatically; lifetime resets when rule is saved.</div>
       </div>
     </div>
 
@@ -109,8 +110,28 @@ function buildRuleForm(rule) {
     <div class="section-header">
       <span class="section-title">Actions (THEN)</span>
     </div>
-    <div id="action-list"></div>
-    <button class="add-btn" onclick="addActionRow()">+ Add Action</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Cooldown (s, 0 = off)</label>
+        <input id="f-cooldown" type="number" min="0" value="${rule ? rule.cooldown || 0 : 0}" placeholder="0 = no cooldown">
+        <div class="form-hint">Prevents the rule from firing again for this many seconds after it triggers. Useful to avoid alert floods.</div>
+      </div>
+      <div class="form-group">
+        <label>Max Executions</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="f-maxex" type="number" min="0" value="${rule ? rule.max_executions || 0 : 0}" placeholder="0 = unlimited" style="width:80px;">
+          <select id="f-maxex-period">
+            <option value=""       ${!(rule && rule.max_exec_period) ? 'selected' : ''}>lifetime</option>
+            <option value="minute" ${rule && rule.max_exec_period === 'minute' ? 'selected' : ''}>per minute</option>
+            <option value="hour"   ${rule && rule.max_exec_period === 'hour'   ? 'selected' : ''}>per hour</option>
+            <option value="day"    ${rule && rule.max_exec_period === 'day'    ? 'selected' : ''}>per day</option>
+          </select>
+        </div>
+        <div class="form-hint">0 = unlimited. Period resets automatically; lifetime resets when rule is saved.</div>
+      </div>
+    </div>
   `;
 }
 
@@ -3065,6 +3086,7 @@ async function saveRule() {
 
   const rule = {
     name,
+    tag:             document.getElementById('f-tag').value.trim(),
     enabled:         document.getElementById('f-enabled').checked,
     triggers:        triggerRows,
     trigger_logic:   triggerLogic,
@@ -3080,11 +3102,18 @@ async function saveRule() {
   try {
     if (editingRule && editingRule.id) {
       await API.updateRule(editingRule.id, rule);
+      setRuleTag(editingRule.id, rule.tag);
       toast('Rule updated', 'success');
     } else {
-      await API.addRule(rule);
+      const resp = await API.addRule(rule);
+      /* Try to extract the new rule ID from the response to tag it */
+      try {
+        const body = await resp.json();
+        if (body && body.id) setRuleTag(body.id, rule.tag);
+      } catch(_) {}
       toast('Rule created', 'success');
     }
+    _ruleEditorDirty = false;
     closeModal();
     loadRules();
   } catch(e) {

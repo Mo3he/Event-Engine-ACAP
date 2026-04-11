@@ -7,7 +7,8 @@
   <link rel="stylesheet" href="style.css">
   <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_light.svg">
   <script>(function(){
-    var t=localStorage.getItem('theme')||'light';
+    var stored=localStorage.getItem('theme');
+    var t=stored||(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
     document.documentElement.setAttribute('data-theme',t);
     document.addEventListener('DOMContentLoaded',function(){
       var el=document.getElementById('favicon');
@@ -66,12 +67,22 @@
         <div style="display:flex;gap:8px;align-items:center;">
           <input type="text" id="rule-search" placeholder="Search rules…" oninput="renderRules()"
                  style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;width:160px;">
+          <select id="rule-tag-filter" onchange="renderRules()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
+            <option value="">All Tags</option>
+          </select>
           <button class="btn btn-ghost btn-sm" onclick="exportRules()" title="Download all rules as JSON">Export</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-rules-file').click()" title="Import rules from JSON file">Import</button>
           <input type="file" id="import-rules-file" accept=".json" style="display:none;" onchange="importRules(this)">
           <button class="btn btn-template btn-sm" id="btn-template" onclick="openTemplateModal()" title="Create a rule from a starter template">Templates</button>
           <button class="btn btn-primary btn-sm" onclick="openRuleEditor(null)">+ New Rule</button>
         </div>
+      </div>
+      <div id="bulk-bar" class="bulk-bar" style="display:none;">
+        <span id="bulk-count">0 selected</span>
+        <button class="btn btn-ghost btn-sm" onclick="bulkEnable(true)">Enable</button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkEnable(false)">Disable</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--accent-danger);" onclick="bulkDelete()">Delete</button>
+        <button class="btn btn-ghost btn-sm" onclick="bulkDeselectAll()">Cancel</button>
       </div>
       <div id="rules-list"></div>
     </div>
@@ -86,7 +97,17 @@
           <select id="log-rule-filter" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
             <option value="">All Rules</option>
           </select>
+          <select id="log-time-filter" onchange="loadEvents()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
+            <option value="">All Time</option>
+            <option value="3600">Last Hour</option>
+            <option value="86400" selected>Last 24h</option>
+            <option value="604800">Last 7 Days</option>
+          </select>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;color:var(--text-muted);" title="Auto-refresh every 3 seconds">
+            <input type="checkbox" id="log-live-tail" onchange="toggleLiveTail(this.checked)"> Live
+          </label>
           <button class="btn btn-ghost btn-sm" onclick="loadEvents()">Refresh</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportLogCSV()">CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="clearEventLog()" style="color:var(--error,#f87171);">Clear</button>
         </div>
       </div>
@@ -137,6 +158,23 @@
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
       <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
 
+      <!-- Backup & Restore -->
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Export your rules and settings before uninstalling so you can restore them after reinstalling.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
+          <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
+          <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
+          <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
+          <button class="btn btn-ghost" onclick="manualCheckForUpdate()">Check for Updates</button>
+        </div>
+      </div>
+
       <!-- MQTT Settings -->
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -147,6 +185,17 @@
           </div>
         </div>
         <form id="mqtt-form" onsubmit="saveMqttSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
+          <div class="form-row" style="align-items:center;">
+            <div class="form-group" style="flex:0 0 auto;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <span style="font-size:13px;">Enabled</span>
+                <label class="toggle">
+                  <input type="checkbox" name="enabled">
+                  <span class="toggle-slider"></span>
+                </label>
+              </label>
+            </div>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label>Broker Host</label>
@@ -181,15 +230,6 @@
                 <span style="font-size:13px;">Use TLS</span>
                 <label class="toggle">
                   <input type="checkbox" name="use_tls">
-                  <span class="toggle-slider"></span>
-                </label>
-              </label>
-            </div>
-            <div class="form-group" style="flex:0 0 auto;">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
-                <span style="font-size:13px;">Enabled</span>
-                <label class="toggle">
-                  <input type="checkbox" name="enabled">
                   <span class="toggle-slider"></span>
                 </label>
               </label>
@@ -303,22 +343,6 @@
         </form>
       </div>
 
-      <!-- Backup & Restore -->
-      <div class="card">
-        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-          Export your rules and settings before uninstalling so you can restore them after reinstalling.
-        </p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
-          <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
-          <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
-          <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
-        </div>
-      </div>
-
     </div>
   </div>
 
@@ -346,6 +370,7 @@
 
 <script src="api.js" onerror="__scriptLoadError('api.js')"></script>
 <script src="app.js" onerror="__scriptLoadError('app.js')"></script>
+<script src="update-checker.js" onerror="__scriptLoadError('update-checker.js')"></script>
 <script src="device-capabilities.js" onerror="__scriptLoadError('device-capabilities.js')"></script>
 <script src="settings.js" onerror="__scriptLoadError('settings.js')"></script>
 <script src="rule-editor.js" onerror="__scriptLoadError('rule-editor.js')"></script>

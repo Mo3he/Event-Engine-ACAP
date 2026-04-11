@@ -25,6 +25,10 @@ let knownVarNames = [];       /* variable names loaded at startup for hint displ
 let knownCounterNames = [];   /* counter names loaded at startup for hint display */
 let engineLat = 0;            /* engine settings latitude — used as default for astronomical triggers */
 let engineLon = 0;            /* engine settings longitude */
+let bulkSelected = new Set(); /* selected rule IDs for bulk actions */
+let lastLoadedEvents = [];    /* cached for CSV export */
+let liveTailTimer = null;     /* live tail interval ID */
+let ruleErrorMap = {};        /* rule_id → true if recent event had error */
 
 function showFatalUiError(message) {
   const subtitle = document.getElementById('header-subtitle');
@@ -128,6 +132,12 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     if (btn.dataset.tab === 'log')       loadEvents();
     if (btn.dataset.tab === 'variables') loadVariables();
     if (btn.dataset.tab === 'settings')  { loadStatus(); loadAllSettings(); }
+    /* Stop live tail when leaving the log tab */
+    if (btn.dataset.tab !== 'log') {
+      toggleLiveTail(false);
+      const cb = document.getElementById('log-live-tail');
+      if (cb) cb.checked = false;
+    }
   });
 });
 
@@ -844,6 +854,9 @@ function openTemplateModal() {
   const header = `<div style="padding:12px 16px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;">
     Create from Template
     <button onclick="document.getElementById('_template_panel').remove()" style="float:right;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;">&times;</button>
+  </div>
+  <div style="padding:8px 12px;border-bottom:1px solid var(--border);">
+    <input id="_template_search" type="text" placeholder="Search templates…" oninput="filterTemplates()" style="width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:12px;">
   </div>`;
   const templateIconByTrigger = {
     vapix_event: '<svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M480-280q83 0 141.5-58.5T680-480q0-83-58.5-141.5T480-680q-83 0-141.5 58.5T280-480q0 83 58.5 141.5T480-280Zm0 120q-134 0-227-93t-93-227q0-134 93-227t227-93q134 0 227 93t93 227q0 134-93 227t-227 93Zm0-200q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0-120Z"/></svg>',
@@ -861,7 +874,7 @@ function openTemplateModal() {
     const triggerType = t.rule && t.rule.triggers && t.rule.triggers[0] && t.rule.triggers[0].type;
     const iconSvg = templateIconByTrigger[triggerType] || templateIconByTrigger.default;
     return (
-    `<div onclick="applyTemplate(${i})" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;"
+    `<div class="_tmpl_item" data-search="${escHtml((t.name + ' ' + t.desc).toLowerCase())}" onclick="applyTemplate(${i})" style="padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:flex-start;"
           onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <span style="display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;color:var(--accent);">${iconSvg}</span>
       <div>
@@ -871,7 +884,7 @@ function openTemplateModal() {
     </div>`
     );
   }).join('');
-  panel.innerHTML = header + `<div style="max-height:380px;overflow-y:auto;">${items}</div>`;
+  panel.innerHTML = header + `<div id="_tmpl_list" style="max-height:380px;overflow-y:auto;">${items}</div>`;
   document.body.appendChild(panel);
 
   /* Position below whichever template button triggered it */
@@ -897,7 +910,19 @@ function openTemplateModal() {
       }
       document.removeEventListener('click', _close);
     });
+    const searchInput = document.getElementById('_template_search');
+    if (searchInput) searchInput.focus();
   }, 0);
+}
+
+function filterTemplates() {
+  const input = document.getElementById('_template_search');
+  const q = input ? input.value.toLowerCase().trim() : '';
+  const items = document.querySelectorAll('._tmpl_item');
+  items.forEach(el => {
+    const text = el.getAttribute('data-search') || '';
+    el.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
 }
 
 function applyTemplate(i) {
@@ -910,13 +935,79 @@ function applyTemplate(i) {
 }
 
 /* ===================================================
+ * Tags — stored in localStorage, keyed by rule ID
+ * =================================================== */
+function getRuleTag(id) {
+  try { const m = JSON.parse(localStorage.getItem('ee_rule_tags') || '{}'); return m[id] || ''; } catch(_) { return ''; }
+}
+function setRuleTag(id, tag) {
+  try {
+    const m = JSON.parse(localStorage.getItem('ee_rule_tags') || '{}');
+    if (tag) m[id] = tag; else delete m[id];
+    localStorage.setItem('ee_rule_tags', JSON.stringify(m));
+  } catch(_) {}
+}
+function getAllTags() {
+  try {
+    const m = JSON.parse(localStorage.getItem('ee_rule_tags') || '{}');
+    return [...new Set(Object.values(m))].sort();
+  } catch(_) { return []; }
+}
+function refreshTagFilter() {
+  const sel = document.getElementById('rule-tag-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const tags = getAllTags();
+  sel.innerHTML = '<option value="">All Tags</option>' +
+    tags.map(t => `<option value="${escHtml(t)}" ${cur === t ? 'selected' : ''}>${escHtml(t)}</option>`).join('');
+}
+
+/* ===================================================
+ * Rule Sort Order — stored in localStorage
+ * =================================================== */
+function getRuleSortOrder() {
+  try { return JSON.parse(localStorage.getItem('ee_rule_order') || '[]'); } catch(_) { return []; }
+}
+function setRuleSortOrder(ids) {
+  localStorage.setItem('ee_rule_order', JSON.stringify(ids));
+}
+function sortRulesByStoredOrder(rules) {
+  const order = getRuleSortOrder();
+  if (!order.length) return rules;
+  const posMap = {};
+  order.forEach((id, i) => posMap[id] = i);
+  return [...rules].sort((a, b) => {
+    const pa = posMap[a.id] !== undefined ? posMap[a.id] : 99999;
+    const pb = posMap[b.id] !== undefined ? posMap[b.id] : 99999;
+    return pa - pb;
+  });
+}
+
+/* ===================================================
+ * Error indicator — build a map of rule IDs with recent errors
+ * =================================================== */
+function buildRuleErrorMap(events) {
+  ruleErrorMap = {};
+  if (!events) return;
+  for (const e of events) {
+    if (e.actions_failed > 0 && e.action_error && e.rule_id) {
+      ruleErrorMap[e.rule_id] = true;
+    }
+  }
+}
+
+/* ===================================================
  * Rules Tab
  * =================================================== */
 async function loadRules() {
   try {
     allRules = await API.getRules();
+    allRules = sortRulesByStoredOrder(allRules);
     renderRules();
     updateLogFilter();
+    refreshTagFilter();
+    /* Fetch recent events for error indicator */
+    API.getEvents(200, '').then(ev => { buildRuleErrorMap(ev); renderRules(); }).catch(() => {});
   } catch(e) {
     toast('Failed to load rules', 'error');
   }
@@ -943,10 +1034,15 @@ function renderRules() {
 
   const searchEl = document.getElementById('rule-search');
   const search = searchEl ? searchEl.value.toLowerCase().trim() : '';
-  const visibleRules = search ? allRules.filter(r => r.name.toLowerCase().includes(search)) : allRules;
+  const tagFilterEl = document.getElementById('rule-tag-filter');
+  const tagFilter = tagFilterEl ? tagFilterEl.value : '';
 
-  if (!visibleRules.length && search) {
-    list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">No rules match "<em>${escHtml(search)}</em>"</div>`;
+  let visibleRules = allRules;
+  if (search) visibleRules = visibleRules.filter(r => r.name.toLowerCase().includes(search));
+  if (tagFilter) visibleRules = visibleRules.filter(r => getRuleTag(r.id) === tagFilter);
+
+  if (!visibleRules.length) {
+    list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">No rules match the current filter</div>`;
     return;
   }
 
@@ -955,18 +1051,24 @@ function renderRules() {
     const fireBtn = isManualOnly
       ? `<button class="btn btn-primary btn-sm" onclick="testRule('${r.id}')" title="Fire rule now"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg> Fire</button>`
       : `<button class="btn btn-ghost btn-sm btn-icon" onclick="testRule('${r.id}')" title="Test / Fire now"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg></button>`;
+    const tag = getRuleTag(r.id);
+    const hasError = !!ruleErrorMap[r.id];
+    const isSelected = bulkSelected.has(r.id);
     return `
-    <div class="rule-card ${r.enabled ? '' : 'disabled'}" id="rule-card-${r.id}">
+    <div class="rule-card ${r.enabled ? '' : 'disabled'} ${isSelected ? 'bulk-selected' : ''}" id="rule-card-${r.id}" draggable="true" ondragstart="ruleDragStart(event,'${r.id}')" ondragover="ruleDragOver(event)" ondrop="ruleDrop(event,'${r.id}')">
+      <input type="checkbox" class="bulk-cb" ${isSelected ? 'checked' : ''} onchange="bulkToggle('${r.id}', this.checked)" onclick="event.stopPropagation()" title="Select for bulk action">
       <label class="toggle" title="${r.enabled ? 'Disable' : 'Enable'} rule">
         <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule('${r.id}', this.checked)">
         <span class="toggle-slider"></span>
       </label>
       <div class="rule-meta">
         <div class="rule-name-row">
+          ${hasError ? '<span class="rule-error-dot" title="Recent action error"></span>' : ''}
           <div class="rule-name">${escHtml(r.name)}</div>
           <code class="rule-uuid" onclick="copyRuleId('${r.id}')" title="${r.id}">UUID: ${r.id.slice(0, 8)}</code>
         </div>
         <div class="rule-badges">
+          ${tag ? `<span class="badge badge-tag">${escHtml(tag)}</span>` : ''}
           ${(r.trigger_types||[]).map(t => `<span class="badge badge-trigger">${escHtml(ruleTypeLabel('trigger',t))}</span>`).join('')}
           ${(r.condition_types||[]).map(t => `<span class="badge badge-cond">${escHtml(ruleTypeLabel('condition',t))}</span>`).join('')}
           ${(r.action_types||[]).map(t => `<span class="badge badge-action">${escHtml(ruleTypeLabel('action',t))}</span>`).join('')}
@@ -983,6 +1085,85 @@ function renderRules() {
       </div>
     </div>`;
   }).join('');
+
+  updateBulkBar();
+}
+
+/* ===================================================
+ * Bulk Actions
+ * =================================================== */
+function bulkToggle(id, checked) {
+  if (checked) bulkSelected.add(id); else bulkSelected.delete(id);
+  updateBulkBar();
+  const card = document.getElementById('rule-card-' + id);
+  if (card) card.classList.toggle('bulk-selected', checked);
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  const cnt = document.getElementById('bulk-count');
+  if (!bar) return;
+  bar.style.display = bulkSelected.size > 0 ? 'flex' : 'none';
+  if (cnt) cnt.textContent = bulkSelected.size + ' selected';
+}
+
+function bulkDeselectAll() {
+  bulkSelected.clear();
+  renderRules();
+}
+
+async function bulkEnable(enabled) {
+  const ids = [...bulkSelected];
+  if (!ids.length) return;
+  try {
+    await Promise.all(ids.map(id => API.setEnabled(id, enabled)));
+    toast(`${ids.length} rule(s) ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    bulkSelected.clear();
+    loadRules();
+  } catch(e) { toast('Bulk update failed', 'error'); }
+}
+
+async function bulkDelete() {
+  const ids = [...bulkSelected];
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} rule(s)?`)) return;
+  try {
+    await Promise.all(ids.map(id => API.deleteRule(id)));
+    toast(`${ids.length} rule(s) deleted`, 'success');
+    bulkSelected.clear();
+    loadRules();
+  } catch(e) { toast('Bulk delete failed', 'error'); }
+}
+
+/* ===================================================
+ * Drag & Drop Reorder
+ * =================================================== */
+let _dragRuleId = null;
+
+function ruleDragStart(e, id) {
+  _dragRuleId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id);
+  e.currentTarget.style.opacity = '0.5';
+  setTimeout(() => { if (e.currentTarget) e.currentTarget.style.opacity = ''; }, 200);
+}
+
+function ruleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function ruleDrop(e, targetId) {
+  e.preventDefault();
+  if (!_dragRuleId || _dragRuleId === targetId) return;
+  const fromIdx = allRules.findIndex(r => r.id === _dragRuleId);
+  const toIdx = allRules.findIndex(r => r.id === targetId);
+  if (fromIdx < 0 || toIdx < 0) return;
+  const [moved] = allRules.splice(fromIdx, 1);
+  allRules.splice(toIdx, 0, moved);
+  setRuleSortOrder(allRules.map(r => r.id));
+  renderRules();
+  _dragRuleId = null;
 }
 
 async function toggleRule(id, enabled) {
@@ -1073,12 +1254,47 @@ async function exportRule(id) {
 async function loadEvents() {
   const filterEl = document.getElementById('log-rule-filter');
   const rule = filterEl ? filterEl.value : '';
+  const timeEl = document.getElementById('log-time-filter');
+  const since = timeEl && timeEl.value ? Math.floor(Date.now() / 1000) - parseInt(timeEl.value) : 0;
   try {
-    const events = await API.getEvents(200, rule);
+    let events = await API.getEvents(500, rule);
+    if (since) events = events.filter(e => e.timestamp >= since);
+    lastLoadedEvents = events;
     renderEventLog(events);
   } catch(e) {
     toast('Failed to load events', 'error');
   }
+}
+
+/* ===== Live Tail ===== */
+function toggleLiveTail(on) {
+  if (liveTailTimer) { clearInterval(liveTailTimer); liveTailTimer = null; }
+  if (on) {
+    loadEvents();
+    liveTailTimer = setInterval(loadEvents, 3000);
+  }
+}
+
+/* ===== CSV Export ===== */
+function exportLogCSV() {
+  if (!lastLoadedEvents.length) { toast('No events to export', 'warning'); return; }
+  const rows = [['Time', 'Rule', 'Fired', 'Error', 'Details']];
+  for (const e of lastLoadedEvents) {
+    const d = new Date(e.timestamp * 1000);
+    const time = d.toISOString();
+    const ruleName = e.rule_name || e.rule_id || '';
+    const fired = e.fired ? 'Yes' : 'No';
+    const error = e.action_error || '';
+    const details = e.trigger_data ? JSON.stringify(e.trigger_data) : '';
+    rows.push([time, ruleName, fired, error, details]);
+  }
+  const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'event_log.csv'; a.click();
+  URL.revokeObjectURL(url);
+  toast('Event log exported', 'success');
 }
 
 async function clearEventLog() {
@@ -1363,6 +1579,11 @@ window.addEventListener('DOMContentLoaded', () => {
     startPoll();
     loadVapixEventCatalog();
     loadAcapEvents();
+
+    /* Check for newer release on GitHub */
+    API.getStatus().then(s => {
+      if (s && s.engine_version) checkForUpdate(s.engine_version);
+    }).catch(() => {});
     Promise.all([
       loadPtzPresets(),
       loadAudioClips(),
