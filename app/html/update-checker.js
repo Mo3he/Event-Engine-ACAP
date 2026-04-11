@@ -70,10 +70,11 @@ function showUpdateBanner(current, latest, releaseUrl) {
     `</span> ` +
     `<span class="update-banner-actions">` +
     `<a href="${escHtml(releaseUrl)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">View Release</a>` +
-    `<button class="btn btn-ghost btn-sm" onclick="dismissUpdate('${escHtml(latest)}')">Dismiss</button>` +
+    `<button class="btn btn-ghost btn-sm" id="update-dismiss-btn">Dismiss</button>` +
     `</span>`;
 
   document.body.appendChild(banner);
+  document.getElementById('update-dismiss-btn').addEventListener('click', () => dismissUpdate(latest));
 }
 
 function dismissUpdate(version) {
