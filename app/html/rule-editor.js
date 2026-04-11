@@ -110,8 +110,9 @@ function buildRuleForm(rule) {
     <div class="section-header">
       <span class="section-title">Actions (THEN)</span>
     </div>
-      </div>
-    </div>
+    <div id="action-list"></div>
+    <button class="add-btn" onclick="addActionRow()">+ Add Action</button>
+
     <div class="form-row">
       <div class="form-group">
         <label>Cooldown (s, 0 = off)</label>
