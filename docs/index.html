@@ -409,9 +409,9 @@
       padding: 0 20px;
     }
     .rule-node {
-      padding: 14px 22px;
+      padding: 20px 32px;
       border-radius: var(--radius);
-      font-size: 13px;
+      font-size: 16px;
       font-weight: 600;
       border: 1px solid;
       backdrop-filter: blur(10px);
@@ -454,15 +454,15 @@
     }
     .rule-arrow {
       color: var(--text-dim);
-      font-size: 20px;
-      padding: 0 8px;
+      font-size: 28px;
+      padding: 0 16px;
       animation: fadeSlideUp 0.8s ease-out both;
     }
     .rule-arrow:nth-child(2) { animation-delay: 0.3s; }
     .rule-arrow:nth-child(4) { animation-delay: 0.5s; }
 
     .rule-label {
-      font-size: 10px;
+      font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       opacity: 0.6;
@@ -970,25 +970,6 @@
         GitHub
       </a>
     </div>
-
-    <div class="hero-visual">
-      <div class="rule-flow">
-        <div class="rule-node rule-trigger">
-          <span class="rule-label">Trigger</span>
-          Motion Detected
-        </div>
-        <span class="rule-arrow">→</span>
-        <div class="rule-node rule-condition">
-          <span class="rule-label">Condition</span>
-          After Sunset
-        </div>
-        <span class="rule-arrow">→</span>
-        <div class="rule-node rule-action">
-          <span class="rule-label">Action</span>
-          Send Alert + Record
-        </div>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -1014,6 +995,22 @@
     <div class="stat">
       <div class="stat-value">42</div>
       <div class="stat-label">Ready-Made Templates</div>
+    </div>
+  </div>
+  <div class="rule-flow" style="padding: 32px 24px; border-top: 1px solid var(--border);">
+    <div class="rule-node rule-trigger">
+      <span class="rule-label">Trigger</span>
+      Motion Detected
+    </div>
+    <span class="rule-arrow">→</span>
+    <div class="rule-node rule-condition">
+      <span class="rule-label">Condition</span>
+      After Sunset
+    </div>
+    <span class="rule-arrow">→</span>
+    <div class="rule-node rule-action">
+      <span class="rule-label">Action</span>
+      Send Alert + Record
     </div>
   </div>
 </section>
