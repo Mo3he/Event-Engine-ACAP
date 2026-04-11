@@ -247,10 +247,54 @@
       margin: 36px 0;
     }
 
+    /* Search */
+    .search-box {
+      display: flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0 8px;
+      gap: 6px;
+      transition: border-color .15s;
+    }
+    .search-box:focus-within { border-color: var(--accent); }
+    .search-box svg { flex-shrink: 0; color: var(--text-dim); }
+    .search-box input {
+      border: none;
+      background: none;
+      color: var(--text);
+      font-size: 13px;
+      padding: 5px 0;
+      width: 100%;
+      outline: none;
+    }
+    .search-box input::placeholder { color: var(--text-dim); }
+    .search-clear {
+      background: none; border: none; cursor: pointer; color: var(--text-dim);
+      font-size: 16px; padding: 0 2px; display: none; line-height: 1;
+    }
+    .search-clear:hover { color: var(--text); }
+    .search-box.has-query .search-clear { display: block; }
+    mark.search-hl {
+      background: rgba(0,110,184,.2);
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+    .search-no-results {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+      font-size: 14px;
+      display: none;
+    }
+
     /* Responsive */
     @media (max-width: 700px) {
       .sidebar { display: none; }
       .content { padding: 20px 16px 60px; }
+      .search-box { display: none; }
     }
   </style>
 </head>
@@ -278,6 +322,11 @@
 
     <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
+      <div class="search-box" id="search-box" style="margin:12px 12px 8px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="search-input" placeholder="Search docs…" autocomplete="off">
+        <button class="search-clear" id="search-clear" title="Clear">×</button>
+      </div>
       <div class="sidebar-group-label">Getting Started</div>
       <a href="#overview">Overview</a>
       <a href="#accessing-ui">Accessing the UI</a>
@@ -1240,6 +1289,212 @@ function updateActive() {
 
 window.addEventListener('scroll', updateActive, { passive: true });
 updateActive();
+
+/* ── Search ── */
+(function() {
+  var input = document.getElementById('search-input');
+  var clearBtn = document.getElementById('search-clear');
+  var searchBox = document.getElementById('search-box');
+  var content = document.querySelector('.content');
+  var sidebar = document.getElementById('sidebar');
+  var noResults = document.createElement('div');
+  noResults.className = 'search-no-results';
+  noResults.textContent = 'No results found.';
+  content.appendChild(noResults);
+
+  /* Build section map once: each h2[id] owns all siblings until the next h2[id] */
+  var sectionData = [];
+  (function() {
+    var allH2 = Array.from(content.querySelectorAll('h2[id]'));
+    allH2.forEach(function(h2, i) {
+      var els = [h2];
+      var sib = h2.nextElementSibling;
+      while (sib && !(sib.tagName === 'H2' && sib.id)) {
+        els.push(sib);
+        sib = sib.nextElementSibling;
+      }
+      sectionData.push({ id: h2.id, elements: els });
+    });
+  })();
+
+  /* Elements before the first h2 (h1, subtitle, etc.) */
+  var preamble = [];
+  (function() {
+    var first = content.querySelector('h2[id]');
+    if (!first) return;
+    var el = content.firstElementChild;
+    while (el && el !== first) {
+      preamble.push(el);
+      el = el.nextElementSibling;
+    }
+  })();
+
+  function clearHighlights() {
+    content.querySelectorAll('mark.search-hl').forEach(function(m) {
+      var parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+  }
+
+  function highlightIn(root, regex) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function(tn) {
+      var parts = tn.textContent.split(regex);
+      if (parts.length <= 1) return;
+      var frag = document.createDocumentFragment();
+      var matches = tn.textContent.match(regex);
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i]) frag.appendChild(document.createTextNode(parts[i]));
+        if (matches && i < matches.length) {
+          var mark = document.createElement('mark');
+          mark.className = 'search-hl';
+          mark.textContent = matches[i];
+          frag.appendChild(mark);
+        }
+      }
+      tn.parentNode.replaceChild(frag, tn);
+    });
+  }
+
+  var debounce;
+  input.addEventListener('input', function() {
+    clearTimeout(debounce);
+    debounce = setTimeout(doSearch, 150);
+  });
+  clearBtn.addEventListener('click', function() {
+    input.value = '';
+    doSearch();
+    input.focus();
+  });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { input.value = ''; doSearch(); }
+  });
+
+  function doSearch() {
+    var q = input.value.trim();
+    searchBox.classList.toggle('has-query', q.length > 0);
+    clearHighlights();
+
+    if (!q) {
+      preamble.forEach(function(el) { el.style.display = ''; });
+      sectionData.forEach(function(s) {
+        s.elements.forEach(function(el) { el.style.display = ''; });
+      });
+      sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) { a.style.display = ''; });
+      sidebar.querySelectorAll('.sidebar-group-label').forEach(function(g) { g.style.display = ''; });
+      noResults.style.display = 'none';
+      return;
+    }
+
+    preamble.forEach(function(el) { el.style.display = 'none'; });
+
+    var escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var regex = new RegExp(escaped, 'gi');
+    var visibleIds = new Set();
+
+    sectionData.forEach(function(s) {
+      var text = s.elements.map(function(el) { return el.textContent; }).join(' ');
+      var sectionMatch = regex.test(text);
+      regex.lastIndex = 0;
+      if (!sectionMatch) {
+        s.elements.forEach(function(el) { el.style.display = 'none'; });
+        return;
+      }
+      visibleIds.add(s.id);
+
+      /* Within a matching h2 section, filter at h3 granularity */
+      var h3groups = [];
+      var currentGroup = { heading: null, els: [] };
+      s.elements.forEach(function(el) {
+        if (el.tagName === 'H3' && el.id) {
+          if (currentGroup.els.length) h3groups.push(currentGroup);
+          currentGroup = { heading: el, els: [el] };
+        } else {
+          currentGroup.els.push(el);
+        }
+      });
+      if (currentGroup.els.length) h3groups.push(currentGroup);
+
+      /* If there are h3 subgroups, filter them individually */
+      if (h3groups.length > 1 || (h3groups.length === 1 && h3groups[0].heading)) {
+        h3groups.forEach(function(g) {
+          var gText = g.els.map(function(el) { return el.textContent; }).join(' ');
+          var gMatch = regex.test(gText);
+          regex.lastIndex = 0;
+          /* Always show the h2 heading itself (first group without a h3 heading) */
+          if (!g.heading) {
+            g.els.forEach(function(el) { el.style.display = ''; });
+          } else {
+            g.els.forEach(function(el) { el.style.display = gMatch ? '' : 'none'; });
+          }
+          if (gMatch) {
+            g.els.forEach(function(el) { highlightIn(el, new RegExp(escaped, 'gi')); });
+          }
+        });
+      } else {
+        s.elements.forEach(function(el) { el.style.display = ''; });
+        s.elements.forEach(function(el) { highlightIn(el, new RegExp(escaped, 'gi')); });
+      }
+    });
+
+    /* Filter sidebar: show links whose target section is visible */
+    sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) {
+      var href = a.getAttribute('href').slice(1);
+      a.style.display = visibleIds.has(href) ? '' : 'none';
+    });
+    /* For sub-links (h3 targets), only show if the h3's own content matches the query */
+    sidebar.querySelectorAll('a.sub[href^="#"]').forEach(function(a) {
+      if (a.style.display !== 'none') return; /* already visible as h2 match */
+      var href = a.getAttribute('href').slice(1);
+      var h3 = document.getElementById(href);
+      if (!h3) return;
+      /* Gather text from this h3 until the next h3 or h2 */
+      var text = h3.textContent;
+      var sib = h3.nextElementSibling;
+      while (sib && sib.tagName !== 'H3' && sib.tagName !== 'H2') {
+        text += ' ' + sib.textContent;
+        sib = sib.nextElementSibling;
+      }
+      if (regex.test(text)) {
+        a.style.display = '';
+        regex.lastIndex = 0;
+      }
+    });
+    /* Also show the parent h2 link if any of its sub-links are visible */
+    sidebar.querySelectorAll('a[href^="#"]:not(.sub)').forEach(function(a) {
+      if (a.style.display !== 'none') return;
+      var next = a.nextElementSibling;
+      while (next && next.classList.contains('sub')) {
+        if (next.style.display !== 'none') { a.style.display = ''; return; }
+        next = next.nextElementSibling;
+      }
+    });
+    /* Show sidebar group labels if any link below them is visible */
+    sidebar.querySelectorAll('.sidebar-group-label').forEach(function(g) {
+      var next = g.nextElementSibling;
+      var anyVisible = false;
+      while (next && !next.classList.contains('sidebar-group-label')) {
+        if (next.tagName === 'A' && next.style.display !== 'none') anyVisible = true;
+        next = next.nextElementSibling;
+      }
+      g.style.display = anyVisible ? '' : 'none';
+    });
+
+    noResults.style.display = visibleIds.size === 0 ? 'block' : 'none';
+  }
+
+  /* Ctrl/Cmd+K shortcut */
+  document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      input.focus();
+      input.select();
+    }
+  });
+})();
 </script>
 
 </body>

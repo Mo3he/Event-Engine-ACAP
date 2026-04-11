@@ -95,7 +95,7 @@ function buildRuleForm(rule) {
       </div>
     </div>
     <div id="trigger-list"></div>
-    <button class="add-btn" onclick="addTriggerRow()">+ Add Trigger</button>
+    <button class="add-btn add-trigger" onclick="addTriggerRow()">+ Add Trigger</button>
 
     <!-- Conditions -->
     <div class="section-header">
@@ -107,14 +107,14 @@ function buildRuleForm(rule) {
       </div>
     </div>
     <div id="condition-list"></div>
-    <button class="add-btn" onclick="addConditionRow()">+ Add Condition</button>
+    <button class="add-btn add-condition" onclick="addConditionRow()">+ Add Condition</button>
 
     <!-- Actions -->
     <div class="section-header">
       <span class="section-title">Actions (THEN)</span>
     </div>
     <div id="action-list"></div>
-    <button class="add-btn" onclick="addActionRow()">+ Add Action</button>
+    <button class="add-btn add-action" onclick="addActionRow()">+ Add Action</button>
 
     <div class="form-row">
       <div class="form-group">

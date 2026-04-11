@@ -205,11 +205,55 @@
     .summary-table td { border: 1px solid var(--border); padding: 8px 10px; vertical-align: top; }
     .summary-table tr:nth-child(even) td { background: var(--surface2); }
 
+    /* Search */
+    .search-box {
+      display: flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0 8px;
+      gap: 6px;
+      transition: border-color .15s;
+    }
+    .search-box:focus-within { border-color: var(--accent); }
+    .search-box svg { flex-shrink: 0; color: var(--text-dim); }
+    .search-box input {
+      border: none;
+      background: none;
+      color: var(--text);
+      font-size: 13px;
+      padding: 5px 0;
+      width: 100%;
+      outline: none;
+    }
+    .search-box input::placeholder { color: var(--text-dim); }
+    .search-clear {
+      background: none; border: none; cursor: pointer; color: var(--text-dim);
+      font-size: 16px; padding: 0 2px; display: none; line-height: 1;
+    }
+    .search-clear:hover { color: var(--text); }
+    .search-box.has-query .search-clear { display: block; }
+    mark.search-hl {
+      background: rgba(0,113,197,.2);
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+    .search-no-results {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+      font-size: 14px;
+      display: none;
+    }
+
     /* Responsive */
     @media (max-width: 800px) {
       .sidebar { display: none; }
       .main { padding: 20px 16px 60px; }
       .page { display: block; }
+      .search-box { display: none; }
     }
   </style>
 </head>
@@ -230,6 +274,11 @@
 
 <div class="page">
   <nav class="sidebar" id="sidebar">
+    <div class="search-box" id="search-box" style="margin:12px 12px 8px;">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="search-input" placeholder="Search use cases…" autocomplete="off">
+      <button class="search-clear" id="search-clear" title="Clear">×</button>
+    </div>
     <div class="sidebar-group">Categories</div>
     <a href="#uc1">1 — Notifications &amp; Data</a>
     <a href="#uc1-1" class="sub">1.1 Sensor Data Transmission</a>
@@ -1295,6 +1344,122 @@ function downloadTemplate(name) {
       alert('Download failed: ' + err.message + '\n\nYou can download templates directly from the GitHub repository.');
     });
 }
+
+/* ── Search ── */
+(function() {
+  var input = document.getElementById('search-input');
+  var clearBtn = document.getElementById('search-clear');
+  var searchBox = document.getElementById('search-box');
+  var main = document.querySelector('.main');
+  var sidebar = document.getElementById('sidebar');
+  var hero = main.querySelector('.hero');
+  var sectionHeaders = Array.from(main.querySelectorAll('.section-header'));
+  var cards = Array.from(main.querySelectorAll('.uc-card'));
+  var noResults = document.createElement('div');
+  noResults.className = 'search-no-results';
+  noResults.textContent = 'No matching use cases.';
+  main.appendChild(noResults);
+
+  function clearHighlights() {
+    main.querySelectorAll('mark.search-hl').forEach(function(m) {
+      var parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+  }
+
+  function highlightText(node, regex) {
+    if (node.nodeType === 3) {
+      var match = regex.exec(node.textContent);
+      if (match) {
+        var span = document.createElement('mark');
+        span.className = 'search-hl';
+        var after = node.splitText(match.index);
+        after.splitText(match[0].length);
+        span.appendChild(after.cloneNode(true));
+        after.parentNode.replaceChild(span, after);
+        return 1;
+      }
+    } else if (node.nodeType === 1 && node.tagName !== 'SCRIPT' && node.tagName !== 'STYLE' && node.tagName !== 'MARK') {
+      for (var i = 0; i < node.childNodes.length; i++) {
+        i += highlightText(node.childNodes[i], regex);
+      }
+    }
+    return 0;
+  }
+
+  var debounce;
+  input.addEventListener('input', function() {
+    clearTimeout(debounce);
+    debounce = setTimeout(doSearch, 200);
+  });
+  clearBtn.addEventListener('click', function() {
+    input.value = '';
+    doSearch();
+    input.focus();
+  });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { input.value = ''; doSearch(); }
+  });
+
+  function doSearch() {
+    var q = input.value.trim();
+    searchBox.classList.toggle('has-query', q.length > 0);
+    clearHighlights();
+
+    if (!q) {
+      if (hero) hero.style.display = '';
+      sectionHeaders.forEach(function(sh) { sh.style.display = ''; });
+      cards.forEach(function(c) { c.style.display = ''; });
+      sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) { a.style.display = ''; });
+      noResults.style.display = 'none';
+      return;
+    }
+
+    if (hero) hero.style.display = 'none';
+    var escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var regex = new RegExp(escaped, 'gi');
+    var visibleCardIds = new Set();
+
+    cards.forEach(function(card) {
+      var match = regex.test(card.textContent);
+      card.style.display = match ? '' : 'none';
+      if (match) {
+        visibleCardIds.add(card.id);
+        highlightText(card, new RegExp(escaped, 'gi'));
+      }
+    });
+
+    /* Show/hide section headers based on whether any of their cards are visible */
+    sectionHeaders.forEach(function(sh) {
+      var next = sh.nextElementSibling;
+      var hasVisible = false;
+      while (next && !next.classList.contains('section-header')) {
+        if (next.classList.contains('uc-card') && next.style.display !== 'none') hasVisible = true;
+        next = next.nextElementSibling;
+      }
+      sh.style.display = hasVisible ? '' : 'none';
+    });
+
+    /* Filter sidebar links */
+    sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) {
+      var href = a.getAttribute('href').slice(1);
+      var el = document.getElementById(href);
+      a.style.display = (el && el.style.display !== 'none') ? '' : 'none';
+    });
+
+    noResults.style.display = visibleCardIds.size === 0 ? 'block' : 'none';
+  }
+
+  /* Ctrl/Cmd+K shortcut */
+  document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      input.focus();
+      input.select();
+    }
+  });
+})();
 </script>
 </body>
 </html>

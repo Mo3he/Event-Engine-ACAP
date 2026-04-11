@@ -1063,7 +1063,7 @@ function renderRules() {
     return;
   }
 
-  list.innerHTML = visibleRules.map(r => {
+  list.innerHTML = visibleRules.map((r, idx) => {
     const isManualOnly = (r.trigger_types||[]).length > 0 && (r.trigger_types||[]).every(t => t === 'manual');
     const fireBtn = isManualOnly
       ? `<button class="btn btn-primary btn-sm" onclick="testRule('${r.id}')" title="Fire rule now"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg> Fire</button>`
@@ -1071,8 +1071,14 @@ function renderRules() {
     const tag = getRuleTag(r.id);
     const hasError = !!ruleErrorMap[r.id];
     const isSelected = bulkSelected.has(r.id);
+    const isFirst = idx === 0;
+    const isLast = idx === visibleRules.length - 1;
     return `
-    <div class="rule-card ${r.enabled ? '' : 'disabled'} ${isSelected ? 'bulk-selected' : ''}" id="rule-card-${r.id}" draggable="true" ondragstart="ruleDragStart(event,'${r.id}')" ondragover="ruleDragOver(event)" ondrop="ruleDrop(event,'${r.id}')">
+    <div class="rule-card ${r.enabled ? '' : 'disabled'} ${isSelected ? 'bulk-selected' : ''}" id="rule-card-${r.id}">
+      <div class="reorder-arrows">
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveRuleUp('${r.id}')" title="Move up" ${isFirst ? 'disabled' : ''}>↑</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveRuleDown('${r.id}')" title="Move down" ${isLast ? 'disabled' : ''}>↓</button>
+      </div>
       <input type="checkbox" class="bulk-cb" ${isSelected ? 'checked' : ''} onchange="bulkToggle('${r.id}', this.checked)" onclick="event.stopPropagation()" title="Select for bulk action">
       <label class="toggle" title="${r.enabled ? 'Disable' : 'Enable'} rule">
         <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule('${r.id}', this.checked)">
@@ -1120,7 +1126,16 @@ function updateBulkBar() {
   const bar = document.getElementById('bulk-bar');
   const cnt = document.getElementById('bulk-count');
   if (!bar) return;
-  bar.style.display = bulkSelected.size > 0 ? 'flex' : 'none';
+  const shouldShow = bulkSelected.size > 0;
+  const isShown = bar.style.display === 'flex';
+  if (shouldShow && !isShown) {
+    bar.style.display = 'flex';
+    bar.style.animation = 'none';
+    bar.offsetHeight; /* force reflow */
+    bar.style.animation = '';
+  } else if (!shouldShow) {
+    bar.style.display = 'none';
+  }
   if (cnt) cnt.textContent = bulkSelected.size + ' selected';
 }
 
@@ -1153,34 +1168,23 @@ async function bulkDelete() {
 }
 
 /* ===================================================
- * Drag & Drop Reorder
+ * Rule Reorder (Up / Down Arrows)
  * =================================================== */
-let _dragRuleId = null;
 
-function ruleDragStart(e, id) {
-  _dragRuleId = id;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData('text/plain', id);
-  e.currentTarget.style.opacity = '0.5';
-  setTimeout(() => { if (e.currentTarget) e.currentTarget.style.opacity = ''; }, 200);
-}
-
-function ruleDragOver(e) {
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-}
-
-function ruleDrop(e, targetId) {
-  e.preventDefault();
-  if (!_dragRuleId || _dragRuleId === targetId) return;
-  const fromIdx = allRules.findIndex(r => r.id === _dragRuleId);
-  const toIdx = allRules.findIndex(r => r.id === targetId);
-  if (fromIdx < 0 || toIdx < 0) return;
-  const [moved] = allRules.splice(fromIdx, 1);
-  allRules.splice(toIdx, 0, moved);
+function moveRuleUp(id) {
+  const idx = allRules.findIndex(r => r.id === id);
+  if (idx <= 0) return;
+  [allRules[idx - 1], allRules[idx]] = [allRules[idx], allRules[idx - 1]];
   setRuleSortOrder(allRules.map(r => r.id));
   renderRules();
-  _dragRuleId = null;
+}
+
+function moveRuleDown(id) {
+  const idx = allRules.findIndex(r => r.id === id);
+  if (idx < 0 || idx >= allRules.length - 1) return;
+  [allRules[idx], allRules[idx + 1]] = [allRules[idx + 1], allRules[idx]];
+  setRuleSortOrder(allRules.map(r => r.id));
+  renderRules();
 }
 
 async function toggleRule(id, enabled) {
