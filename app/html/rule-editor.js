@@ -44,6 +44,15 @@ function closeModal() {
 
 function buildRuleForm(rule) {
   return `
+    <div style="margin-bottom:12px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <span style="font-size:13px;">Enabled</span>
+        <label class="toggle">
+          <input type="checkbox" id="f-enabled" ${(!rule || rule.enabled !== false) ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+    </div>
     <div class="form-row">
       <div class="form-group" style="flex:2">
         <label>Rule Name</label>
@@ -53,12 +62,6 @@ function buildRuleForm(rule) {
         <label>Tag <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
         <input id="f-tag" type="text" value="${rule && rule.tag ? escHtml(rule.tag) : ''}" placeholder="e.g. Security" list="tag-datalist">
         <datalist id="tag-datalist">${getAllTags().map(t => `<option value="${escHtml(t)}">`).join('')}</datalist>
-      </div>
-      <div class="form-group" style="flex:0 0 auto; justify-content:flex-end; padding-top:18px;">
-        <label class="toggle" style="align-self:center">
-          <input type="checkbox" id="f-enabled" ${(!rule || rule.enabled !== false) ? 'checked' : ''}>
-          <span class="toggle-slider"></span>
-        </label>
       </div>
     </div>
 
