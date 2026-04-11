@@ -950,7 +950,7 @@
   <div class="hero-content">
     <div class="hero-badge">
       <span class="hero-badge-dot"></span>
-      v1.9.3 - Paging Console + 42 Use-Case Templates
+      <span id="hero-version">v1.9.3</span>
     </div>
     <h1><span class="gradient">Automate your</span><br>Axis <span class="hero-word" id="heroWord">camera</span></h1>
     <p class="hero-sub">
@@ -958,11 +958,11 @@
       Triggers, conditions, actions.<br>No server or cloud required.
     </p>
     <div class="hero-actions">
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_aarch64.eap" class="btn btn-primary">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download aarch64
       </a>
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_armv7hf.eap" class="btn btn-primary">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download armv7hf
       </a>
@@ -1264,11 +1264,11 @@
       No licenses. No subscriptions. Free forever.
     </p>
     <div class="cta-buttons">
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_aarch64.eap" class="btn btn-primary">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download aarch64
       </a>
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_armv7hf.eap" class="btn btn-primary">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_3_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download armv7hf
       </a>
@@ -1411,6 +1411,25 @@ toggle.addEventListener('click', () => {
   const current = document.documentElement.getAttribute('data-theme');
   setTheme(current === 'light' ? 'dark' : 'light');
 });
+
+/* Fetch latest release from GitHub and update version badge + download links */
+(async () => {
+  try {
+    const r = await fetch('https://api.github.com/repos/Mo3he/Event-Engine-ACAP/releases/latest');
+    if (!r.ok) return;
+    const d = await r.json();
+    const tag = d.tag_name || '';
+    const ver = tag.replace(/^v/, '');
+    if (!ver) return;
+    const badge = document.getElementById('hero-version');
+    if (badge) badge.textContent = tag;
+    const underscored = ver.replace(/\./g, '_');
+    document.querySelectorAll('a.eap-link').forEach(a => {
+      const arch = a.dataset.arch;
+      if (arch) a.href = `https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_${underscored}_${arch}.eap`;
+    });
+  } catch (_) { /* offline — keep hardcoded fallback */ }
+})();
 </script>
 
 </body>
