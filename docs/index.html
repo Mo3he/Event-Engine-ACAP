@@ -317,6 +317,30 @@
       color: var(--accent);
       transition: opacity 0.3s, transform 0.3s;
     }
+    .scroll-hint {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      animation: scrollBounce 2s ease-in-out infinite;
+      z-index: 10000;
+    }
+    .scroll-hint svg {
+      width: 36px;
+      height: 36px;
+    }
+    @keyframes scrollBounce {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(8px); }
+    }
     [data-theme="light"] .hero h1 .gradient {
       background: linear-gradient(135deg, #1a1d23 0%, #3a3f4a 100%);
       -webkit-background-clip: text;
@@ -968,6 +992,10 @@
   </div>
 </section>
 
+<div class="scroll-hint" id="scrollHint">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"/><polyline points="7 6 12 11 17 6"/></svg>
+</div>
+
 <!-- Stats -->
 <section class="stats reveal">
   <div class="stats-inner">
@@ -1275,6 +1303,14 @@ const observer = new IntersectionObserver((entries) => {
 }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
 
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Hide scroll hint on scroll
+const scrollHint = document.getElementById('scrollHint');
+window.addEventListener('scroll', () => {
+  if (window.scrollY > 100) scrollHint.style.opacity = '0';
+  else scrollHint.style.opacity = '';
+}, { passive: true });
+scrollHint.style.transition = 'opacity 0.4s';
 
 // Cycle hero rule examples
 const examples = [
