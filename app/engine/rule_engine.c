@@ -543,6 +543,20 @@ int RuleEngine_Delete(const char* id) {
     return 0;
 }
 
+int RuleEngine_IsEnabled(const char* id) {
+    if (!id) return 0;
+    pthread_mutex_lock(&store_lock);
+    for (int i = 0; i < rule_count; i++) {
+        if (strcmp(rules[i].id, id) == 0) {
+            int en = rules[i].enabled;
+            pthread_mutex_unlock(&store_lock);
+            return en;
+        }
+    }
+    pthread_mutex_unlock(&store_lock);
+    return 0;
+}
+
 int RuleEngine_SetEnabled(const char* id, int enabled) {
     if (!id) return 0;
     pthread_mutex_lock(&store_lock);

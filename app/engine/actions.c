@@ -2248,7 +2248,12 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
 /* run_rule — forward to rule engine */
 static void action_run_rule(cJSON* cfg) {
     const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
-    if (rid) RuleEngine_Fire(rid, NULL);  /* directly execute the target rule's actions */
+    if (!rid) return;
+    if (!RuleEngine_IsEnabled(rid)) {
+        LOG("run_rule: skipping disabled rule %s", rid);
+        return;
+    }
+    RuleEngine_Fire(rid, NULL);
 }
 
 /* set_rule_enabled — enable or disable another rule by ID */
