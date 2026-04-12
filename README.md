@@ -32,6 +32,58 @@ Rules are built in a clean web UI and take effect immediately — no camera rest
 <img width="397" height="591" alt="Screenshot 2026-03-21 at 06 14 23" src="https://github.com/user-attachments/assets/eacb1931-904c-409a-a9c2-2649cf5255d1" />
 <img width="410" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/a01a9021-0cda-4d38-bd5a-27a52ec13a61" />
 
+---
+
+## Requirements
+
+- Axis camera running **AXIS OS 11.8 or later**
+- [Docker](https://www.docker.com/) — only needed if building from source
+
+### Firmware Compatibility
+
+| Feature | Minimum AXIS OS |
+|---------|----------------|
+| Core rule engine, all triggers/actions | 11.0 |
+| `reverseProxy` manifest (alertStream) | 11.8 |
+| Tested LTS release | **11.11** (recommended) |
+
+---
+
+## Install
+
+Download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface:
+
+1. Go to `http://<camera-ip>/#settings/apps`
+2. Click **Add app** and upload the `.eap` for your camera's architecture:
+
+   - `aarch64` — newer Axis cameras (ARTPEC-8, most cameras from 2020+)
+   - `armv7hf` — older Axis cameras (ARTPEC-6/7)
+3. Start the app
+
+If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
+
+---
+
+## Build From Source
+
+```bash
+./build.sh            # builds both aarch64 and armv7hf
+./build.sh aarch64    # build only aarch64
+./build.sh armv7hf    # build only armv7hf
+```
+
+Requires Docker. The build pulls `axisecp/acap-native-sdk:12.0.0` automatically and produces `.eap` files.
+
+---
+
+## Web UI
+
+Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
+
+- **Rules** — create, edit, duplicate, enable/disable, delete, import/export, and tag rules
+- **Event Log** — per-rule firing history with timestamps and result codes
+- **Variables** — view and manage named variables and counters
+- **Settings** — location (used for sunrise/sunset), SMTP configuration, MQTT broker configuration, SOCKS5 proxy, device info, and backup/restore
 
 ---
 
@@ -61,36 +113,6 @@ Rules are built in a clean web UI and take effect immediately — no camera rest
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
 | **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count. Supports **remote device** target; use Load to fetch available scenarios from the remote device |
 | **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?). Supports **remote device** target; use Load to fetch the full event catalog from the remote device |
-
-## Cross-Device Automation
-
-Conditions and actions marked **remote device** can target any reachable Axis device on the network instead of the local camera. Supply an IP/hostname, username, and password in the condition or action block. This enables rules that detect on one device, verify state on a second, and act on a third — no server or middleware required.
-
-| Conditions | |
-|-----------|---|
-| I/O State | Yes |
-| AOA Occupancy | Yes — Load button fetches scenarios from remote |
-| Device Event State | Yes — Load button fetches event catalog from remote |
-
-| Actions | |
-|---------|---|
-| Recording | Yes |
-| Overlay Text | Yes |
-| PTZ Preset | Yes |
-| Guard Tour | Yes |
-| IR Cut Filter | Yes |
-| Privacy Mask | Yes |
-| Wiper | Yes |
-| Light Control | Yes |
-| Audio Clip | Yes |
-| Siren / Light | Yes |
-| Speaker Display | Yes |
-| I/O Output | Yes |
-| Paging Console Execute | Yes |
-| Paging Console Button | Yes |
-| Device Event Query | Yes |
-| Set Device Parameter | Yes |
-| ACAP Control | Yes |
 
 ---
 
@@ -175,6 +197,38 @@ Actions are grouped by category in the rule editor. Actions that support **while
 
 ---
 
+## Cross-Device Automation
+
+Conditions and actions marked **remote device** can target any reachable Axis device on the network instead of the local camera. Supply an IP/hostname, username, and password in the condition or action block. This enables rules that detect on one device, verify state on a second, and act on a third — no server or middleware required.
+
+| Conditions | |
+|-----------|---|
+| I/O State | Yes |
+| AOA Occupancy | Yes — Load button fetches scenarios from remote |
+| Device Event State | Yes — Load button fetches event catalog from remote |
+
+| Actions | |
+|---------|---|
+| Recording | Yes |
+| Overlay Text | Yes |
+| PTZ Preset | Yes |
+| Guard Tour | Yes |
+| IR Cut Filter | Yes |
+| Privacy Mask | Yes |
+| Wiper | Yes |
+| Light Control | Yes |
+| Audio Clip | Yes |
+| Siren / Light | Yes |
+| Speaker Display | Yes |
+| I/O Output | Yes |
+| Paging Console Execute | Yes |
+| Paging Console Button | Yes |
+| Device Event Query | Yes |
+| Set Device Parameter | Yes |
+| ACAP Control | Yes |
+
+---
+
 ## Rule Settings
 
 Each rule has two optional execution controls:
@@ -237,17 +291,6 @@ Configure broker, port, credentials, client ID, and TLS/proxy settings in the **
 
 ---
 
-## Web UI
-
-Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
-
-- **Rules** — create, edit, duplicate, enable/disable, delete, import/export, and tag rules
-- **Event Log** — per-rule firing history with timestamps and result codes
-- **Variables** — view and manage named variables and counters
-- **Settings** — location (used for sunrise/sunset), SMTP configuration, MQTT broker configuration, SOCKS5 proxy, device info, and backup/restore
-
----
-
 ## Use Case Templates
 
 The [`use-cases/`](use-cases/) directory contains 50 ready-to-import JSON rule templates across 7 categories:
@@ -262,48 +305,6 @@ The [`use-cases/`](use-cases/) directory contains 50 ready-to-import JSON rule t
 Import a template: open the web UI → Rules tab → Import, or POST the JSON to `/local/acap_event_engine/rules?action=import`.
 
 See [`use-cases/USE_CASES.md`](use-cases/USE_CASES.md) for full descriptions and setup instructions.
-
----
-
-## Requirements
-
-- Axis camera running **AXIS OS 11.8 or later**
-- [Docker](https://www.docker.com/) — only needed if building from source
-
-### Firmware Compatibility
-
-| Feature | Minimum AXIS OS |
-|---------|----------------|
-| Core rule engine, all triggers/actions | 11.0 |
-| `reverseProxy` manifest (alertStream) | 11.8 |
-| Tested LTS release | **11.11** (recommended) |
-
----
-
-## Install
-
-Download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface:
-
-1. Go to `http://<camera-ip>/#settings/apps`
-2. Click **Add app** and upload the `.eap` for your camera's architecture:
-
-   - `aarch64` — newer Axis cameras (ARTPEC-8, most cameras from 2020+)
-   - `armv7hf` — older Axis cameras (ARTPEC-6/7)
-3. Start the app
-
-If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
-
----
-
-## Build From Source
-
-```bash
-./build.sh            # builds both aarch64 and armv7hf
-./build.sh aarch64    # build only aarch64
-./build.sh armv7hf    # build only armv7hf
-```
-
-Requires Docker. The build pulls `axisecp/acap-native-sdk:12.0.0` automatically and produces `.eap` files.
 
 ---
 
