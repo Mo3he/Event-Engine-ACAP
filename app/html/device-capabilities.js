@@ -592,7 +592,9 @@ function findCatalogMatch(t) {
   /* Exact match first */
   let idx = vapixEventCatalog.findIndex(ev => keys.every(k => cmp(ev.topics[k], getTopic(k))));
   if (idx >= 0) return idx;
-  /* Prefix match: trigger has fewer topic levels than catalog entry */
+  /* Prefix match: trigger has fewer topic levels than catalog entry.
+   * Require at least one topic to be set — otherwise a blank trigger matches everything. */
+  if (!keys.some(k => getTopic(k))) return -1;
   return vapixEventCatalog.findIndex(ev =>
     keys.every(k => !getTopic(k) || cmp(ev.topics[k], getTopic(k)))
   );

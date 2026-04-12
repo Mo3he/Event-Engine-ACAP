@@ -153,6 +153,24 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
 
     if (!validate_rule_steps("triggers", cJSON_GetObjectItem(rule_json, "triggers"), trigger_types, 1, error, error_size))
         return 0;
+
+    /* vapix_event and io_input triggers must have topic0 for a valid subscription */
+    {
+        cJSON* triggers = cJSON_GetObjectItem(rule_json, "triggers");
+        int tidx = 0;
+        cJSON* t;
+        cJSON_ArrayForEach(t, triggers) {
+            const char* ttype = cJSON_GetStringValue(cJSON_GetObjectItem(t, "type"));
+            if (ttype && (strcmp(ttype, "vapix_event") == 0 || strcmp(ttype, "io_input") == 0)) {
+                if (!cJSON_GetObjectItem(t, "topic0")) {
+                    snprintf(error, error_size, "trigger %d (%s) is missing topic0 — select a device event", tidx + 1, ttype);
+                    return 0;
+                }
+            }
+            tidx++;
+        }
+    }
+
     if (!validate_rule_steps("conditions", cJSON_GetObjectItem(rule_json, "conditions"), condition_types, 0, error, error_size))
         return 0;
     if (!validate_rule_steps("actions", cJSON_GetObjectItem(rule_json, "actions"), action_types, 1, error, error_size))

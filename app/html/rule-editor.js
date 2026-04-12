@@ -335,7 +335,7 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Device Event</label>
         <select onchange="applyVapixEvent(${rowIdx}, this.value)">
-          <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
+          <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
           ${vapixEventCatalog.map((ev, i) =>
             `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
           ).join('')}
@@ -515,11 +515,12 @@ function triggerFields(t, rowIdx) {
     } else if (!aoaScenarios.length) {
       scenarioControl = `<input type="number" data-k="scenario_id" value="${t.scenario_id || 1}" min="1"><div class="form-hint">No scenarios found — enter the scenario number manually (1-based).</div>`;
     } else {
+      const hasVal = t.scenario_id !== undefined;
       const opts = aoaScenarios.map(s => {
-        const sel = (t.scenario_id !== undefined ? parseInt(t.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+        const sel = hasVal && parseInt(t.scenario_id) === s.id ? 'selected' : '';
         return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
       }).join('');
-      scenarioControl = `<select data-k="scenario_id">${opts}</select>`;
+      scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
     }
     return `
     <div class="form-row">
@@ -793,11 +794,12 @@ function conditionFields(c, rowIdx) {
       const cached = host ? remoteCapCache[`${host}:::aoa`] : null;
       const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="aoa" onclick="loadRemoteCondCap('${rowIdx}','aoa')" style="white-space:nowrap;margin-left:6px" title="Fetch scenarios from the remote device">Load</button>`;
       if (cached && cached.length) {
+        const hasVal = c.scenario_id !== undefined;
         const opts = cached.map(s => {
-          const sel = (c.scenario_id !== undefined ? parseInt(c.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+          const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
           return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
         }).join('');
-        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id">${opts}</select>${loadBtn}</div>`;
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>${loadBtn}</div>`;
       } else {
         scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1" style="flex:1">${loadBtn}</div>`;
       }
@@ -806,11 +808,12 @@ function conditionFields(c, rowIdx) {
     } else if (!aoaScenarios.length) {
       scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1">`;
     } else {
+      const hasVal = c.scenario_id !== undefined;
       const opts = aoaScenarios.map(s => {
-        const sel = (c.scenario_id !== undefined ? parseInt(c.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+        const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
         return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
       }).join('');
-      scenarioControl = `<select data-k="scenario_id">${opts}</select>`;
+      scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
     }
     return `
     <div class="form-row">
@@ -890,7 +893,7 @@ function conditionFields(c, rowIdx) {
       const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="vapix_events" onclick="loadRemoteCondCap('${rowIdx}','vapix_events')" style="white-space:nowrap;margin-left:6px" title="Fetch event instances from the remote device">Load</button>`;
       if (cachedEvents && cachedEvents.length) {
         const topicOpts = cachedEvents.map(ev => {
-          const sel = c.event_key && ev.topic && ev.topic.includes(c.event_key) ? 'selected' : '';
+          const sel = c.event_key && ev.topic && ev.topic === c.event_key ? 'selected' : '';
           return `<option value="${escHtml(ev.topic)}" ${sel}>${escHtml(ev.topic)}</option>`;
         }).join('');
         topicSection = `
@@ -905,13 +908,13 @@ function conditionFields(c, rowIdx) {
             <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
           </div>
         </div>`;
-        const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic.includes(c.event_key));
+        const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic === c.event_key);
         dataKeys = matchedEv && matchedEv.dataKeys ? matchedEv.dataKeys : [];
         /* Get types from the full catalog if available */
         if (fullCatalog && matchedEv) {
           const catEv = fullCatalog.find(ev => {
             const p = vapixCatalogTopicPath(ev);
-            return p && matchedEv.topic && p.includes(c.event_key);
+            return p && c.event_key && p === c.event_key;
           });
           if (catEv) dataTypes = catEv.dataTypes || {};
         }
@@ -931,12 +934,12 @@ function conditionFields(c, rowIdx) {
       const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
         ? vapixEventCatalog.map((ev, i) => {
             const path = vapixCatalogTopicPath(ev);
-            const sel = c.event_key && path && path.includes(c.event_key) ? 'selected' : '';
+            const sel = c.event_key && path && path === c.event_key ? 'selected' : '';
             return `<option value="${i}" ${sel}>${escHtml(ev.label)}</option>`;
           }).join('')
         : '';
       const matchIdx = vapixEventCatalog
-        ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p.includes(c.event_key); })
+        ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p === c.event_key; })
         : -1;
       if (matchIdx >= 0) {
         dataKeys = vapixEventCatalog[matchIdx].dataKeys || [];
@@ -1821,7 +1824,7 @@ function actionFields(a, rowIdx) {
         const matchIdx = cached.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], a[k])));
         eventDropdown = `
         <select onchange="applyRemoteVapixEventAction(this, '${escHtml(host)}')">
-          <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
+          <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
           ${cached.map((ev, i) =>
             `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
           ).join('')}
@@ -1839,7 +1842,7 @@ function actionFields(a, rowIdx) {
         : -1;
       eventDropdown = `
         <select onchange="applyVapixEventAction(this)">
-          <option value="-1" ${matchIdx < 0 ? 'selected':''}>— Choose an event —</option>
+          <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
           ${(vapixEventCatalog || []).map((ev, i) =>
             `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
           ).join('')}
@@ -1856,8 +1859,8 @@ function actionFields(a, rowIdx) {
   }
   if (type === 'fire_vapix_event') {
     const events = Array.isArray(acapEvents) ? acapEvents : [];
-    const selId = a.event_id || (events.length > 0 ? events[0].id : '');
-    const selEvent = events.find(e => e.id === selId) || null;
+    const selId = a.event_id || '';
+    const selEvent = selId ? events.find(e => e.id === selId) || null : null;
     const isStateful = selEvent ? !!selEvent.state : false;
     const isAdding = a._adding === 'true';
     return `
@@ -1866,7 +1869,7 @@ function actionFields(a, rowIdx) {
         <label>Event</label>
         <div style="display:flex;gap:6px;align-items:center;">
           <select data-k="event_id" onchange="rerenderAction(this)" style="flex:1;">
-            ${events.length === 0 ? '<option value="">— No events declared —</option>' : ''}
+            ${events.length === 0 ? '<option value="">— No events declared —</option>' : `<option value="" disabled ${selId ? '' : 'selected'}>— Select an event —</option>`}
             ${events.map(e => `<option value="${escHtml(e.id)}" ${e.id === selId ? 'selected' : ''}>${escHtml(e.name || e.id)}${e.state ? ' (stateful)' : ''}</option>`).join('')}
           </select>
           <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventStartAdd(this)" title="Create a new custom ACAP event">＋ New</button>
@@ -2508,11 +2511,12 @@ function actionFields(a, rowIdx) {
     } else if (!aoaScenarios.length) {
       scenarioControl = `<input type="number" data-k="scenario_id" value="${a.scenario_id || 1}" min="1">`;
     } else {
+      const hasVal = a.scenario_id !== undefined;
       const opts = aoaScenarios.map(s => {
-        const sel = (a.scenario_id !== undefined ? parseInt(a.scenario_id) === s.id : s.id === 1) ? 'selected' : '';
+        const sel = hasVal && parseInt(a.scenario_id) === s.id ? 'selected' : '';
         return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
       }).join('');
-      scenarioControl = `<select data-k="scenario_id">${opts}</select>`;
+      scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
     }
     return `
     <div class="form-row">
@@ -2805,11 +2809,13 @@ function collectRows(rows, prefix) {
 function normalizeTrigger(t) {
   const out = { type: t.type };
   if (t.type === 'vapix_event' || t.type === 'io_input') {
-    /* namespace (ns) can legitimately be empty string — only skip if value is absent */
-    if (t.topic0_val) out.topic0 = { [t.topic0_ns || '']: t.topic0_val };
-    if (t.topic1_val) out.topic1 = { [t.topic1_ns || '']: t.topic1_val };
-    if (t.topic2_val) out.topic2 = { [t.topic2_ns || '']: t.topic2_val };
-    if (t.topic3_val) out.topic3 = { [t.topic3_ns || '']: t.topic3_val };
+    /* Topics may be in flat form (topic0_ns/topic0_val from form inputs) or
+     * object form ({topic0: {ns: val}} from applyVapixEvent / saved JSON).
+     * Handle both so topics are never silently dropped. */
+    ['topic0','topic1','topic2','topic3'].forEach(k => {
+      if (t[`${k}_val`])          out[k] = { [t[`${k}_ns`] || '']: t[`${k}_val`] };
+      else if (t[k] && typeof t[k] === 'object') out[k] = t[k];
+    });
     const condType = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
     if (condType === 'boolean') {
       if (t.filter_key) out.filter_key = t.filter_key;
@@ -3068,6 +3074,15 @@ async function saveRule() {
   if (!name) { toast('Rule name is required', 'error'); return; }
   if (!triggerRows.length) { toast('At least one trigger is required', 'error'); return; }
   if (!actionRows.length) { toast('At least one action is required', 'error'); return; }
+
+  /* Per-trigger required field validation */
+  for (let i = 0; i < triggerRows.length; i++) {
+    const t = triggerRows[i];
+    if ((t.type === 'vapix_event' || t.type === 'io_input') && !t.topic0) {
+      toast(`Trigger ${i + 1}: Please select a device event from the dropdown`, 'error');
+      return;
+    }
+  }
 
   /* Per-action required field validation */
   for (let i = 0; i < actionRows.length; i++) {

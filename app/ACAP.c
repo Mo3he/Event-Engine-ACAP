@@ -1081,7 +1081,7 @@ static char* get_parameter_value(const char* param_name) {
     }
     gchar* value = NULL;
     if (!ax_parameter_get(axparameter, param_name, &value, 0)) {
-        LOG_WARN("%s: Failed to get parameter %s\n", __func__, param_name);
+        LOG_TRACE("%s: Failed to get parameter %s\n", __func__, param_name);
         ax_parameter_free(axparameter);
         return NULL;
     }
@@ -2292,7 +2292,10 @@ char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
     long response_code;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     if (response_code >= 300) {
-        LOG_WARN("%s: Code %ld\n", __func__, response_code);
+        if (response_code == 404)
+            syslog(LOG_INFO, "%s: %s returned 404 (not installed)\n", __func__, endpoint);
+        else
+            LOG_WARN("%s: %s returned HTTP %ld\n", __func__, endpoint, response_code);
         free(response);
         return NULL;
     }
