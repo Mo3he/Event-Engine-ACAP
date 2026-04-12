@@ -30,7 +30,8 @@ Each rule has:
 Rules are built in a clean web UI and take effect immediately — no camera restart required.
 
 <img width="397" height="591" alt="Screenshot 2026-03-21 at 06 14 23" src="https://github.com/user-attachments/assets/eacb1931-904c-409a-a9c2-2649cf5255d1" />
-<img width="406" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/ce711052-7bc4-41ad-9599-721cefb80ab2" />
+<img width="410" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/a01a9021-0cda-4d38-bd5a-27a52ec13a61" />
+
 
 ---
 
