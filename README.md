@@ -286,6 +286,7 @@ All endpoints are under `/local/acap_event_engine/` and require HTTP Basic Auth 
 
 Full spec: `app/html/openapi.json`
 Interactive docs: `http://<camera-ip>/local/acap_event_engine/swagger.html`
+AI automation guide: [`AI_RULE_GUIDE.md`](AI_RULE_GUIDE.md) — complete reference for programmatically creating and uploading rules via the API
 
 ### Alert Stream
 
