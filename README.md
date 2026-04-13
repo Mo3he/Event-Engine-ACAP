@@ -13,7 +13,9 @@ API documentation can be found here: [API Docs](https://petstore.swagger.io/?url
 
 If you find something that doesn't work the way it should, open an [Issue](https://github.com/Mo3he/Event-Engine-ACAP/issues) or if you would like me to add something, start a [Discussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions)
 
-Disclaimer: This is an independent, community-developed ACAP package and is not an official Axis Communications product. It was developed entirely on personal time and is not affiliated with, endorsed by, or supported by Axis Communications AB. Use it at your own risk. For official Axis software and support, visit axis.com 
+### Disclaimer: This is an independent, community-developed ACAP package and is not an official Axis Communications product. It was developed entirely on personal time and is not affiliated with, endorsed by, or supported by Axis Communications AB. Use it at your own risk. For official Axis software and support, visit axis.com 
+
+
 ---
 
 ## What It Does
