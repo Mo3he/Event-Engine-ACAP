@@ -948,10 +948,10 @@
   <div class="hero-glow hero-glow-2"></div>
   <div class="hero-glow hero-glow-3"></div>
   <div class="hero-content">
-    <div class="hero-badge">
+    <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest" target="_blank" rel="noopener" class="hero-badge" id="hero-badge-link">
       <span class="hero-badge-dot"></span>
       <span id="hero-version">v1.9.7 - Fix rule chain control &amp; validation</span>
-    </div>
+    </a>
     <h1><span class="gradient">Automate your</span><br>Axis <span class="hero-word" id="heroWord">camera</span></h1>
     <p class="hero-sub">
       A powerful If-This-Then-That style rule engine that runs directly on the camera.
@@ -1385,7 +1385,7 @@ const iconImgs = document.querySelectorAll('.nav-logo img, .hero-icon');
 
 function setTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  toggle.textContent = theme === 'light' ? '☀️' : '🌙';
+  toggle.textContent = theme === 'light' ? '🌙' : '☀️';
   const iconFile = theme === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
   iconImgs.forEach(img => { img.src = iconFile; });
   try { localStorage.setItem('ee-theme', theme); } catch(e) {}
@@ -1423,6 +1423,8 @@ toggle.addEventListener('click', () => {
     if (!ver) return;
     const badge = document.getElementById('hero-version');
     if (badge) badge.textContent = d.name || tag;
+    const badgeLink = document.getElementById('hero-badge-link');
+    if (badgeLink && d.html_url) badgeLink.href = d.html_url;
     const underscored = ver.replace(/\./g, '_');
     document.querySelectorAll('a.eap-link').forEach(a => {
       const arch = a.dataset.arch;
