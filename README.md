@@ -39,16 +39,8 @@ Rules are built in a clean web UI and take effect immediately — no camera rest
 
 ## Requirements
 
-- Axis camera running **AXIS OS 11.8 or later**
+- Axis camera running **AXIS OS 11.11 or later** (required by the SDK used to build the package)
 - [Docker](https://www.docker.com/) — only needed if building from source
-
-### Firmware Compatibility
-
-| Feature | Minimum AXIS OS |
-|---------|----------------|
-| Core rule engine, all triggers/actions | 11.0 |
-| `reverseProxy` manifest (alertStream) | 11.8 |
-| Tested LTS release | **11.11** (recommended) |
 
 ---
 
