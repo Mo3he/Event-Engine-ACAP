@@ -67,7 +67,7 @@ If you're unsure which architecture your camera uses, check **System → About**
 ./build.sh armv7hf    # build only armv7hf
 ```
 
-Requires Docker. The build pulls `axisecp/acap-native-sdk:12.0.0` automatically and produces `.eap` files.
+Requires Docker. The build pulls `axisecp/acap-native-sdk:1.15.1` automatically and produces `.eap` files.
 
 ---
 
@@ -296,6 +296,7 @@ The [`use-cases/`](use-cases/) directory contains 50 ready-to-import JSON rule t
 4. **Signage & Displays** — queue/ticket display; air quality monitoring on speaker displays; webhook-driven signage
 5. **System Integration** — arm/disarm via MQTT; daily counter reset; MQTT heartbeat; maintenance mode; enable/disable rules via MQTT
 6. **Cross-Device** — multi-device I/O with conditions, speaker display, and paging console orchestration
+7. **Advanced Patterns** — counter-driven escalation; tailgate detection; night-only recording; snapshot FTP with fallback; ACAP watchdog; paging console announcements; VMS event bridge; security audit logger; network-gated alerts; raw snapshot upload; dual-zone AND_ACTIVE logic
 
 Import a template: open the web UI → Rules tab → Import, or POST the JSON to `/local/acap_event_engine/rules?action=import`.
 
