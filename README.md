@@ -196,31 +196,9 @@ Actions are grouped by category in the rule editor. Actions that support **while
 
 Conditions and actions marked **remote device** can target any reachable Axis device on the network instead of the local camera. Supply an IP/hostname, username, and password in the condition or action block. This enables rules that detect on one device, verify state on a second, and act on a third — no server or middleware required.
 
-| Conditions | |
-|-----------|---|
-| I/O State | Yes |
-| AOA Occupancy | Yes — Load button fetches scenarios from remote |
-| Device Event State | Yes — Load button fetches event catalog from remote |
+**Conditions:** I/O State, AOA Occupancy (Load button fetches scenarios from remote), Device Event State (Load button fetches event catalog from remote)
 
-| Actions | |
-|---------|---|
-| Recording | Yes |
-| Overlay Text | Yes |
-| PTZ Preset | Yes |
-| Guard Tour | Yes |
-| IR Cut Filter | Yes |
-| Privacy Mask | Yes |
-| Wiper | Yes |
-| Light Control | Yes |
-| Audio Clip | Yes |
-| Siren / Light | Yes |
-| Speaker Display | Yes |
-| I/O Output | Yes |
-| Paging Console Execute | Yes |
-| Paging Console Button | Yes |
-| Device Event Query | Yes |
-| Set Device Parameter | Yes |
-| ACAP Control | Yes |
+**Actions:** Recording, Overlay Text, PTZ Preset, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, Audio Clip, Siren / Light, Speaker Display, I/O Output, Paging Console Execute, Paging Console Button, Device Event Query, Set Device Parameter, ACAP Control
 
 ---
 
