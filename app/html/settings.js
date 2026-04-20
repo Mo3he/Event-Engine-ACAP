@@ -34,6 +34,7 @@ async function loadStatus() {
     updateMqttStatusBadge(s.mqtt || {});
     updateStreamStatusBadge(s);
     renderDeviceCapabilities();
+    checkSerialPort();
   } catch(e) {
     toast('Failed to load status', 'error');
   }
@@ -385,4 +386,100 @@ async function loadAllSettings() {
     loadSmtpSettings(settings);
     loadMqttSettings(settings);
   } catch(e) { /* non-fatal — individual loaders will show errors as needed */ }
+}
+
+/* ===== Serial Port / RS-485 Setup ===== */
+
+async function vapixParam(params) {
+  const qs = Object.entries(params).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  const r = await fetch(`/axis-cgi/param.cgi?${qs}`, { credentials: 'include' });
+  if (!r.ok) throw new Error(`param.cgi failed: ${r.status}`);
+  return r.text();
+}
+
+async function checkSerialPort() {
+  const card = document.getElementById('serial-setup-card');
+  const dot  = document.getElementById('serial-dot');
+  const text = document.getElementById('serial-status-text');
+  try {
+    const res = await vapixParam({ action: 'list', group: 'PortManager' });
+    if (!res || res.trim() === '' || res.includes('Error')) {
+      /* No PortManager -- hide the card */
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = 'block';
+    /* Check if already configured */
+    const isRS485   = res.includes('PortMode=RS485');
+    const isEnabled = res.includes('GenericTCPServer.Enabled=yes') || res.includes('GenericTCPServer.Listener.Enabled=yes');
+    if (isRS485 && isEnabled) {
+      dot.style.background  = 'var(--accent-success)';
+      text.textContent = 'Configured';
+    } else {
+      dot.style.background  = '#f59e0b';
+      text.textContent = isRS485 ? 'RS-485 set, TCP listener not enabled' : 'Not configured';
+    }
+    /* Pre-fill baud if already set */
+    const m = res.match(/BaudRate=(\d+)/);
+    if (m) {
+      const sel = document.getElementById('serial-baud');
+      for (const opt of sel.options) { if (opt.value === m[1]) { opt.selected = true; break; } }
+    }
+    const pm = res.match(/Listener\.Port=(\d+)/);
+    if (pm) document.getElementById('serial-port').value = pm[1];
+  } catch(e) {
+    /* Not supported or not authenticated -- hide silently */
+    card.style.display = 'none';
+  }
+}
+
+async function configureSerial() {
+  const baud = document.getElementById('serial-baud').value;
+  const port = parseInt(document.getElementById('serial-port').value, 10);
+  const log  = document.getElementById('serial-log');
+  const btn  = event.currentTarget;
+
+  if (!port || port < 1024 || port > 65535) { toast('Invalid TCP port', 'error'); return; }
+
+  log.style.display = 'block';
+  log.textContent = '';
+  btn.disabled = true;
+  const emit = (msg) => { log.textContent += msg + '\n'; log.scrollTop = log.scrollHeight; };
+
+  try {
+    emit('Setting serial port to RS-485 mode...');
+    await vapixParam({
+      action: 'update',
+      'Serial.Ser1.PortMode': 'RS485',
+      'Serial.Ser1.BaudRate': baud,
+      'Serial.Ser1.DataBits': '8',
+      'Serial.Ser1.Parity':   'None',
+      'Serial.Ser1.StopBits': '1'
+    });
+    emit('OK');
+
+    emit('Enabling PortManager GenericTCPServer listener on port ' + port + '...');
+    await vapixParam({
+      action: 'update',
+      'PortManager.P0.GenericTCPServer.Enabled':          'yes',
+      'PortManager.P0.GenericTCPServer.Listener.Enabled': 'yes',
+      'PortManager.P0.GenericTCPServer.Listener.Port':    String(port)
+    });
+    emit('OK');
+
+    emit('Restarting PortManager...');
+    await vapixParam({ action: 'update', 'PortManager.P0.PortEnabled': 'no' });
+    await new Promise(r => setTimeout(r, 800));
+    await vapixParam({ action: 'update', 'PortManager.P0.PortEnabled': 'yes' });
+    emit('OK');
+
+    emit('Done. Use connection type "Serial Gateway", host 127.0.0.1, port ' + port + ' in rules.');
+    toast('RS-485 configured', 'success');
+    await checkSerialPort();
+  } catch(e) {
+    emit('Error: ' + e.message);
+    toast('Configuration failed', 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }

@@ -158,6 +158,39 @@
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
       <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
 
+      <!-- Serial Port Setup -->
+      <div class="card" id="serial-setup-card" style="margin-bottom:16px;display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">RS-485 / SERIAL GATEWAY</h3>
+          <div id="serial-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+            <span id="serial-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
+            <span id="serial-status-text">Checking…</span>
+          </div>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Configure this device's serial port for RS-485 and expose it via PortManager so Event Engine can communicate with Modbus RTU devices.
+        </p>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;">
+          <div class="form-group" style="flex:0 0 140px;">
+            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">Baud Rate</label>
+            <select id="serial-baud" style="width:100%;padding:7px 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;">
+              <option value="9600">9600</option>
+              <option value="19200">19200</option>
+              <option value="38400">38400</option>
+              <option value="57600">57600</option>
+              <option value="115200">115200</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:0 0 120px;">
+            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">TCP Port</label>
+            <input id="serial-port" type="number" value="4001" min="1024" max="65535"
+              style="width:100%;padding:7px 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;box-sizing:border-box;">
+          </div>
+          <button class="btn btn-primary" onclick="configureSerial()" style="flex:0 0 auto;">Configure RS-485</button>
+        </div>
+        <div id="serial-log" style="font-size:12px;color:var(--text-muted);font-family:monospace;display:none;max-height:120px;overflow-y:auto;background:var(--input-bg);border-radius:6px;padding:8px 10px;white-space:pre-wrap;"></div>
+      </div>
+
       <!-- Backup & Restore -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
