@@ -7,11 +7,11 @@ A powerful If-This-Then-That style automation engine that runs directly on your 
 
 #### To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface.
 
-Want to know why you need this ACAP? Take a look at [Use Cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html)
-A full user manual is built in to the ACAP and available here: [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)
+Want to know why you need this ACAP? Take a look at [Use Cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html)  
+A full user manual is built in to the ACAP and available here: [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)  
 API documentation can be found here: [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json)
 
-If you find something that doesn't work the way it should, open an [Issue](https://github.com/Mo3he/Event-Engine-ACAP/issues) or if you would like me to add something, start a [Discussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions)
+If you find something that doesn't work the way it should, open an [Issue](https://github.com/Mo3he/Event-Engine-ACAP/issues), if you would like me to add something, start a [Discussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions) and if you like my work, a coffee would help a lot
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-orange?style=flat&logo=buy-me-a-coffee)](https://www.buymeacoffee.com/mo3he)
 
