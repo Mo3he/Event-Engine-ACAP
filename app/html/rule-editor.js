@@ -190,6 +190,9 @@ const TRIGGER_GROUPS = [
     { value: 'rule_fired',        label: 'Rule Fired' },
     { value: 'manual',            label: 'Manual (button / API)' },
   ]},
+  { label: 'Modbus', types: [
+    { value: 'modbus_read',       label: 'Modbus Read' },
+  ]},
 ];
 
 function triggerTypeOptions(selected) {
@@ -456,6 +459,8 @@ function triggerFields(t, rowIdx) {
           <option value="rising"  ${(t.edge||'rising')==='rising'  ? 'selected' : ''}>Rising (activate)</option>
           <option value="falling" ${t.edge==='falling' ? 'selected' : ''}>Falling (deactivate)</option>
           <option value="both"    ${t.edge==='both'    ? 'selected' : ''}>Both</option>
+          <option value="cut"     ${t.edge==='cut'     ? 'selected' : ''}>Cut (wire cut — supervised)</option>
+          <option value="short"   ${t.edge==='short'   ? 'selected' : ''}>Short (wire short — supervised)</option>
         </select>
       </div>
       <div class="form-group" style="flex:0 0 140px;">
@@ -550,6 +555,93 @@ function triggerFields(t, rowIdx) {
         <div class="form-hint" style="color:var(--text-muted);">This rule has no automatic trigger. Use the <strong>Fire</strong> button in the rule list to run it manually, or call <code>POST /local/acap_event_engine/fire</code> with <code>{"id":"&lt;rule_id&gt;"}</code>.</div>
       </div>
     </div>`;
+  if (type === 'modbus_read') {
+    const ctype = t.connection_type || 'tcp';
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Connection Type</label>
+        <select data-k="connection_type" onchange="rerenderTrigger(this)">
+          <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
+          <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
+          <option value="rtu" ${ctype==='rtu'?'selected':''}>RTU direct (advanced)</option>
+        </select>
+      </div>
+      ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
+      <div class="form-group">
+        <label>Host</label>
+        <input type="text" data-k="host" value="${escHtml(t.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
+        ${ctype==='serial_gateway'?'<div class="form-hint">Use 127.0.0.1. Configure PortManager.P0.GenericTCPServer on the camera to expose the RS-485 port.</div>':''}
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" data-k="port" value="${t.port||(ctype==='serial_gateway'?4001:502)}" min="1" max="65535">
+      </div>` : `
+      <div class="form-group">
+        <label>Device</label>
+        <input type="text" data-k="device" value="${escHtml(t.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
+      </div>
+      <div class="form-group">
+        <label>Baud Rate</label>
+        <input type="number" data-k="baud" value="${t.baud||9600}" min="1200">
+      </div>
+      <div class="form-group">
+        <label>Parity</label>
+        <select data-k="parity">
+          <option value="N" ${(!t.parity||t.parity==='N')?'selected':''}>None</option>
+          <option value="E" ${t.parity==='E'?'selected':''}>Even</option>
+          <option value="O" ${t.parity==='O'?'selected':''}>Odd</option>
+        </select>
+      </div>`}
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Slave ID</label>
+        <input type="number" data-k="slave_id" value="${t.slave_id||1}" min="1" max="247">
+        <div class="form-hint">Modbus device address (1-247)</div>
+      </div>
+      <div class="form-group">
+        <label>Register Type</label>
+        <select data-k="register_type">
+          <option value="holding"  ${(!t.register_type||t.register_type==='holding') ?'selected':''}>Holding Register</option>
+          <option value="input"    ${t.register_type==='input'   ?'selected':''}>Input Register</option>
+          <option value="coil"     ${t.register_type==='coil'    ?'selected':''}>Coil</option>
+          <option value="discrete" ${t.register_type==='discrete'?'selected':''}>Discrete Input</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Register Address</label>
+        <input type="number" data-k="register" value="${t.register||0}" min="0" max="65535">
+        <div class="form-hint">0-based register address</div>
+      </div>
+      <div class="form-group">
+        <label>Poll Interval (s)</label>
+        <input type="number" data-k="poll_interval" value="${t.poll_interval||30}" min="1">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Threshold Operator</label>
+        <select data-k="op">
+          <option value=""       ${!t.op           ?'selected':''}>Any change (no threshold)</option>
+          <option value="gt"     ${t.op==='gt'     ?'selected':''}>Greater than</option>
+          <option value="gte"    ${t.op==='gte'    ?'selected':''}>Greater than or equal</option>
+          <option value="lt"     ${t.op==='lt'     ?'selected':''}>Less than</option>
+          <option value="lte"    ${t.op==='lte'    ?'selected':''}>Less than or equal</option>
+          <option value="eq"     ${t.op==='eq'     ?'selected':''}>Equal</option>
+          <option value="between"${t.op==='between'?'selected':''}>Between</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Threshold</label>
+        <input type="number" data-k="threshold" value="${t.threshold!==undefined?t.threshold:''}" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label>Threshold 2 <span style="font-weight:normal;opacity:.7">(between only)</span></label>
+        <input type="number" data-k="threshold2" value="${t.threshold2!==undefined?t.threshold2:''}" placeholder="100">
+      </div>
+    </div>`;
+  }
   return '';
 }
 
@@ -1152,6 +1244,9 @@ const ACTION_GROUPS = [
     { value: 'acap_control',      label: 'ACAP Control' },
     { value: 'aoa_get_counts',    label: 'AOA Get Counts' },
   ]},
+  { label: 'Modbus', types: [
+    { value: 'modbus_write',      label: 'Modbus Write' },
+  ]},
 ];
 
 function actionTypeOptions(selected) {
@@ -1719,12 +1814,10 @@ function actionFields(a, rowIdx) {
   }
   if (type === 'audio_clip') {
     const remoteCtrl = remoteCapControl(a, rowIdx, 'audio', 'clip_name', a.clip_name || '', 'Clip name or ID');
-    if (remoteCtrl) return `
-    <div class="form-row">
-      <div class="form-group"><label>Audio Clip</label>${remoteCtrl}</div>
-    </div>`;
     let clipControl;
-    if (audioClips === null) {
+    if (remoteCtrl) {
+      clipControl = remoteCtrl;
+    } else if (audioClips === null) {
       clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Loading clips…" disabled>`;
     } else if (!audioClips.length) {
       clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Clip ID (e.g. 36)">`;
@@ -1736,10 +1829,36 @@ function actionFields(a, rowIdx) {
       }
       clipControl = `<select data-k="clip_name">${opts}</select>`;
     }
+    const loopCount = parseInt(a.loop_count) || 1;
+    const isLooping = loopCount === 0;
     return `
     <div class="form-row">
       <div class="form-group"><label>Audio Clip</label>${clipControl}</div>
-    </div>`;
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Volume (%)</label>
+        <input type="number" data-k="volume" min="0" max="100" value="${a.volume !== undefined ? a.volume : ''}" placeholder="default">
+        <div class="form-hint">Leave empty for device default</div>
+      </div>
+      <div class="form-group" style="flex:0 0 150px;">
+        <label>Loop count</label>
+        <input type="number" data-k="loop_count" min="0" value="${loopCount}" onchange="rerenderAction(this)">
+        <div class="form-hint">0 = loop until trigger clears</div>
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" min="1" value="${a.channel || ''}" placeholder="default">
+        <div class="form-hint">Leave empty for default</div>
+      </div>
+    </div>
+    ${isLooping ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically stop the clip when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
   }
   if (type === 'siren_light') {
     const remoteCtrl = remoteCapControl(a, rowIdx, 'siren', 'profile', a.profile || '', 'Profile name (e.g. Green)');
@@ -2718,6 +2837,70 @@ function actionFields(a, rowIdx) {
       <div class="form-group">
         <label>Assign Action</label>${actionCtrl}
         <div class="form-hint">Select an action to assign to this button slot, or choose <em>clear slot</em> to leave it empty.</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'modbus_write') {
+    const ctype = a.connection_type || 'tcp';
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Connection Type</label>
+        <select data-k="connection_type" onchange="rerenderAction(this)">
+          <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
+          <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
+          <option value="rtu" ${ctype==='rtu'?'selected':''}>RTU direct (advanced)</option>
+        </select>
+      </div>
+      ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
+      <div class="form-group">
+        <label>Host</label>
+        <input type="text" data-k="host" value="${escHtml(a.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
+        ${ctype==='serial_gateway'?'<div class="form-hint">Use 127.0.0.1. Configure PortManager.P0.GenericTCPServer on the camera to expose the RS-485 port.</div>':''}
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" data-k="port" value="${a.port||(ctype==='serial_gateway'?4001:502)}" min="1" max="65535">
+      </div>` : `
+      <div class="form-group">
+        <label>Device</label>
+        <input type="text" data-k="device" value="${escHtml(a.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
+      </div>
+      <div class="form-group">
+        <label>Baud Rate</label>
+        <input type="number" data-k="baud" value="${a.baud||9600}" min="1200">
+      </div>
+      <div class="form-group">
+        <label>Parity</label>
+        <select data-k="parity">
+          <option value="N" ${(!a.parity||a.parity==='N')?'selected':''}>None</option>
+          <option value="E" ${a.parity==='E'?'selected':''}>Even</option>
+          <option value="O" ${a.parity==='O'?'selected':''}>Odd</option>
+        </select>
+      </div>`}
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Slave ID</label>
+        <input type="number" data-k="slave_id" value="${a.slave_id||1}" min="1" max="247">
+        <div class="form-hint">Modbus device address (1-247)</div>
+      </div>
+      <div class="form-group">
+        <label>Register Type</label>
+        <select data-k="register_type">
+          <option value="holding" ${(!a.register_type||a.register_type==='holding')?'selected':''}>Holding Register</option>
+          <option value="coil"    ${a.register_type==='coil'?'selected':''}>Coil</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Register Address</label>
+        <input type="number" data-k="register" value="${a.register||0}" min="0" max="65535">
+        <div class="form-hint">0-based register address</div>
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="number" data-k="value" value="${a.value!==undefined?a.value:0}">
+        <div class="form-hint">For coils: 0 = off, 1 = on. For holding registers: 16-bit unsigned integer (0-65535).</div>
       </div>
     </div>`;
   }

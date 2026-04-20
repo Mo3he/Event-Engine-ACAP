@@ -6,7 +6,10 @@ ARG SDK=acap-native-sdk
 
 FROM ${REPO}/${SDK}:${VERSION}-${ARCH}-ubuntu${UBUNTU_VERSION} as sdk
 
+ARG ARCH=aarch64
+
 WORKDIR /opt/app
+
 COPY ./app .
 
 RUN . /opt/axis/acapsdk/environment-setup* && acap-build . && \

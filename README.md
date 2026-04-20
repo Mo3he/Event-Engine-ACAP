@@ -91,11 +91,12 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards `+`/`#` supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token (max 120 characters). Requires admin-level camera credentials. All keys in the JSON `payload` object are flattened and injected as `{{trigger.KEY}}` variables |
-| **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration |
+| **I/O Input** | Digital input port state change (rising/falling/both edges) with optional hold duration. Supervised inputs also support **cut** (open-circuit/wire cut) and **short** (short-circuit) fault states |
 | **Counter Threshold** | When a named counter crosses a configured value (polled every second) |
 | **Rule Chain** | Fires when another named rule executes |
 | **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}`, `{{trigger.active}}`, and `{{trigger.reason}}` |
 | **Manual** | Fired via the **Fire Now** button in the UI or `POST /fire` with a rule ID. Useful for testing and one-shot actions |
+| **Modbus Read** | Poll a Modbus register on a configurable interval and fire when the value crosses a threshold. Supports Modbus TCP and RTU/RS-485. Register types: holding (FC03), input (FC04), coil (FC01), discrete (FC02). Threshold operators: `gt`, `gte`, `lt`, `lte`, `eq`, `between`. Port 502 works on all firmware versions |
 
 ## Conditions
 
@@ -147,7 +148,7 @@ Actions are grouped by category in the rule editor. Actions that support **while
 
 | Type | Description |
 |------|-------------|
-| **Audio Clip** | Play a named media clip on the camera |
+| **Audio Clip** | Play a named media clip on the camera with configurable volume (0–100), loop count, and output channel. Set `while_active` to loop indefinitely and auto-stop when the trigger deactivates |
 | **Paging Console Execute** | Execute a pre-configured action on an Axis Paging Console (e.g. Axis C6110) by action UUID. Supports **remote device** target |
 | **Paging Console Button** | Update a button slot on a Paging Console page to a specified action UUID, or clear it. GET the current layout, patch the slot, PUT it back atomically. Supports **remote device** target |
 | **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310). Supports `while_active` auto-stop |
@@ -184,6 +185,12 @@ Actions are grouped by category in the rule editor. Actions that support **while
 | Type | Description |
 |------|-------------|
 | **InfluxDB Write** | Write a data point to InfluxDB v1 or v2 using line protocol. Template-aware measurement, tags, and fields. v1 authenticates with username/password, v2 with API token |
+
+### Modbus
+
+| Type | Description |
+|------|-------------|
+| **Modbus Write** | Write a value to a Modbus register via TCP or RTU/RS-485. Supports FC06 (write single holding register) and FC05 (write single coil). Uses the same connection parameters as Modbus Read |
 
 ### Analytics
 

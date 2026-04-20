@@ -6,6 +6,7 @@
 #include <glib.h>
 #include <curl/curl.h>
 #include <time.h>
+#include <errno.h>
 
 #include "actions.h"
 #include "triggers.h"
@@ -13,6 +14,7 @@
 #include "mqtt_client.h"
 #include "event_log.h"
 #include "rule_engine.h"
+#include "modbus_pool.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
@@ -63,6 +65,7 @@ static char* remote_vapix_put_path(const char* host, const char* user, const cha
 static char* remote_vapix_get_path(const char* host, const char* user, const char* pass, const char* path);
 static int   stop_active_recordings_from_xml(const char* xml, const char* remote_host, const char* remote_user, const char* remote_pass);
 static gboolean recording_stop_timeout_cb(gpointer user_data);
+static int   resolve_clip_id(const char* clip_name);
 
 /* Global recording ID table — maps diskid → recording_id for active recordings.
  * Populated on every start regardless of while_active so that explicit "stop"
@@ -125,12 +128,13 @@ static void active_recording_remove_by_id(const char* recording_id) {
 #define MAX_WHILE_ACTIVE 64
 typedef struct {
     char rule_id[64];
-    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output", "speaker_display" */
+    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output", "speaker_display", "audio_clip" */
     char siren_profile[128];
     int  overlay_channel;
     int  io_port;
     char io_restore[16];   /* opposite state to restore: "open" or "closed" */
     char recording_id[64]; /* recording ID returned by record/record.cgi */
+    char clip_name[128];   /* audio clip name for audio_clip while_active stop */
     char remote_host[128]; /* empty = local device */
     char remote_user[64];
     char remote_pass[128];
@@ -210,6 +214,18 @@ static void while_active_undo(WhileActiveEntry* e) {
             : ACAP_VAPIX_Post_Path("/config/rest/speaker-display-notification/v1/stop", "{\"data\":{}}");
         if (resp) free(resp);
         LOG("while_active: stopped speaker display for rule %s", e->rule_id);
+    } else if (strcmp(e->atype, "audio_clip") == 0) {
+        char req[256];
+        int stop_id = resolve_clip_id(e->clip_name);
+        if (stop_id >= 0)
+            snprintf(req, sizeof(req), "mediaclip.cgi?action=stop&clip=%d", stop_id);
+        else
+            snprintf(req, sizeof(req), "mediaclip.cgi?action=stop&clip=%s", e->clip_name);
+        char* resp = is_remote
+            ? remote_vapix_get(e->remote_host, e->remote_user, e->remote_pass, req)
+            : ACAP_VAPIX_Get(req);
+        if (resp) free(resp);
+        LOG("while_active: stopped audio clip '%s' for rule %s", e->clip_name, e->rule_id);
     }
 }
 
@@ -1479,13 +1495,90 @@ static void action_io_output(const char* rule_id, cJSON* cfg) {
 }
 
 /* audio_clip */
-static void action_audio_clip(cJSON* cfg) {
+
+/* Resolve a clip name to its numeric MediaClip ID using param.cgi.
+ * Newer firmware (12.x+) requires clip=<int> instead of clip=<name>.
+ * Returns the numeric ID on success, -1 if not found or on error.
+ * Falls back to -1 so callers can try by name as a last resort. */
+static int resolve_clip_id(const char* clip_name) {
+    char* resp = ACAP_VAPIX_Get("param.cgi?action=list&group=MediaClip");
+    if (!resp) return -1;
+    /* Parse lines like: root.MediaClip.M40.Name=Alarm */
+    int found_id = -1;
+    char* line = strtok(resp, "\n");
+    int candidate_id = -1;
+    while (line) {
+        /* trim trailing \r */
+        char* cr = strchr(line, '\r');
+        if (cr) *cr = '\0';
+        /* look for .M<id>.Name=<clip_name> */
+        const char* prefix = "root.MediaClip.M";
+        if (strncmp(line, prefix, strlen(prefix)) == 0) {
+            const char* after_prefix = line + strlen(prefix);
+            char* dot = strchr(after_prefix, '.');
+            if (dot) {
+                int mid = 0;
+                for (const char* p = after_prefix; p < dot; p++) {
+                    if (*p < '0' || *p > '9') { mid = -1; break; }
+                    mid = mid * 10 + (*p - '0');
+                }
+                if (mid >= 0) {
+                    const char* field = dot + 1;
+                    if (strncmp(field, "Name=", 5) == 0) {
+                        const char* val = field + 5;
+                        if (strcmp(val, clip_name) == 0)
+                            found_id = mid;
+                    }
+                }
+            }
+        }
+        line = strtok(NULL, "\n");
+    }
+    free(resp);
+    (void)candidate_id;
+    return found_id;
+}
+
+static void action_audio_clip(const char* rule_id, cJSON* cfg) {
     const char* clip = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "clip_name"));
     if (!clip) return;
-    char req[256];
-    snprintf(req, sizeof(req), "mediaclip.cgi?action=play&clip=%s", clip);
+
+    cJSON* volume_j  = cJSON_GetObjectItem(cfg, "volume");
+    cJSON* loop_j    = cJSON_GetObjectItem(cfg, "loop_count");
+    cJSON* channel_j = cJSON_GetObjectItem(cfg, "channel");
+    cJSON* wa_j      = cJSON_GetObjectItem(cfg, "while_active");
+    int loop_count   = (loop_j && cJSON_IsNumber(loop_j)) ? (int)loop_j->valuedouble : 1;
+
+    /* Resolve clip name to numeric ID (required by firmware 12.x+).
+     * Fall back to using the name string if resolution fails. */
+    int clip_id = resolve_clip_id(clip);
+
+    char req[512];
+    int n;
+    if (clip_id >= 0)
+        n = snprintf(req, sizeof(req), "mediaclip.cgi?action=play&clip=%d", clip_id);
+    else
+        n = snprintf(req, sizeof(req), "mediaclip.cgi?action=play&clip=%s", clip);
+    if (volume_j  && cJSON_IsNumber(volume_j))
+        n += snprintf(req + n, sizeof(req) - n, "&volume=%d", (int)volume_j->valuedouble);
+    if (loop_j    && cJSON_IsNumber(loop_j))
+        n += snprintf(req + n, sizeof(req) - n, "&repeat=%d", loop_count);
+    if (channel_j && cJSON_IsNumber(channel_j))
+        n += snprintf(req + n, sizeof(req) - n, "&channel=%d", (int)channel_j->valuedouble);
+    (void)n;
+
     char* resp = VAPIX_GET(cfg, req);
     if (resp) free(resp);
+
+    /* Register while_active only for infinite-loop clips (loop_count == 0) */
+    if (rule_id && wa_j && cJSON_IsTrue(wa_j) && loop_count == 0) {
+        WhileActiveEntry e = {0};
+        snprintf(e.rule_id,   sizeof(e.rule_id),   "%s", rule_id);
+        snprintf(e.atype,     sizeof(e.atype),     "audio_clip");
+        snprintf(e.clip_name, sizeof(e.clip_name), "%s", clip);
+        WA_SET_REMOTE(e, cfg);
+        while_active_register(&e);
+    }
 }
 
 /* send_syslog */
@@ -2895,6 +2988,39 @@ void Actions_Digest_Tick(void) {
     }
 }
 
+/* modbus_write — write a value to a Modbus register (TCP or RTU/RS-485) */
+static void action_modbus_write(cJSON* cfg) {
+    mb_ctx_t* ctx = modbus_pool_get(cfg);
+    if (!ctx) {
+        LOG_WARN("modbus_write: no connection available");
+        return;
+    }
+
+    cJSON* slave_j = cJSON_GetObjectItem(cfg, "slave_id");
+    int slave_id   = slave_j ? (int)slave_j->valuedouble : 1;
+
+    cJSON* reg_j = cJSON_GetObjectItem(cfg, "register");
+    int    reg   = reg_j ? (int)reg_j->valuedouble : 0;
+
+    cJSON* val_j = cJSON_GetObjectItem(cfg, "value");
+    double val   = val_j ? val_j->valuedouble : 0.0;
+
+    const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "register_type"));
+    if (!rtype) rtype = "holding";
+
+    int rc = -1;
+    if (strcmp(rtype, "coil") == 0) {
+        rc = mb_write_bit(ctx, slave_id, reg, (int)val ? 1 : 0);
+    } else {
+        rc = mb_write_register(ctx, slave_id, reg, (uint16_t)(int)val);
+    }
+
+    if (rc < 0) {
+        LOG_WARN("modbus_write: write failed (reg %d): %s", reg, strerror(errno));
+        modbus_pool_invalidate(ctx);
+    }
+}
+
 static void execute_from(const char* rule_id, cJSON* actions_array,
                          int start_index, cJSON* trigger_data) {
     g_current_rule_id = rule_id;
@@ -2929,7 +3055,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(rule_id, action, trigger_data);
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
         else if (strcmp(type, "io_output")         == 0) action_io_output(rule_id, action);
-        else if (strcmp(type, "audio_clip")              == 0) action_audio_clip(action);
+        else if (strcmp(type, "audio_clip")              == 0) action_audio_clip(rule_id, action);
         else if (strcmp(type, "paging_console_execute")    == 0) action_paging_console_execute(action);
         else if (strcmp(type, "paging_console_button")     == 0) action_paging_console_button(action);
         else if (strcmp(type, "siren_light")               == 0) action_siren_light(rule_id, action);
@@ -2958,6 +3084,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "acap_control")      == 0) action_acap_control(action);
         else if (strcmp(type, "aoa_get_counts")    == 0) action_aoa_get_counts(action, trigger_data);
         else if (strcmp(type, "speaker_display")    == 0) action_speaker_display(rule_id, action, trigger_data);
+        else if (strcmp(type, "modbus_write")       == 0) action_modbus_write(action);
         else LOG_WARN("unknown action type '%s'", type);
     }
 }

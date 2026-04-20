@@ -339,7 +339,7 @@ Fires on a digital I/O input port state change.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `port` | integer | — | I/O port number (1-based) |
-| `edge` | `"rising"` \| `"falling"` \| `"both"` | `"rising"` | Which edge(s) to fire on |
+| `edge` | `"rising"` \| `"falling"` \| `"both"` \| `"cut"` \| `"short"` | `"rising"` | Which edge(s) to fire on. `cut` = open-circuit/wire-cut fault; `short` = short-circuit fault (supervised inputs only) |
 | `hold_secs` | integer | `0` | Port must remain in triggered state this many seconds before firing |
 
 ### 6. `counter_threshold` — Counter Threshold
@@ -706,13 +706,21 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
 ```json
 {
   "type": "audio_clip",
-  "clip_name": "alarm.wav"
+  "clip_name": "alarm.wav",
+  "volume": 80,
+  "loop_count": 1,
+  "channel": 1,
+  "while_active": false
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `clip_name` | string | Name of audio clip as uploaded to the camera |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `clip_name` | string | — | Name of audio clip as uploaded to the camera |
+| `volume` | integer 0–100 | `70` | Playback volume |
+| `loop_count` | integer | `1` | Number of times to play. Set to `0` with `while_active: true` to loop indefinitely |
+| `channel` | integer | `1` | Audio output channel |
+| `while_active` | boolean | `false` | Loop indefinitely and auto-stop when trigger deactivates. Requires `loop_count: 0` |
 
 ### 8. `siren_light` — Siren/Light Profile
 
@@ -1594,3 +1602,76 @@ Set `while_active: true` on recording, overlay, I/O output, siren, or speaker_di
 13. **Maximum rule name length**: 100 characters.
 14. **Maximum webhook token length**: 120 characters.
 15. **Speaker display message maximum**: 1000 characters.
+16. **Modbus TCP port 502**: Works for outbound client connections on all AXIS OS versions (including 12+). The privilege restriction only applies to binding/listening, not connecting.
+17. **Modbus `op` field**: Use word-form operators — `gt`, `gte`, `lt`, `lte`, `eq`, `between`. Symbolic forms like `>=` are not accepted.
+
+---
+
+## Trigger: `modbus_read`
+
+Polls a Modbus register at a configurable interval and fires when the value satisfies a threshold condition. Uses edge-triggered hysteresis — fires once when condition becomes true, does not re-fire until condition clears and becomes true again.
+
+```json
+{
+  "type": "modbus_read",
+  "connection_type": "tcp",
+  "host": "192.168.1.50",
+  "port": 502,
+  "slave_id": 1,
+  "register_type": "holding",
+  "register": 0,
+  "poll_interval": 10,
+  "op": "gte",
+  "threshold": 100
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `connection_type` | `"tcp"` \| `"rtu"` | `"tcp"` | Transport type |
+| `host` | string | `"127.0.0.1"` | TCP: hostname or IP of Modbus server |
+| `port` | integer | `502` | TCP: port number |
+| `device` | string | `"/dev/ttyS1"` | RTU: serial device path |
+| `baud` | integer | `9600` | RTU: baud rate |
+| `parity` | `"N"` \| `"E"` \| `"O"` | `"N"` | RTU: parity |
+| `slave_id` | integer | `1` | Modbus slave/unit ID |
+| `register_type` | `"holding"` \| `"input"` \| `"coil"` \| `"discrete"` | `"holding"` | Register type (FC03/FC04/FC01/FC02) |
+| `register` | integer | `0` | Register address (0-based) |
+| `poll_interval` | integer | `30` | Seconds between polls (minimum 1) |
+| `op` | `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` \| `"eq"` \| `"between"` | — | Threshold comparison operator |
+| `threshold` | number | — | Lower threshold value |
+| `threshold2` | number | — | Upper threshold (required for `between`) |
+
+Template variables injected: `{{trigger.value}}`, `{{trigger.register}}`, `{{trigger.register_type}}`, `{{trigger.slave_id}}`
+
+---
+
+## Action: `modbus_write`
+
+Writes a value to a Modbus register. Uses FC06 for holding registers, FC05 for coils.
+
+```json
+{
+  "type": "modbus_write",
+  "connection_type": "tcp",
+  "host": "192.168.1.50",
+  "port": 502,
+  "slave_id": 1,
+  "register_type": "holding",
+  "register": 10,
+  "value": 1
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `connection_type` | `"tcp"` \| `"rtu"` | `"tcp"` | Transport type |
+| `host` | string | `"127.0.0.1"` | TCP: hostname or IP |
+| `port` | integer | `502` | TCP: port number |
+| `device` | string | `"/dev/ttyS1"` | RTU: serial device path |
+| `baud` | integer | `9600` | RTU: baud rate |
+| `parity` | `"N"` \| `"E"` \| `"O"` | `"N"` | RTU: parity |
+| `slave_id` | integer | `1` | Modbus slave/unit ID |
+| `register_type` | `"holding"` \| `"coil"` | `"holding"` | Register type |
+| `register` | integer | `0` | Register address (0-based) |
+| `value` | number | — | Value to write. For coils: 0 or 1. For holding: 0–65535 |

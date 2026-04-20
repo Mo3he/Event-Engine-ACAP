@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | ISO 8601 UTC timestamp |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n| `{{trigger.KEY|N}}` | Numeric value rounded to N decimal places, e.g. `{{trigger.Temperature|2}}` → `20.35` |\n",
-    "version": "1.9.7",
+    "version": "1.9.8",
     "contact": {
       "url": "https://github.com/Mo3he"
     }
@@ -109,7 +109,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired"],
+            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "modbus_read"],
             "description": "Trigger type"
           }
         }
@@ -297,7 +297,7 @@
               },
               "edge": {
                 "type": "string",
-                "enum": ["rising", "falling", "both"],
+                "enum": ["rising", "falling", "both", "cut", "short"],
                 "default": "rising",
                 "description": "Which edge(s) to fire on"
               },
@@ -353,6 +353,33 @@
                 "format": "uuid",
                 "description": "ID of the rule whose firing triggers this rule"
               }
+            }
+          }
+        ]
+      },
+
+      "TriggerModbusRead": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "description": "Polls a Modbus register (TCP or RTU/RS-485) and fires when the value crosses a threshold.",
+            "required": ["connection_type", "slave_id", "register_type", "register"],
+            "properties": {
+              "type":            { "type": "string", "enum": ["modbus_read"] },
+              "connection_type": { "type": "string", "enum": ["tcp", "serial_gateway", "rtu"], "description": "Transport: tcp=Modbus TCP, serial_gateway=RTU framing via PortManager GenericTCPServer, rtu=direct serial" },
+              "host":            { "type": "string", "description": "TCP/serial_gateway: hostname or IP address of Modbus TCP device" },
+              "port":            { "type": "integer", "default": 502, "description": "TCP: port number" },
+              "device":          { "type": "string", "description": "RTU: serial device path, e.g. /dev/ttyS1" },
+              "baud":            { "type": "integer", "default": 9600, "description": "RTU: baud rate" },
+              "parity":          { "type": "string", "enum": ["N", "E", "O"], "default": "N", "description": "RTU: parity (None/Even/Odd)" },
+              "slave_id":        { "type": "integer", "minimum": 1, "maximum": 247, "description": "Modbus slave/device address" },
+              "register_type":   { "type": "string", "enum": ["holding", "input", "coil", "discrete"], "description": "Register type to read" },
+              "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Register address (0-based)" },
+              "poll_interval":   { "type": "integer", "minimum": 1, "default": 30, "description": "Polling interval in seconds" },
+              "op":              { "type": "string", "enum": ["gt", "lt", "gte", "lte", "eq", "between"], "description": "Comparison operator for threshold check" },
+              "threshold":       { "type": "number", "description": "Primary threshold value" },
+              "threshold2":      { "type": "number", "description": "Upper bound for 'between' operator" }
             }
           }
         ]
@@ -511,7 +538,7 @@
               "fire_vapix_event", "send_syslog", "delay",
               "guard_tour", "set_device_param", "snapshot_upload",
               "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control",
-              "speaker_display"
+              "speaker_display", "modbus_write"
             ]
           },
           "remote_host": {
@@ -672,8 +699,12 @@
           {
             "type": "object",
             "properties": {
-              "type":      { "type": "string", "enum": ["audio_clip"] },
-              "clip_name": { "type": "string", "description": "Name of the audio clip to play", "example": "alarm.wav" }
+              "type":        { "type": "string", "enum": ["audio_clip"] },
+              "clip_name":   { "type": "string", "description": "Name or ID of the audio clip to play", "example": "alarm.wav" },
+              "volume":      { "type": "integer", "minimum": 0, "maximum": 100, "description": "Playback volume (0-100). Omit to use device default." },
+              "loop_count":  { "type": "integer", "minimum": 0, "default": 1, "description": "Number of times to repeat. 0 = loop indefinitely until while_active stop. 1 = play once." },
+              "channel":     { "type": "integer", "description": "Audio output channel. Omit to use device default." },
+              "while_active": { "type": "boolean", "default": false, "description": "If true and loop_count is 0, stop the clip automatically when the triggering condition clears" }
             }
           }
         ]
@@ -967,7 +998,28 @@
         ]
       },
 
-      "Variable": {
+      "ActionModbusWrite": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "description": "Write a value to a Modbus holding register or coil (TCP or RTU/RS-485).",
+            "required": ["connection_type", "slave_id", "register_type", "register", "value"],
+            "properties": {
+              "type":            { "type": "string", "enum": ["modbus_write"] },
+              "connection_type": { "type": "string", "enum": ["tcp", "serial_gateway", "rtu"], "description": "Transport: tcp=Modbus TCP, serial_gateway=RTU framing via PortManager GenericTCPServer, rtu=direct serial" },
+              "host":            { "type": "string", "description": "TCP/serial_gateway: hostname or IP address" },
+              "port":            { "type": "integer", "default": 502, "description": "TCP: port number" },
+              "device":          { "type": "string", "description": "RTU: serial device path, e.g. /dev/ttyS1" },
+              "baud":            { "type": "integer", "default": 9600, "description": "RTU: baud rate" },
+              "parity":          { "type": "string", "enum": ["N", "E", "O"], "default": "N", "description": "RTU: parity (None/Even/Odd)" },
+              "slave_id":        { "type": "integer", "minimum": 1, "maximum": 247, "description": "Modbus slave/device address" },
+              "register_type":   { "type": "string", "enum": ["holding", "coil"], "description": "Register type to write" },
+              "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Register address (0-based)" },
+              "value":           { "type": "number", "description": "Value to write. For coils: 0 = off, non-zero = on. For holding registers: 16-bit unsigned integer." }
+            }
+          }
+        ]
+      },
         "type": "object",
         "properties": {
           "name":       { "type": "string" },
@@ -1409,7 +1461,8 @@
                   { "type": "mqtt_message",       "label": "MQTT Message",       "description": "Fire when a matching MQTT message is received" },
                   { "type": "io_input",           "label": "I/O Input",          "description": "Fire on digital input port state change" },
                   { "type": "counter_threshold",  "label": "Counter Threshold",  "description": "Fire when a counter crosses a value" },
-                  { "type": "rule_fired",         "label": "Rule Chain",         "description": "Fire when another rule executes" }
+                  { "type": "rule_fired",         "label": "Rule Chain",         "description": "Fire when another rule executes" },
+                  { "type": "modbus_read",        "label": "Modbus Read",        "description": "Poll a Modbus register and fire when value crosses a threshold" }
                 ]
               }
             }

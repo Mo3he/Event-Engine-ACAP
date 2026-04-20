@@ -73,7 +73,7 @@ static int validate_rule_steps(const char* label, cJSON* arr,
 static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) {
     static const char* const trigger_types[] = {
         "vapix_event", "schedule", "mqtt_message", "http_webhook", "io_input",
-        "counter_threshold", "rule_fired", "aoa_scenario", "manual", NULL
+        "counter_threshold", "rule_fired", "aoa_scenario", "manual", "modbus_read", NULL
     };
     static const char* const condition_types[] = {
         "time_window", "io_state", "counter", "variable_compare", "http_check",
@@ -88,6 +88,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         "fire_vapix_event", "vapix_query", "set_device_param", "acap_control",
         "influxdb_write", "aoa_get_counts", "speaker_display",
         "paging_console_execute", "paging_console_button",
+        "modbus_write",
         NULL
     };
     static const char* const trigger_logic_values[] = {"OR", "AND", "AND_ACTIVE", NULL};
@@ -699,6 +700,7 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         {"acap_control",      "ACAP Control",      "Start, stop, or restart another ACAP application"},
         {"influxdb_write",    "InfluxDB Write",    "Write a data point to InfluxDB (v1 or v2) in line protocol"},
         {"aoa_get_counts",    "AOA Get Counts",    "Fetch accumulated crossline counts from an Object Analytics scenario"},
+        {"modbus_write",      "Modbus Write",      "Write a value to a Modbus register via TCP or RTU/RS-485"},
         {NULL, NULL, NULL}
     };
 

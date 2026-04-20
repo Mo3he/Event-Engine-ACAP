@@ -3,12 +3,14 @@
 #include <string.h>
 #include <syslog.h>
 #include <time.h>
+#include <errno.h>
 
 #include "triggers.h"
 #include "scheduler.h"
 #include "variables.h"
 #include "mqtt_client.h"
 #include "actions.h"
+#include "modbus_pool.h"
 #include "../ACAP.h"
 
 /* Simple MQTT topic filter matching (supports + and #) */
@@ -43,6 +45,7 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 #define TRIG_MQTT_MESSAGE      6
 #define TRIG_AOA_SCENARIO      7
 #define TRIG_MANUAL            8
+#define TRIG_MODBUS_READ       9
 
 typedef struct {
     int    type;
@@ -98,6 +101,19 @@ typedef struct {
     /* aoa_scenario */
     int    aoa_scenario_id;          /* AOA scenario number (1-based) */
     char   aoa_object_class[32];     /* optional: "human", "car", "bike", "truck", "bus", "" = any */
+
+    /* modbus_read */
+    char   modbus_connection_type[16]; /* "tcp", "rtu", or "serial_gateway" */
+    char   modbus_host[128];          /* TCP: hostname or IP */
+    int    modbus_port;               /* TCP: port (default 502) */
+    char   modbus_device[64];         /* RTU: device path e.g. "/dev/ttyS1" */
+    int    modbus_baud;               /* RTU: baud rate */
+    char   modbus_parity[4];          /* RTU: "N", "E", "O" */
+    int    modbus_slave_id;           /* Modbus slave/device address (1-247) */
+    char   modbus_reg_type[16];       /* "holding", "input", "coil", "discrete" */
+    int    modbus_register;           /* register address (0-65535) */
+    int    modbus_poll_interval;      /* seconds between polls */
+    time_t modbus_last_poll;          /* timestamp of last poll */
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
@@ -204,6 +220,7 @@ void Triggers_Cleanup(void) {
     }
     sub_count = 0;
     Scheduler_Cleanup();
+    modbus_pool_release_all();
 }
 
 void Triggers_Unsubscribe_Rule(const char* rule_id) {
@@ -288,7 +305,15 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
                 const char* edge = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "edge"));
                 if (!edge || strcmp(edge, "rising") == 0) s->io_edge = 0;
                 else if (strcmp(edge, "falling") == 0) s->io_edge = 1;
-                else s->io_edge = 2;
+                else if (strcmp(edge, "cut") == 0) {
+                    s->io_edge = 3; /* supervised fault state */
+                    snprintf(s->string_value, sizeof(s->string_value), "cut");
+                } else if (strcmp(edge, "short") == 0) {
+                    s->io_edge = 3; /* supervised fault state */
+                    snprintf(s->string_value, sizeof(s->string_value), "short");
+                } else {
+                    s->io_edge = 2;
+                }
                 cJSON* hold_j = cJSON_GetObjectItem(trig, "hold_secs");
                 if (hold_j) s->io_hold_secs = (int)hold_j->valuedouble;
                 s->io_last_state = -1;
@@ -371,6 +396,39 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
         } else if (strcmp(type, "manual") == 0) {
             /* Manual trigger — no subscription; fires only via the HTTP fire endpoint */
             s->type = TRIG_MANUAL;
+
+        } else if (strcmp(type, "modbus_read") == 0) {
+            s->type = TRIG_MODBUS_READ;
+            const char* ctype = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "connection_type"));
+            snprintf(s->modbus_connection_type, sizeof(s->modbus_connection_type), "%s", ctype ? ctype : "tcp");
+            const char* host = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "host"));
+            snprintf(s->modbus_host, sizeof(s->modbus_host), "%s", host ? host : "127.0.0.1");
+            cJSON* port_j = cJSON_GetObjectItem(trig, "port");
+            s->modbus_port = port_j ? (int)port_j->valuedouble : 502;
+            const char* device = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "device"));
+            snprintf(s->modbus_device, sizeof(s->modbus_device), "%s", device ? device : "/dev/ttyS1");
+            cJSON* baud_j = cJSON_GetObjectItem(trig, "baud");
+            s->modbus_baud = baud_j ? (int)baud_j->valuedouble : 9600;
+            const char* parity = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "parity"));
+            snprintf(s->modbus_parity, sizeof(s->modbus_parity), "%s", (parity && parity[0]) ? parity : "N");
+            cJSON* slave_j = cJSON_GetObjectItem(trig, "slave_id");
+            s->modbus_slave_id = slave_j ? (int)slave_j->valuedouble : 1;
+            const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "register_type"));
+            snprintf(s->modbus_reg_type, sizeof(s->modbus_reg_type), "%s", rtype ? rtype : "holding");
+            cJSON* reg_j = cJSON_GetObjectItem(trig, "register");
+            s->modbus_register = reg_j ? (int)reg_j->valuedouble : 0;
+            cJSON* poll_j = cJSON_GetObjectItem(trig, "poll_interval");
+            s->modbus_poll_interval = poll_j ? (int)poll_j->valuedouble : 30;
+            if (s->modbus_poll_interval < 1) s->modbus_poll_interval = 1;
+            /* Threshold comparison — reuse existing value_op/value_threshold fields */
+            const char* vop = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "op"));
+            if (vop && vop[0]) snprintf(s->value_op, sizeof(s->value_op), "%s", vop);
+            cJSON* thresh_j = cJSON_GetObjectItem(trig, "threshold");
+            if (thresh_j) s->value_threshold = thresh_j->valuedouble;
+            cJSON* thresh2_j = cJSON_GetObjectItem(trig, "threshold2");
+            if (thresh2_j) s->value_threshold2 = thresh2_j->valuedouble;
+            s->modbus_last_poll = 0; /* force immediate first poll */
+            /* No VAPIX subscription — polled via Triggers_Tick */
 
         } else {
             LOG_WARN("unknown trigger type '%s' for rule %s", type, rule_id);
@@ -460,19 +518,32 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
                 if (event_port != s->io_port) continue; /* port mismatch — skip this event */
             }
 
-            cJSON* st = cJSON_GetObjectItem(event, "state");
-            int active = st ? (cJSON_IsTrue(st) ? 1 : 0) : -1;
-            /* NOTE: io_last_state is currently unused; commented out to avoid dead code */
-            /* if (active >= 0) s->io_last_state = active; */
+            if (s->io_edge == 3) {
+                /* Supervised fault state (cut/short) — compare string "state" field.
+                 * Note: requires supervision pre-configured via axis-cgi/supervisedio.cgi */
+                cJSON* state_j = cJSON_GetObjectItem(event, "state");
+                const char* state_str = cJSON_GetStringValue(state_j);
+                if (!state_str || strcmp(state_str, s->string_value) != 0) {
+                    Actions_Stop_Active_Siren(s->rule_id);
+                    s->io_since = 0;
+                    continue;
+                }
+                /* Fault state matches — fall through to fire */
+            } else {
+                cJSON* st = cJSON_GetObjectItem(event, "state");
+                int active = st ? (cJSON_IsTrue(st) ? 1 : 0) : -1;
+                /* NOTE: io_last_state is currently unused; commented out to avoid dead code */
+                /* if (active >= 0) s->io_last_state = active; */
 
-            /* Check edge match */
-            int edge_matches = 1;
-            if (s->io_edge == 0 && active == 0) edge_matches = 0; /* rising  = want active   */
-            if (s->io_edge == 1 && active == 1) edge_matches = 0; /* falling = want inactive */
+                /* Check edge match */
+                int edge_matches = 1;
+                if (s->io_edge == 0 && active == 0) edge_matches = 0; /* rising  = want active   */
+                if (s->io_edge == 1 && active == 1) edge_matches = 0; /* falling = want inactive */
 
-            if (!edge_matches) {
-                s->io_since = 0; /* cancel any pending hold */
-                continue;
+                if (!edge_matches) {
+                    s->io_since = 0; /* cancel any pending hold */
+                    continue;
+                }
             }
 
             if (s->io_hold_secs > 0) {
@@ -637,6 +708,81 @@ void Triggers_Tick(void) {
             s->counter_hysteresis = 0; /* reset — allow re-firing */
         }
     }
+
+    /* Modbus read poll triggers */
+    time_t now_mb = time(NULL);
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->type != TRIG_MODBUS_READ) continue;
+        if (s->modbus_last_poll > 0 &&
+            (now_mb - s->modbus_last_poll) < (time_t)s->modbus_poll_interval) continue;
+        s->modbus_last_poll = now_mb;
+
+        /* Build a transient cfg JSON for modbus_pool_get */
+        cJSON* cfg = cJSON_CreateObject();
+        cJSON_AddStringToObject(cfg, "connection_type", s->modbus_connection_type);
+        cJSON_AddStringToObject(cfg, "host",            s->modbus_host);
+        cJSON_AddNumberToObject(cfg, "port",            s->modbus_port);
+        cJSON_AddStringToObject(cfg, "device",          s->modbus_device);
+        cJSON_AddNumberToObject(cfg, "baud",            s->modbus_baud);
+        cJSON_AddStringToObject(cfg, "parity",          s->modbus_parity);
+
+        mb_ctx_t* ctx = modbus_pool_get(cfg);
+        cJSON_Delete(cfg);
+        if (!ctx) {
+            LOG_WARN("modbus_read: no connection available for rule %s", s->rule_id);
+            continue;
+        }
+
+        double  value = 0.0;
+        int     rc    = -1;
+        if (strcmp(s->modbus_reg_type, "holding") == 0) {
+            uint16_t v = 0;
+            rc = mb_read_register(ctx, s->modbus_slave_id, 0x03, s->modbus_register, &v);
+            if (rc == 0) value = (double)v;
+        } else if (strcmp(s->modbus_reg_type, "input") == 0) {
+            uint16_t v = 0;
+            rc = mb_read_register(ctx, s->modbus_slave_id, 0x04, s->modbus_register, &v);
+            if (rc == 0) value = (double)v;
+        } else if (strcmp(s->modbus_reg_type, "coil") == 0) {
+            uint8_t b = 0;
+            rc = mb_read_bit(ctx, s->modbus_slave_id, 0x01, s->modbus_register, &b);
+            if (rc == 0) value = (double)b;
+        } else if (strcmp(s->modbus_reg_type, "discrete") == 0) {
+            uint8_t b = 0;
+            rc = mb_read_bit(ctx, s->modbus_slave_id, 0x02, s->modbus_register, &b);
+            if (rc == 0) value = (double)b;
+        }
+
+        if (rc < 0) {
+            LOG_WARN("modbus_read: read error for rule %s (reg %d): %s",
+                     s->rule_id, s->modbus_register, strerror(errno));
+            modbus_pool_invalidate(ctx);
+            continue;
+        }
+
+        /* Apply threshold comparison if configured */
+        int passes = s->value_op[0]
+            ? value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)
+            : 1;
+
+        if (!passes) {
+            if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
+            s->value_hysteresis = 0;
+            continue;
+        }
+        if (s->value_hysteresis) continue; /* already fired; wait for condition to clear */
+
+        s->value_hysteresis = 1;
+        cJSON* tdata = cJSON_CreateObject();
+        cJSON_AddStringToObject(tdata, "type",          "modbus_read");
+        cJSON_AddNumberToObject(tdata,  "value",         value);
+        cJSON_AddNumberToObject(tdata,  "register",      s->modbus_register);
+        cJSON_AddStringToObject(tdata, "register_type",  s->modbus_reg_type);
+        cJSON_AddNumberToObject(tdata,  "slave_id",      s->modbus_slave_id);
+        fire_fn(s->rule_id, s->trigger_index, tdata);
+        cJSON_Delete(tdata);
+    }
 }
 
 /*-----------------------------------------------------
@@ -793,7 +939,7 @@ cJSON* Triggers_Catalog(void) {
     t = cJSON_CreateObject();
     cJSON_AddStringToObject(t, "type", "io_input");
     cJSON_AddStringToObject(t, "label", "I/O Input");
-    cJSON_AddStringToObject(t, "description", "Fires on digital input state change");
+    cJSON_AddStringToObject(t, "description", "Fires on digital input state change (rising, falling, both) or supervised fault state (cut, short)");
     cJSON_AddItemToArray(arr, t);
 
     t = cJSON_CreateObject();
@@ -824,6 +970,12 @@ cJSON* Triggers_Catalog(void) {
     cJSON_AddStringToObject(t, "type", "manual");
     cJSON_AddStringToObject(t, "label", "Manual");
     cJSON_AddStringToObject(t, "description", "No automatic trigger — fires only via the Fire button or POST /fire API");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "modbus_read");
+    cJSON_AddStringToObject(t, "label", "Modbus Read");
+    cJSON_AddStringToObject(t, "description", "Polls a Modbus register (TCP or RTU/RS-485) and fires when the value crosses a threshold");
     cJSON_AddItemToArray(arr, t);
 
     return arr;
