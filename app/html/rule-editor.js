@@ -571,12 +571,15 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Host</label>
         <input type="text" data-k="host" value="${escHtml(t.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
-        ${ctype==='serial_gateway'?'<div class="form-hint">Use 127.0.0.1. Configure PortManager.P0.GenericTCPServer on the camera to expose the RS-485 port.</div>':''}
+        ${ctype==='serial_gateway'?'<div class="form-hint">Use host 127.0.0.1 and port 4001. Configure RS-485 first via the Settings tab.</div>':''}
       </div>
       <div class="form-group">
         <label>Port</label>
         <input type="number" data-k="port" value="${t.port||(ctype==='serial_gateway'?4001:502)}" min="1" max="65535">
-      </div>` : `
+      </div>` : ''}
+    </div>
+    ${ctype === 'rtu' ? `
+    <div class="form-row">
       <div class="form-group">
         <label>Device</label>
         <input type="text" data-k="device" value="${escHtml(t.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
@@ -592,8 +595,8 @@ function triggerFields(t, rowIdx) {
           <option value="E" ${t.parity==='E'?'selected':''}>Even</option>
           <option value="O" ${t.parity==='O'?'selected':''}>Odd</option>
         </select>
-      </div>`}
-    </div>
+      </div>
+    </div>` : ''}
     <div class="form-row">
       <div class="form-group">
         <label>Slave ID</label>
@@ -2856,12 +2859,15 @@ function actionFields(a, rowIdx) {
       <div class="form-group">
         <label>Host</label>
         <input type="text" data-k="host" value="${escHtml(a.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
-        ${ctype==='serial_gateway'?'<div class="form-hint">Use 127.0.0.1. Configure PortManager.P0.GenericTCPServer on the camera to expose the RS-485 port.</div>':''}
+        ${ctype==='serial_gateway'?'<div class="form-hint">Use host 127.0.0.1 and port 4001. Configure RS-485 first via the Settings tab.</div>':''}
       </div>
       <div class="form-group">
         <label>Port</label>
         <input type="number" data-k="port" value="${a.port||(ctype==='serial_gateway'?4001:502)}" min="1" max="65535">
-      </div>` : `
+      </div>` : ''}
+    </div>
+    ${ctype === 'rtu' ? `
+    <div class="form-row">
       <div class="form-group">
         <label>Device</label>
         <input type="text" data-k="device" value="${escHtml(a.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
@@ -2877,8 +2883,8 @@ function actionFields(a, rowIdx) {
           <option value="E" ${a.parity==='E'?'selected':''}>Even</option>
           <option value="O" ${a.parity==='O'?'selected':''}>Odd</option>
         </select>
-      </div>`}
-    </div>
+      </div>
+    </div>` : ''}
     <div class="form-row">
       <div class="form-group">
         <label>Slave ID</label>

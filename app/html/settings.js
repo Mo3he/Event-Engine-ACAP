@@ -402,30 +402,32 @@ async function checkSerialPort() {
   const dot  = document.getElementById('serial-dot');
   const text = document.getElementById('serial-status-text');
   try {
-    const res = await vapixParam({ action: 'list', group: 'PortManager' });
-    if (!res || res.trim() === '' || res.includes('Error')) {
+    const [pmRes, serRes] = await Promise.all([
+      vapixParam({ action: 'list', group: 'PortManager' }),
+      vapixParam({ action: 'list', group: 'Serial' }).catch(() => '')
+    ]);
+    if (!pmRes || pmRes.trim() === '' || pmRes.includes('Error')) {
       /* No PortManager -- hide the card */
       card.style.display = 'none';
       return;
     }
     card.style.display = 'block';
-    /* Check if already configured */
-    const isRS485   = res.includes('PortMode=RS485');
-    const isEnabled = res.includes('GenericTCPServer.Enabled=yes') || res.includes('GenericTCPServer.Listener.Enabled=yes');
+    const isRS485   = serRes.includes('PortMode=RS485');
+    const isEnabled = pmRes.includes('GenericTCPServer.Enabled=yes') && pmRes.includes('Listener.Enabled=yes');
     if (isRS485 && isEnabled) {
-      dot.style.background  = 'var(--accent-success)';
+      dot.style.background = 'var(--accent-success)';
       text.textContent = 'Configured';
     } else {
-      dot.style.background  = '#f59e0b';
+      dot.style.background = '#f59e0b';
       text.textContent = isRS485 ? 'RS-485 set, TCP listener not enabled' : 'Not configured';
     }
     /* Pre-fill baud if already set */
-    const m = res.match(/BaudRate=(\d+)/);
+    const m = serRes.match(/BaudRate=(\d+)/);
     if (m) {
       const sel = document.getElementById('serial-baud');
       for (const opt of sel.options) { if (opt.value === m[1]) { opt.selected = true; break; } }
     }
-    const pm = res.match(/Listener\.Port=(\d+)/);
+    const pm = pmRes.match(/Listener\.Port=(\d+)/);
     if (pm) document.getElementById('serial-port').value = pm[1];
   } catch(e) {
     /* Not supported or not authenticated -- hide silently */
