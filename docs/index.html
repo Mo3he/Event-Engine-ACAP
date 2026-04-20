@@ -10,7 +10,7 @@
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://mo3he.github.io/Event-Engine-ACAP/">
   <meta property="og:title" content="Event Engine - Automation for Axis Cameras">
-  <meta property="og:description" content="A powerful If-This-Then-That style rule engine running directly on Axis devices. 8 trigger types, 7 conditions, 35+ actions - no server or cloud required.">
+  <meta property="og:description" content="A powerful If-This-Then-That style rule engine running directly on Axis devices. 9 trigger types, 7 conditions, 36+ actions including Modbus TCP/RTU - no server or cloud required.">
   <meta property="og:image" content="https://mo3he.github.io/Event-Engine-ACAP/og-image.png">
   <meta name="image" property="og:image" content="https://mo3he.github.io/Event-Engine-ACAP/og-image.png">
   <meta property="og:image:width" content="1200">
@@ -19,7 +19,7 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Event Engine - Automation for Axis Cameras">
-  <meta name="twitter:description" content="A powerful If-This-Then-That style rule engine running directly on Axis devices. 8 trigger types, 7 conditions, 35+ actions - no server or cloud required.">
+  <meta name="twitter:description" content="A powerful If-This-Then-That style rule engine running directly on Axis devices. 9 trigger types, 7 conditions, 36+ actions including Modbus TCP/RTU - no server or cloud required.">
   <meta name="twitter:image" content="https://mo3he.github.io/Event-Engine-ACAP/og-image.png">
 
   <link rel="icon" href="event_engine_icon_dark.svg" type="image/svg+xml">
@@ -169,28 +169,7 @@
       transition: all 0.2s !important;
     }
     .nav-cta:hover { opacity: 0.9; transform: translateY(-1px); background: var(--accent) !important; }
-    .nav-sponsor {
-      font-size: 13px !important;
-      font-weight: 600 !important;
-      color: #db61a2 !important;
-      border: 1px solid #db61a2 !important;
-      background: transparent !important;
-      padding: 7px 16px !important;
-      border-radius: var(--radius-sm) !important;
-      transition: all 0.2s !important;
-    }
-    .nav-sponsor:hover { background: rgba(219,97,162,0.1) !important; transform: translateY(-1px); }
-    .nav-bmc {
-      font-size: 13px !important;
-      font-weight: 600 !important;
-      color: #FFDD00 !important;
-      border: 1px solid #FFDD00 !important;
-      background: transparent !important;
-      padding: 7px 16px !important;
-      border-radius: var(--radius-sm) !important;
-      transition: all 0.2s !important;
-    }
-    .nav-bmc:hover { background: rgba(255,221,0,0.1) !important; transform: translateY(-1px); }
+
 
     /* ── Hero ───────────────────────────────────── */
     .hero {
@@ -894,9 +873,9 @@
       .features-grid { grid-template-columns: 1fr; }
       .stats-inner { grid-template-columns: 1fr; }
       .stat { padding: 24px 20px; }
-      .nav-links a:not(.nav-cta):not(.nav-sponsor):not(.nav-bmc) { display: none; }
+      .nav-links a:not(.nav-cta) { display: none; }
       .nav-links { gap: 4px; }
-      .nav-cta, .nav-sponsor, .nav-bmc { padding: 6px 10px !important; font-size: 12px !important; }
+      .nav-cta { padding: 6px 10px !important; font-size: 12px !important; }
       .hero { padding: 80px 20px 60px; min-height: auto; }
       .hero h1 { font-size: clamp(32px, 8vw, 48px); letter-spacing: -1px; }
       .hero-badge { font-size: 11px; padding: 5px 12px 5px 6px; margin-bottom: 16px; }
@@ -941,13 +920,6 @@
       <a href="#capabilities">Capabilities</a>
       <a href="use-cases.html">Use Cases</a>
       <a href="help.html">Docs</a>
-      <a href="https://buymeacoffee.com/mo3he" target="_blank" rel="noopener" class="nav-bmc">
-        ☕ Buy me a coffee
-      </a>
-      <a href="https://github.com/sponsors/Mo3he" class="nav-sponsor">
-        <svg viewBox="0 0 16 16" fill="currentColor" style="width:14px;height:14px;margin-right:2px"><path d="M4.25 2.5c-1.336 0-2.75 1.164-2.75 3 0 2.15 1.58 4.144 3.365 5.682A20 20 0 0 0 8 13.393a20 20 0 0 0 3.135-2.211C12.92 9.644 14.5 7.65 14.5 5.5c0-1.836-1.414-3-2.75-3-1.373 0-2.609.986-3.029 2.456a.75.75 0 0 1-1.442 0C6.859 3.486 5.623 2.5 4.25 2.5M8 14.25l-.345.666-.002-.001-.006-.003-.018-.01a8 8 0 0 1-.268-.15 21 21 0 0 1-3.023-2.211C2.705 10.856.75 8.6.75 5.5.75 2.836 2.836 1 4.25 1 5.797 1 7.153 1.802 8 3.02 8.847 1.802 10.203 1 11.75 1 13.164 1 15.25 2.836 15.25 5.5c0 3.1-1.955 5.356-4.088 6.541a21 21 0 0 1-3.29 2.36l-.019.01-.006.004-.002.001z"/></svg>
-        Sponsor
-      </a>
       <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest" class="nav-cta">
         <svg viewBox="0 0 20 20" fill="currentColor" style="width:14px;height:14px;margin-right:2px"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download
@@ -973,11 +945,11 @@
       Triggers, conditions, actions.<br>No server or cloud required.
     </p>
     <div class="hero-actions">
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_7_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_8_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download aarch64
       </a>
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_7_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_8_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download armv7hf
       </a>
@@ -1007,7 +979,7 @@
 <section class="stats reveal">
   <div class="stats-inner">
     <div class="stat">
-      <div class="stat-value">8</div>
+      <div class="stat-value">9</div>
       <div class="stat-label">Trigger Types</div>
     </div>
     <div class="stat">
@@ -1015,7 +987,7 @@
       <div class="stat-label">Condition Types</div>
     </div>
     <div class="stat">
-      <div class="stat-value">35+</div>
+      <div class="stat-value">36+</div>
       <div class="stat-label">Action Types</div>
     </div>
     <div class="stat">
@@ -1083,6 +1055,11 @@
         <h3>Arm / Disarm Patterns</h3>
         <p>System-level arming via MQTT or variables. Build full security workflows with conditional rule execution.</p>
       </div>
+      <div class="feature-card">
+        <div class="feature-icon purple">🏭</div>
+        <h3>Industrial Integration</h3>
+        <p>Read and write Modbus TCP/RTU registers and coils. Bridge camera events to PLCs, energy meters, and industrial sensors over RS-485 or Ethernet.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -1104,7 +1081,7 @@
       <div class="tca-col">
         <div class="tca-header">
           <div class="tca-header-row"><span class="tca-dot green"></span><h3>Triggers</h3></div>
-          <span>8 trigger types</span>
+          <span>9 trigger types</span>
         </div>
         <ul class="tca-list">
           <li class="has-desc"><div class="tca-item-row"><span class="ico">📹</span> Device Events</div><span class="tca-item-desc">Every event on every Axis device</span></li>
@@ -1115,6 +1092,7 @@
           <li class="has-desc"><div class="tca-item-row"><span class="ico">🔘</span> I/O Input</div><span class="tca-item-desc">Physical input port state changes</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">#️⃣</span> Counter Threshold</div><span class="tca-item-desc">Fire when a counter crosses a value</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">🔗</span> Rule Chain</div><span class="tca-item-desc">Trigger when another rule fires</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🏭</span> Modbus Read</div><span class="tca-item-desc">Poll Modbus TCP/RTU registers over RS-485 or Ethernet</span></li>
         </ul>
       </div>
 
@@ -1139,7 +1117,7 @@
       <div class="tca-col">
         <div class="tca-header">
           <div class="tca-header-row"><span class="tca-dot blue"></span><h3>Actions</h3></div>
-          <span>35+ action types</span>
+          <span>36+ action types</span>
         </div>
         <ul class="tca-list two-col">
           <li class="has-desc"><div class="tca-item-row"><span class="ico">🌐</span> HTTP Request</div><span class="tca-item-desc">Call any REST API or webhook</span></li>
@@ -1177,6 +1155,7 @@
           <li class="has-desc"><div class="tca-item-row"><span class="ico">📊</span> InfluxDB Write</div><span class="tca-item-desc">Write time-series data points</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">👥</span> AOA Get Counts</div><span class="tca-item-desc">Fetch live occupancy counts</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">📓</span> Send Syslog</div><span class="tca-item-desc">Forward to syslog server</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🏭</span> Modbus Write</div><span class="tca-item-desc">Write coils or registers on PLCs and industrial devices</span></li>
         </ul>
       </div>
     </div>
@@ -1286,11 +1265,11 @@
       No licenses. No subscriptions. Free forever.
     </p>
     <div class="cta-buttons">
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_7_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_8_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download aarch64
       </a>
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_7_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_8_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download armv7hf
       </a>
@@ -1310,11 +1289,6 @@
     <a href="https://github.com/Mo3he/Event-Engine-ACAP/issues">Issues</a>
     <a href="https://github.com/Mo3he/Event-Engine-ACAP/discussions">Discussions</a>
   </div>
-  <p style="margin-top:16px">
-    <a href="https://buymeacoffee.com/mo3he" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;background:#FFDD00;color:#000;font-weight:700;padding:8px 18px;border-radius:8px;text-decoration:none;font-size:14px">
-      ☕ Buy me a coffee
-    </a>
-  </p>
   <p>Event Engine ACAP - Open source automation for Axis cameras</p>
   <p><a href="https://github.com/Mo3he/Event-Engine-ACAP/blob/main/LICENSE.txt">MIT License</a></p>
 </footer>
@@ -1349,6 +1323,7 @@ const examples = [
   { trigger: 'I/O Input Rising',  condition: 'AOA Occupancy > 5',action: 'Siren + Slack Alert' },
   { trigger: 'Counter ≥ 50',      condition: 'Day/Night: Night', action: 'Paging Console + Email' },
   { trigger: 'AOA: Person Enters',condition: 'Time: 22:00–06:00',action: 'Record + Teams Alert' },
+  { trigger: 'Modbus: Temp > 80°C', condition: 'Variable: production=1', action: 'Modbus Write + MQTT Alert' },
 ];
 let exIdx = 0;
 const nodes = document.querySelectorAll('.rule-node');
