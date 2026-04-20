@@ -564,7 +564,7 @@ function triggerFields(t, rowIdx) {
         <select data-k="connection_type" onchange="rerenderTrigger(this)">
           <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
           <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
-          <option value="rtu" ${ctype==='rtu'?'selected':''}>RTU direct (advanced)</option>
+          ${ctype==='rtu'?'<option value="rtu" selected>RTU direct (advanced)</option>':''}
         </select>
       </div>
       ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
@@ -2852,7 +2852,7 @@ function actionFields(a, rowIdx) {
         <select data-k="connection_type" onchange="rerenderAction(this)">
           <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
           <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
-          <option value="rtu" ${ctype==='rtu'?'selected':''}>RTU direct (advanced)</option>
+          ${ctype==='rtu'?'<option value="rtu" selected>RTU direct (advanced)</option>':''}
         </select>
       </div>
       ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
