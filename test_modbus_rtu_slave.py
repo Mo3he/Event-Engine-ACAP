@@ -105,6 +105,32 @@ def build_response(req: bytes) -> bytes | None:
         logging.info(f"FC04 input[{addr}:{addr+count}] -> {regs}")
         return append_crc(body)
 
+    elif fc == 0x05:  # Write Single Coil
+        addr, value = struct.unpack(">HH", req[2:6])
+        coils[addr] = 1 if value == 0xFF00 else 0
+        logging.info(f"FC05 WRITE coil[{addr}] = {coils[addr]}")
+        return append_crc(req[:6])  # echo back request as response
+
+    elif fc == 0x06:  # Write Single Register
+        addr, value = struct.unpack(">HH", req[2:6])
+        holding[addr] = value
+        logging.info(f"FC06 WRITE holding[{addr}] = {value}")
+        return append_crc(req[:6])  # echo back request as response
+
+    elif fc == 0x0F:  # Write Multiple Coils
+        addr, count = struct.unpack(">HH", req[2:6])
+        logging.info(f"FC15 WRITE coils[{addr}:{addr+count}]")
+        body = bytes([slave, fc]) + struct.pack(">HH", addr, count)
+        return append_crc(body)
+
+    elif fc == 0x10:  # Write Multiple Registers
+        addr, count = struct.unpack(">HH", req[2:6])
+        for i in range(count):
+            holding[addr + i] = struct.unpack(">H", req[7 + i*2:9 + i*2])[0]
+        logging.info(f"FC16 WRITE holding[{addr}:{addr+count}] = {[holding.get(addr+i) for i in range(count)]}")
+        body = bytes([slave, fc]) + struct.pack(">HH", addr, count)
+        return append_crc(body)
+
     else:
         # Exception: illegal function
         body = bytes([slave, fc | 0x80, 0x01])
