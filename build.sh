@@ -2,15 +2,25 @@
 set -e
 trap 'echo "Build failed at line $LINENO"; exit 1' ERR
 
+if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+    CONTAINER_CMD=podman
+elif command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+    CONTAINER_CMD=docker
+else
+    echo "ERROR: Neither podman nor docker is available/running."
+    exit 1
+fi
+echo "Using: $CONTAINER_CMD"
+
 rm -rf build *.eap
 
 build_arch() {
     ARCH=$1
     echo "=== Building $ARCH ==="
-    docker build --progress=plain --no-cache --build-arg ARCH="$ARCH" --tag "acap_event_engine_$ARCH" .
-    CONTAINER_ID=$(docker create "acap_event_engine_$ARCH")
-    docker cp "$CONTAINER_ID":/opt/app ./build
-    docker rm "$CONTAINER_ID"
+    $CONTAINER_CMD build --progress=plain --no-cache --build-arg ARCH="$ARCH" --tag "acap_event_engine_$ARCH" .
+    CONTAINER_ID=$($CONTAINER_CMD create "acap_event_engine_$ARCH")
+    $CONTAINER_CMD cp "$CONTAINER_ID":/opt/app ./build
+    $CONTAINER_CMD rm "$CONTAINER_ID" || true
     mv build/*.eap .
     rm -rf build
 }
