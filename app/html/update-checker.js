@@ -69,7 +69,7 @@ function showUpdateBanner(current, latest, releaseUrl) {
     `(you are running v${escHtml(current)}).` +
     `</span> ` +
     `<span class="update-banner-actions">` +
-    `<a href="${escHtml(releaseUrl)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">View Release</a>` +
+    `<a href="${escHtml(releaseUrl)}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm">View Release</a>` +
     `<button class="btn btn-ghost btn-sm" id="update-dismiss-btn">Dismiss</button>` +
     `</span>`;
 
