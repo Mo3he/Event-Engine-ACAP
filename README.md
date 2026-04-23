@@ -31,7 +31,7 @@ Each rule has:
 
 **Trigger logic** can be set to `OR` (any trigger fires the rule), `AND` (all triggers must fire within a configurable time window), or `AND_ACTIVE` (all triggers must be simultaneously in their active state). Conditions can be combined as `AND` (all must pass) or `OR` (any passes).
 
-Rules are built in a clean web UI and take effect immediately — no camera restart required.
+Rules are built in a clean web UI.
 
 <img width="410" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/a01a9021-0cda-4d38-bd5a-27a52ec13a61" />
 
