@@ -675,18 +675,29 @@ function renderTriggerList() {
   });
 }
 
+function flushTriggerRows() {
+  triggerRows = triggerRows.map((_, i) => {
+    const el = document.getElementById('trow-' + i);
+    if (!el) return _;
+    const data = { type: _.type };
+    el.querySelectorAll('[data-k]').forEach(inp => { data[inp.dataset.k] = inp.value; });
+    return data;
+  });
+}
 function addTriggerRow() {
+  flushTriggerRows();
   triggerRows.push({ type: 'vapix_event' });
   renderTriggerList();
 }
 
 function removeTriggerRow(i) {
+  flushTriggerRows();
   triggerRows.splice(i, 1);
   renderTriggerList();
 }
 
 function changeTriggerType(i, type) {
-  collectTriggerRow(i);
+  flushTriggerRows();
   triggerRows[i] = { type };
   renderTriggerList();
 }
@@ -1175,9 +1186,10 @@ function renderConditionList() {
   `).join('');
 }
 
-function addConditionRow() { conditionRows.push({ type: 'time_window' }); renderConditionList(); }
-function removeConditionRow(i) { conditionRows.splice(i, 1); renderConditionList(); }
-function changeConditionType(i, type) { conditionRows[i] = { type }; renderConditionList(); }
+function flushConditionRows() { conditionRows = collectRows(conditionRows, 'crow'); }
+function addConditionRow() { flushConditionRows(); conditionRows.push({ type: 'time_window' }); renderConditionList(); }
+function removeConditionRow(i) { flushConditionRows(); conditionRows.splice(i, 1); renderConditionList(); }
+function changeConditionType(i, type) { flushConditionRows(); conditionRows[i] = { type }; renderConditionList(); }
 
 function collectConditionRow(i) {
   const el = document.getElementById('crow-' + i);
@@ -1283,6 +1295,8 @@ function getTriggerTokens() {
       tokens.push('{{trigger.scenario_id}}', '{{trigger.active}}', '{{trigger.reason}}');
     } else if (t.type === 'rule_fired') {
       tokens.push('{{trigger.fired_rule_id}}');
+    } else if (t.type === 'modbus_read') {
+      tokens.push('{{trigger.value}}', '{{trigger.register}}', '{{trigger.register_type}}', '{{trigger.slave_id}}');
     }
   }
   /* vapix_query actions inject event data as {{trigger.FIELD}} — resolve from catalog */
@@ -1339,6 +1353,11 @@ function toggleTokenPicker(btn) {
   const group = btn.closest('.form-group');
   _tokenTargetInput = group && (group.querySelector('textarea') || group.querySelector('input[type="text"]'));
   _tokenPickerBtn   = btn;
+
+  /* Sync form state into actionRows/triggerRows before building tokens so that
+   * newly configured actions (e.g. vapix_query) are reflected immediately. */
+  actionRows  = collectRows(actionRows,  'arow');
+  triggerRows = collectRows(triggerRows, 'trow');
 
   /* build token groups */
   const triggerTokens = getTriggerTokens();
@@ -1922,9 +1941,14 @@ function actionFields(a, rowIdx) {
       </div>
     </div>`;
   if (type === 'vapix_query') {
-    /* Hidden topic inputs — mirroring the trigger pattern */
-    const ns  = k => a[k] ? Object.keys(a[k])[0]   || '' : '';
-    const val = k => a[k] ? Object.values(a[k])[0] || '' : '';
+    /* Hidden topic inputs — mirroring the trigger pattern.
+     * Topics may be in object form {ns:val} (from applyVapixEventAction / saved JSON)
+     * or in flat form topic0_ns / topic0_val (after collectRows reads form inputs).
+     * Handle both so re-renders don't lose the selected event. */
+    const ns  = k => a[`${k}_ns`]  !== undefined ? a[`${k}_ns`]
+                   : (a[k] ? Object.keys(a[k])[0]   || '' : '');
+    const val = k => a[`${k}_val`] !== undefined ? a[`${k}_val`]
+                   : (a[k] ? Object.values(a[k])[0] || '' : '');
     const hiddenTopics = ['topic0','topic1','topic2','topic3'].map(k =>
       `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
       `<input type="hidden" data-k="${k}_val" value="${escHtml(val(k))}">`
@@ -1938,12 +1962,17 @@ function actionFields(a, rowIdx) {
       return ak === bk && x[ak] === y[bk];
     };
     const topicKeys = ['topic0','topic1','topic2','topic3'];
+    /* Build normalized topic objects — handles both object form and flat _ns/_val form */
+    const getTopic = k => {
+      if (a[k] && typeof a[k] === 'object') return a[k];
+      const v = val(k); return v ? { [ns(k)]: v } : null;
+    };
     let eventDropdown;
     if (isRemote) {
       const cacheKey = `${host}:::vapix_events_catalog`;
       const cached = host && (typeof remoteCapCache !== 'undefined') ? remoteCapCache[cacheKey] : null;
       if (cached && cached.length) {
-        const matchIdx = cached.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], a[k])));
+        const matchIdx = cached.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
         eventDropdown = `
         <select onchange="applyRemoteVapixEventAction(this, '${escHtml(host)}')">
           <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
@@ -1952,15 +1981,16 @@ function actionFields(a, rowIdx) {
           ).join('')}
         </select>`;
       } else {
+        const t0 = getTopic('topic0'), t1 = getTopic('topic1'), t2 = getTopic('topic2'), t3 = getTopic('topic3');
         eventDropdown = `
         <div style="display:flex;align-items:center;gap:6px;">
-          <input type="text" value="${escHtml(val('topic0') ? vapixCatalogTopicPath({topics:{topic0:a.topic0,topic1:a.topic1,topic2:a.topic2,topic3:a.topic3}}) : '')}" placeholder="Enter IP and click Load Events" readonly style="flex:1;opacity:.7;">
+          <input type="text" value="${escHtml(t0 ? vapixCatalogTopicPath({topics:{topic0:t0,topic1:t1,topic2:t2,topic3:t3}}) : '')}" placeholder="Enter IP and click Load Events" readonly style="flex:1;opacity:.7;">
           <button type="button" class="btn btn-ghost btn-sm" onclick="loadRemoteActionVapixEvents('${rowIdx}')" style="white-space:nowrap">Load Events</button>
         </div>`;
       }
     } else {
       const matchIdx = vapixEventCatalog
-        ? vapixEventCatalog.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], a[k])))
+        ? vapixEventCatalog.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))))
         : -1;
       eventDropdown = `
         <select onchange="applyVapixEventAction(this)">
@@ -2945,10 +2975,12 @@ function rerenderAction(sel) {
   actionRows[i] = data;
   renderActionList();
 }
-function addActionRow() { actionRows.push({ type: 'http_request' }); renderActionList(); }
-function removeActionRow(i) { actionRows.splice(i, 1); renderActionList(); }
-function changeActionType(i, type) { actionRows[i] = { type }; renderActionList(); }
+function flushActionRows() { actionRows = collectRows(actionRows, 'arow'); }
+function addActionRow() { flushActionRows(); actionRows.push({ type: 'http_request' }); renderActionList(); }
+function removeActionRow(i) { flushActionRows(); actionRows.splice(i, 1); renderActionList(); }
+function changeActionType(i, type) { flushActionRows(); actionRows[i] = { type }; renderActionList(); }
 function moveAction(i, dir) {
+  flushActionRows();
   const j = i + dir;
   if (j < 0 || j >= actionRows.length) return;
   [actionRows[i], actionRows[j]] = [actionRows[j], actionRows[i]];
@@ -3171,10 +3203,12 @@ function normalizeAction(a) {
     }
   }
   if (a.type === 'vapix_query') {
-    /* Reconstruct topic0-3 objects from the hidden _ns / _val fields */
+    /* Reconstruct topic0-3 objects from the hidden _ns / _val fields (flat form after collectRows)
+     * or directly from object form (when saving without having re-rendered the action list). */
     ['topic0','topic1','topic2','topic3'].forEach(k => {
       const v = a[`${k}_val`];
       if (v) out[k] = { [a[`${k}_ns`] || '']: v };
+      else if (a[k] && typeof a[k] === 'object') out[k] = a[k];
     });
   }
   if (a.type === 'siren_light') {
