@@ -1318,7 +1318,7 @@ int ACAP_DEVICE_Seconds_Since_Midnight(void) {
 static char ACAP_DEVICE_timestring[128] = "2020-01-01 00:00:00";
 static char ACAP_DEVICE_date[128] = "2023-01-01";
 static char ACAP_DEVICE_time_buf[128] = "00:00:00";
-static char ACAP_DEVICE_isostring[128] = "2020-01-01T00:00:00+0000";
+static char ACAP_DEVICE_isostring[128] = "2020-01-01T00:00:00+00:00";
 
 const char* ACAP_DEVICE_Date(void) {
     time_t t = time(NULL);
@@ -1354,6 +1354,15 @@ const char* ACAP_DEVICE_ISOTime(void) {
     struct tm tm;
     localtime_r(&t, &tm);
     strftime(ACAP_DEVICE_isostring, sizeof(ACAP_DEVICE_isostring), "%Y-%m-%dT%T%z", &tm);
+    /* %z produces ±HHMM; insert colon to produce RFC 3339 ±HH:MM */
+    size_t len = strlen(ACAP_DEVICE_isostring);
+    if (len >= 5) {
+        char* mm = ACAP_DEVICE_isostring + len - 2;
+        mm[3] = '\0';    /* extend null terminator */
+        mm[2] = mm[1];  /* shift second M digit right */
+        mm[1] = mm[0];  /* shift first M digit right */
+        mm[0] = ':';    /* insert colon */
+    }
     return ACAP_DEVICE_isostring;
 }
 

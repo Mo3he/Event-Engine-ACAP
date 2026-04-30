@@ -232,7 +232,7 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 
 | Variable | Value |
 |----------|-------|
-| `{{timestamp}}` | ISO 8601 UTC timestamp |
+| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |
 | `{{date}}` | YYYY-MM-DD |
 | `{{time}}` | HH:MM:SS |
 | `{{camera.serial}}` | Camera serial number |

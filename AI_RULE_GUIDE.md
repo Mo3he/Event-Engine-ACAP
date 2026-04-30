@@ -1247,7 +1247,7 @@ All string fields in actions support `{{...}}` variable substitution:
 
 | Variable | Value |
 |----------|-------|
-| `{{timestamp}}` | ISO 8601 UTC timestamp |
+| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |
 | `{{date}}` | `YYYY-MM-DD` |
 | `{{time}}` | `HH:MM:SS` |
 | `{{camera.serial}}` | Device serial number |

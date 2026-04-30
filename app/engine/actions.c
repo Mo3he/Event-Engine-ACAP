@@ -276,7 +276,13 @@ void Actions_Init(void) {
  *-----------------------------------------------------*/
 #define MAX_TEMPLATE_OUTPUT (256 * 1024) /* 256 KB cap on expanded template */
 
-char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
+/*
+ * Internal template expander.  When url_encode_values is non-zero every
+ * substituted value is percent-encoded via curl_easy_escape so that
+ * characters like '+' (timezone offset) are not misread as spaces by
+ * servers that apply application/x-www-form-urlencoded decoding.
+ */
+static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url_encode_values) {
     if (!tmpl) return strdup("");
 
     size_t out_cap = strlen(tmpl) * 2 + 256;
@@ -372,9 +378,20 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
             }
 
             if (!replacement) replacement = "";
+
+            /* Percent-encode the substituted value when building a URL so
+             * that characters such as '+' in a timezone offset are not
+             * decoded as a space by the receiving server. */
+            char* escaped = NULL;
+            if (url_encode_values && replacement[0]) {
+                escaped = curl_easy_escape(NULL, replacement, 0);
+                if (escaped) replacement = escaped;
+            }
+
             size_t rlen = strlen(replacement);
             if (out_len + rlen + 1 > MAX_TEMPLATE_OUTPUT) {
                 LOG_WARN("template expansion exceeded %d bytes, truncating", MAX_TEMPLATE_OUTPUT);
+                curl_free(escaped);
                 free(dyn_replacement);
                 break;
             }
@@ -385,6 +402,7 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
             memcpy(out + out_len, replacement, rlen);
             out_len += rlen;
             out[out_len] = '\0';
+            curl_free(escaped);
             free(dyn_replacement);
             p = end + 2;
         } else {
@@ -397,6 +415,15 @@ char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
         }
     }
     return out;
+}
+
+char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
+    return expand_template_impl(tmpl, trigger_data, 0);
+}
+
+/* URL-safe variant: percent-encodes each substituted value. */
+static char* expand_url_template(const char* tmpl, cJSON* trigger_data) {
+    return expand_template_impl(tmpl, trigger_data, 1);
 }
 
 /*-----------------------------------------------------
@@ -1000,7 +1027,7 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     }
     cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
 
-    char* url    = Actions_Expand_Template(url_tmpl, effective_td);
+    char* url    = expand_url_template(url_tmpl, effective_td);
     char* body   = NULL;
     const char* method = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "method"));
     if (!method) method = "GET";
@@ -2506,7 +2533,7 @@ static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
         return;
     }
 
-    char* url = Actions_Expand_Template(url_tmpl, trigger_data);
+    char* url = expand_url_template(url_tmpl, trigger_data);
     const char* method = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "method"));
     if (!method) method = "POST";
 
