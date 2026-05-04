@@ -394,6 +394,23 @@ use-cases/
 
 ---
 
+## Roadmap
+
+### AXIS OS 13 compatibility (target: September 2026)
+
+AXIS OS 13 ships in September 2026 and introduces several breaking changes. A [full migration plan](OS13_MIGRATION.md) is tracked separately. Key items:
+
+- **Recompile against OS 13 SDK** - the 64-bit `time_t` ABI break requires a rebuild; existing `.eap` files will not install on OS 13
+- **`record/record.cgi` + `record/stop.cgi` replacement** - these endpoints are removed in OS 13; the SD card recording action will be migrated to the new Edge Storage API
+- **Manifest `compatibleWith` declaration** - OS 13 requires ACAP manifests to declare supported OS versions
+- **Manifest schema v2** - OS 13 enforces manifest schema v2 for all ACAPs
+
+### Remote camera HTTPS support
+
+Cameras factory-reset on AXIS OS 13 default to HTTPS-only. The cross-device remote host feature currently connects over HTTP, which those cameras will reject. A future release will add an HTTPS toggle for remote host connections.
+
+---
+
 ## License
 
 MIT
