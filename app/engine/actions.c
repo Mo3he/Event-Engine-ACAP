@@ -1355,6 +1355,12 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
     if (!position)   position   = "topLeft";
     if (!text_color) text_color = "white";
 
+    /* "keep" leaves the overlay's current position untouched; "custom" uses
+     * explicit normalized coordinates (pos_x/pos_y, range -1..1). Otherwise a
+     * preset name (topLeft, bottomRight, …) is sent. */
+    int keep_position   = (strcmp(position, "keep")   == 0);
+    int custom_position = (strcmp(position, "custom") == 0);
+
     cJSON* dur_j = cJSON_GetObjectItem(cfg, "duration");
     int duration = dur_j ? (int)dur_j->valuedouble : 0;
 
@@ -1368,15 +1374,29 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
     cJSON_AddNumberToObject(params, "camera", channel);
     cJSON_AddStringToObject(params, "text", text);
     free(text);
-    if (identity >= 0) {
+    if (identity >= 0)
         cJSON_AddNumberToObject(params, "identity", identity);
-        /* Send position and textColor on setText too — the overlay may be cleared and need repositioning */
-        cJSON_AddStringToObject(params, "position",   position);
-        cJSON_AddStringToObject(params, "textColor",  text_color);
-    } else {
-        cJSON_AddStringToObject(params, "position",   position);
-        cJSON_AddStringToObject(params, "textColor",  text_color);
+    /* Send position and textColor on setText too — the overlay may be cleared
+     * and need repositioning. When "keep" is selected, omit position so the
+     * camera retains whatever position the user set manually. */
+    if (custom_position) {
+        cJSON* px = cJSON_GetObjectItem(cfg, "pos_x");
+        cJSON* py = cJSON_GetObjectItem(cfg, "pos_y");
+        double x = px ? (cJSON_IsString(px) ? atof(px->valuestring) : px->valuedouble) : -0.99;
+        double y = py ? (cJSON_IsString(py) ? atof(py->valuestring) : py->valuedouble) : -0.99;
+        cJSON* pos = cJSON_AddArrayToObject(params, "position");
+        cJSON_AddItemToArray(pos, cJSON_CreateNumber(x));
+        cJSON_AddItemToArray(pos, cJSON_CreateNumber(y));
+    } else if (strcmp(position, "top") == 0 || strcmp(position, "bottom") == 0) {
+        /* Camera firmware ignores "top"/"bottom" string presets (falls back to
+         * left), so send centre as normalized coordinates instead. */
+        cJSON* pos = cJSON_AddArrayToObject(params, "position");
+        cJSON_AddItemToArray(pos, cJSON_CreateNumber(0.0));
+        cJSON_AddItemToArray(pos, cJSON_CreateNumber(strcmp(position, "top") == 0 ? -0.95 : 0.95));
+    } else if (!keep_position) {
+        cJSON_AddStringToObject(params, "position", position);
     }
+    cJSON_AddStringToObject(params, "textColor", text_color);
 
     char* body = cJSON_PrintUnformatted(req);
     cJSON_Delete(req);

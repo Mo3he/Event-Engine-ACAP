@@ -135,7 +135,7 @@ Actions are grouped by category in the rule editor. Actions that support **while
 | Type | Description |
 |------|-------------|
 | **Recording** | Start or stop a recording. Supports `while_active` auto-stop |
-| **Overlay Text** | Write text to the video stream with an optional auto-remove duration. Supports `while_active` auto-clear |
+| **Overlay Text** | Write text to the video stream with an optional auto-remove duration. Position via preset, custom X/Y coordinates, or keep the camera's current position. Supports `while_active` auto-clear |
 | **PTZ Preset** | Move the camera to a named preset position |
 | **Guard Tour** | Start or stop a configured PTZ guard tour. Available tours are loaded from the camera and shown in a dropdown |
 | **IR Cut Filter** | Force the IR cut filter **On** (day mode), **Off** (night mode), or restore **Auto** switching |

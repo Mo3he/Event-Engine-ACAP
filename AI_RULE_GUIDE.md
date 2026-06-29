@@ -656,6 +656,8 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
   "text": "Motion at {{time}}",
   "duration": 10,
   "channel": 1,
+  "position": "topLeft",
+  "text_color": "white",
   "while_active": false
 }
 ```
@@ -665,6 +667,10 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
 | `text` | string | — | Overlay text. Supports template variables. |
 | `duration` | integer | `0` | Seconds to display (0 = until next update) |
 | `channel` | integer | `1` | Video channel |
+| `position` | string | `topLeft` | `keep` (leave current position untouched), `topLeft`, `topRight`, `bottomLeft`, `bottomRight`, `top` (top centre), `bottom` (bottom centre), or `custom` |
+| `pos_x` | number | `-0.99` | Custom X coordinate (-1..1, left to right). Used when `position` = `custom` |
+| `pos_y` | number | `-0.99` | Custom Y coordinate (-1..1, top to bottom). Used when `position` = `custom` |
+| `text_color` | string | `white` | `white`, `black`, `red`, `transparent`, `semiTransparent` |
 | `while_active` | boolean | `false` | Auto-clear when trigger goes inactive |
 
 ### 5. `ptz_preset` — PTZ Preset

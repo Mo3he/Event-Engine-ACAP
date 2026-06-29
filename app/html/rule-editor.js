@@ -1733,7 +1733,7 @@ function actionFields(a, rowIdx) {
         ${hint}
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row" style="flex-wrap:wrap;">
       <div class="form-group" style="flex:0 0 80px;">
         <label>Channel</label>
         <input type="number" data-k="channel" min="1" value="${a.channel || 1}">
@@ -1744,15 +1744,26 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Position</label>
-        <select data-k="position">
+        <select data-k="position" onchange="rerenderAction(this)">
+          <option value="keep"        ${a.position==='keep'        ? 'selected':''}>Keep current</option>
           <option value="topLeft"     ${(a.position||'topLeft')==='topLeft'     ? 'selected':''}>Top Left</option>
           <option value="topRight"    ${a.position==='topRight'    ? 'selected':''}>Top Right</option>
           <option value="bottomLeft"  ${a.position==='bottomLeft'  ? 'selected':''}>Bottom Left</option>
           <option value="bottomRight" ${a.position==='bottomRight' ? 'selected':''}>Bottom Right</option>
           <option value="top"         ${a.position==='top'         ? 'selected':''}>Top Centre</option>
           <option value="bottom"      ${a.position==='bottom'      ? 'selected':''}>Bottom Centre</option>
+          <option value="custom"      ${a.position==='custom'      ? 'selected':''}>Custom (X,Y)</option>
         </select>
       </div>
+      ${a.position==='custom' ? `
+      <div class="form-group" style="flex:0 0 70px;">
+        <label>X (-1..1)</label>
+        <input type="number" step="0.01" min="-1" max="1" data-k="pos_x" value="${a.pos_x !== undefined ? a.pos_x : -0.99}">
+      </div>
+      <div class="form-group" style="flex:0 0 70px;">
+        <label>Y (-1..1)</label>
+        <input type="number" step="0.01" min="-1" max="1" data-k="pos_y" value="${a.pos_y !== undefined ? a.pos_y : -0.99}">
+      </div>` : ''}
       <div class="form-group" style="flex:0 0 120px;">
         <label>Text Colour</label>
         <select data-k="text_color">
