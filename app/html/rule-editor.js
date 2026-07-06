@@ -1545,6 +1545,12 @@ function remoteDeviceSection(obj, rerenderFn) {
       <label>Password</label>
       <input type="password" data-k="remote_pass" value="${escHtml(obj.remote_pass || '')}" autocomplete="new-password">
     </div>
+    <div class="form-group" style="flex:0 0 150px;">
+      <label>&nbsp;</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer" title="Use HTTPS to reach this device. Required for OS 13 cameras that are HTTPS-only; the camera's self-signed certificate is accepted.">
+        <input type="checkbox" data-k="remote_https" ${obj.remote_https ? 'checked' : ''}> Use HTTPS
+      </label>
+    </div>
     ` : ''}
   </div>`;
 }
@@ -1582,6 +1588,12 @@ function remoteDeviceFields(a) {
     <div class="form-group" style="flex:0 0 130px;">
       <label>Password</label>
       <input type="password" data-k="remote_pass" value="${escHtml(a.remote_pass || '')}" placeholder="" autocomplete="new-password">
+    </div>
+    <div class="form-group" style="flex:0 0 150px;">
+      <label>&nbsp;</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer" title="Use HTTPS to reach this device. Required for OS 13 cameras that are HTTPS-only; the camera's self-signed certificate is accepted.">
+        <input type="checkbox" data-k="remote_https" ${a.remote_https ? 'checked' : ''}> Use HTTPS
+      </label>
     </div>
     ` : ''}
   </div>`;
@@ -1715,7 +1727,14 @@ function actionFields(a, rowIdx) {
       <div class="form-group">
         <label>Stream Profile</label>
         <input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Quality">
-        <div class="form-hint">Name of the stream profile configured on the camera. Defaults to Quality if left blank.</div>
+        <div class="form-hint">Name of a stream profile configured on the camera. Leave blank to use Stream Options below, or the camera default.</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Stream Options (advanced)</label>
+        <input type="text" data-k="options" value="${escHtml(a.options || '')}" placeholder="resolution=1920x1080&amp;fps=15">
+        <div class="form-hint">Raw VAPIX stream options, e.g. <b>resolution=1920x1080</b>, <b>videocodec=h265</b>, or <b>fps=15</b> (combine with <b>&amp;</b>). Takes precedence over Stream Profile. If both are blank, recording defaults to <b>videocodec=h264</b> at the sensor's native resolution.</div>
       </div>
     </div>
     <div class="form-row"><div class="form-group">

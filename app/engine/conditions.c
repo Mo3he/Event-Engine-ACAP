@@ -23,6 +23,27 @@ void Conditions_Set_Proxy(const char* proxy) {
 static char* cond_remote_get(const char* host, const char* user, const char* pass, const char* cgi);
 static char* cond_remote_post(const char* host, const char* user, const char* pass, const char* path, const char* body);
 
+/* Strip an http(s):// scheme prefix from a remote host string. Returns 1 for
+ * https (caller should disable TLS cert verification for self-signed camera
+ * certs), 0 for http (the default). */
+static int cond_remote_scheme(const char** host) {
+    if (strncmp(*host, "https://", 8) == 0) { *host += 8; return 1; }
+    if (strncmp(*host, "http://",  7) == 0) { *host += 7; return 0; }
+    return 0;
+}
+
+/* Read remote_host from cfg, prefixing "https://" when the per-target
+ * remote_https flag is set. Returns buf if a remote host is configured, or
+ * NULL for a local target. */
+static const char* cond_remote_host(cJSON* cfg, char* buf, size_t n) {
+    const char* h = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    if (!h || !h[0]) return NULL;
+    cJSON* s = cJSON_GetObjectItem(cfg, "remote_https");
+    if (s && cJSON_IsTrue(s)) snprintf(buf, n, "https://%s", h);
+    else                      snprintf(buf, n, "%s", h);
+    return buf;
+}
+
 /*-----------------------------------------------------
  * time_window
  * config: { "start": "HH:MM", "end": "HH:MM", "days": [0-6,...] }
@@ -143,7 +164,8 @@ static int cond_vapix_event_state(cJSON* cfg) {
     /* Legacy fallback: if no op specified, require expected for string equality */
     if (!op && !expected) return 0;
 
-    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    char _hb[192];
+    const char* rh = cond_remote_host(cfg, _hb, sizeof(_hb));
     const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
     const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
 
@@ -289,13 +311,15 @@ static size_t http_check_write(void* ptr, size_t sz, size_t nmemb, void* userdat
 
 /* Remote device helpers — curl wrappers for condition evaluation on a remote Axis device */
 static char* cond_remote_get(const char* host, const char* user, const char* pass, const char* cgi) {
+    int https = cond_remote_scheme(&host);
     char url[512], userpwd[512];
-    snprintf(url,     sizeof(url),     "http://%s/axis-cgi/%s", host, cgi);
+    snprintf(url,     sizeof(url),     https ? "https://%s/axis-cgi/%s" : "http://%s/axis-cgi/%s", host, cgi);
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user ? user : "", pass ? pass : "");
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
     struct curl_buf buf = {NULL, 0};
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -310,17 +334,19 @@ static char* cond_remote_get(const char* host, const char* user, const char* pas
 
 static char* cond_remote_post(const char* host, const char* user, const char* pass,
                                const char* path, const char* body) {
+    int https = cond_remote_scheme(&host);
     char url[512], userpwd[512];
     if (path[0] == '/')
-        snprintf(url, sizeof(url), "http://%s%s", host, path);
+        snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
     else
-        snprintf(url, sizeof(url), "http://%s/axis-cgi/%s", host, path);
+        snprintf(url, sizeof(url), https ? "https://%s/axis-cgi/%s" : "http://%s/axis-cgi/%s", host, path);
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user ? user : "", pass ? pass : "");
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
     struct curl_buf buf = {NULL, 0};
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -339,8 +365,9 @@ static char* cond_remote_post(const char* host, const char* user, const char* pa
 /* POST SOAP to a remote Axis device (e.g. /vapix/services) */
 static char* cond_remote_soap_post(const char* host, const char* user, const char* pass,
                                     const char* path, const char* soap_body) {
+    int https = cond_remote_scheme(&host);
     char url[512], userpwd[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user ? user : "", pass ? pass : "");
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
@@ -348,6 +375,7 @@ static char* cond_remote_soap_post(const char* host, const char* user, const cha
     struct curl_slist* hdrs = curl_slist_append(NULL,
         "Content-Type: application/soap+xml; charset=utf-8");
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -707,7 +735,8 @@ static int cond_io_state(cJSON* cfg) {
     if (!port_j || !expected) return 0;
 
     int port = (int)port_j->valuedouble;
-    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    char _hb[192];
+    const char* rh = cond_remote_host(cfg, _hb, sizeof(_hb));
     const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
     const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
 
@@ -719,10 +748,13 @@ static int cond_io_state(cJSON* cfg) {
     if (!resp) return 0;
 
     int result = 0;
+    /* io/port.cgi?checkactive=N responds with "portN=active" or "portN=inactive"
+     * (verified on AXIS OS 11.11 and 12.10). Match that; also accept the legacy
+     * "active=yes"/"active=no" form defensively for any device that uses it. */
     if (strcmp(expected, "active") == 0)
-        result = (strstr(resp, "active=yes") != NULL);
+        result = (strstr(resp, "=active") != NULL) || (strstr(resp, "active=yes") != NULL);
     else
-        result = (strstr(resp, "active=no") != NULL);
+        result = (strstr(resp, "=inactive") != NULL) || (strstr(resp, "active=no") != NULL);
     free(resp);
     return result;
 }
@@ -759,7 +791,8 @@ static int cond_aoa_occupancy(cJSON* cfg) {
         "{\"method\":\"getOccupancy\",\"apiVersion\":\"1.0\","
         "\"params\":{\"scenario\":%d}}", scenario_id);
 
-    const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    char _hb[192];
+    const char* rh = cond_remote_host(cfg, _hb, sizeof(_hb));
     const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
     const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
     char* raw = (rh && rh[0])

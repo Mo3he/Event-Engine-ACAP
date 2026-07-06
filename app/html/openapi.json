@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`\n",
-    "version": "1.9.13",
+    "version": "1.9.14",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -518,7 +518,8 @@
               "threshold2": { "type": "number", "description": "Upper bound (for between)" },
               "remote_host": { "type": "string", "description": "IP or hostname of a remote Axis device" },
               "remote_user": { "type": "string", "description": "Username for the remote device" },
-              "remote_pass": { "type": "string", "description": "Password for the remote device" }
+              "remote_pass": { "type": "string", "description": "Password for the remote device" },
+              "remote_https": { "type": "boolean", "default": false, "description": "Reach the remote device over HTTPS (required for OS 13 cameras that are HTTPS-only). The device's self-signed certificate is accepted." }
             }
           }
         ]
@@ -556,6 +557,11 @@
             "type": "string",
             "description": "Password for the remote device user. Required when remote_host is set.",
             "example": "pass"
+          },
+          "remote_https": {
+            "type": "boolean",
+            "default": false,
+            "description": "Reach the remote device over HTTPS instead of HTTP. Required for OS 13 cameras that default to HTTPS-only. The device's self-signed certificate is accepted (no verification)."
           }
         }
       },
@@ -642,6 +648,9 @@
               "type":         { "type": "string", "enum": ["recording"] },
               "operation":    { "type": "string", "enum": ["start", "stop"], "default": "start" },
               "duration":     { "type": "integer", "default": 0, "description": "Max recording duration in seconds (0 = unlimited)" },
+              "diskid":       { "type": "string", "default": "SD_DISK", "description": "Storage disk ID to record to (e.g. SD_DISK). Use /axis-cgi/disks/list.cgi to list disks." },
+              "profile":      { "type": "string", "description": "Name of a stream profile configured on the camera (sent as streamprofile=NAME)." },
+              "options":      { "type": "string", "description": "Raw VAPIX stream options, e.g. 'resolution=1920x1080&fps=15' or 'videocodec=h265'. Takes precedence over profile. On OS 13 the underlying continuous-recording API requires options; when profile and options are both empty, videocodec=h264 (native resolution) is used." },
               "while_active": { "type": "boolean", "default": false, "description": "If true, stop recording automatically when the triggering event goes inactive" }
             }
           }
@@ -745,7 +754,8 @@
               "topic3": { "type": "object", "additionalProperties": { "type": "string" } },
               "remote_host": { "type": "string", "description": "IP or hostname of a remote Axis device to query" },
               "remote_user": { "type": "string", "description": "Username for the remote device (default: root)" },
-              "remote_pass": { "type": "string", "description": "Password for the remote device" }
+              "remote_pass": { "type": "string", "description": "Password for the remote device" },
+              "remote_https": { "type": "boolean", "default": false, "description": "Reach the remote device over HTTPS (required for OS 13 HTTPS-only cameras). Self-signed certificate accepted." }
             }
           }
         ]

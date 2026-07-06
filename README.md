@@ -396,18 +396,18 @@ use-cases/
 
 ## Roadmap
 
-### AXIS OS 13 compatibility (target: September 2026)
+### AXIS OS 13 compatibility - ready as of v1.9.14
 
-AXIS OS 13 ships in September 2026 and introduces several breaking changes. A [full migration plan](OS13_MIGRATION.md) is tracked separately. Key items:
+AXIS OS 13 ships in September 2026 and introduces several breaking changes. Event Engine is already built and validated against them (full details in the [migration notes](OS13_MIGRATION.md)):
 
-- **Recompile against OS 13 SDK** - the 64-bit `time_t` ABI break requires a rebuild; existing `.eap` files will not install on OS 13
-- **`record/record.cgi` + `record/stop.cgi` replacement** - these endpoints are removed in OS 13; the SD card recording action will be migrated to the new Edge Storage API
-- **Manifest `compatibleWith` declaration** - OS 13 requires ACAP manifests to declare supported OS versions
-- **Manifest schema v2** - OS 13 enforces manifest schema v2 for all ACAPs
+- **Rebuilt against the OS 13 SDK** (`acap-native-sdk:12.10.0`) for the 64-bit `time_t` ABI break. Two toolchain symbol-version traps were pinned so the single binary still runs on older firmware: GLib 2.76's `g_string_free_and_steal` and glibc 2.42's `cfsetispeed`/`cfsetospeed`. Verified running on both AXIS OS 11.11 and 12.10.
+- **Recording migrated off `record/record.cgi` + `record/stop.cgi`** (removed in OS 13) to the Edge Storage continuous-recording API, with an automatic fallback to the legacy CGIs on products that don't support continuous-recording profiles. Verified end-to-end on hardware.
+- **Manifest updated to schema v2** with a `compatibleOsVersions` declaration of `11.11`-`13`.
+- **Remaining for production OS 13 use:** the `.eap` must be signed via the Axis ACAP Portal (OS 13 rejects unsigned apps).
 
-### Remote camera HTTPS support
+### Remote camera HTTPS support - added in v1.9.14
 
-Cameras factory-reset on AXIS OS 13 default to HTTPS-only. The cross-device remote host feature currently connects over HTTP, which those cameras will reject. A future release will add an HTTPS toggle for remote host connections.
+Cameras factory-reset on AXIS OS 13 default to HTTPS-only. The cross-device remote host feature (actions and conditions that target another camera) now has a per-target **Use HTTPS** toggle. When enabled, Event Engine reaches the remote device over HTTPS and accepts its self-signed certificate. Leave it off for remote cameras still served over HTTP, so mixed fleets work either way.
 
 ---
 

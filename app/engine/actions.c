@@ -66,6 +66,9 @@ static char* remote_vapix_get_path(const char* host, const char* user, const cha
 static int   stop_active_recordings_from_xml(const char* xml, const char* remote_host, const char* remote_user, const char* remote_pass);
 static gboolean recording_stop_timeout_cb(gpointer user_data);
 static int   resolve_clip_id(const char* clip_name);
+static int   recording_host_uses_continuous(const char* host, const char* user, const char* pass);
+static void  recording_stop_id(const char* host, const char* user, const char* pass, const char* id);
+static int   continuous_remove_ours(const char* host, const char* user, const char* pass, const char* diskid);
 
 /* Global recording ID table — maps diskid → recording_id for active recordings.
  * Populated on every start regardless of while_active so that explicit "stop"
@@ -172,14 +175,13 @@ static void while_active_undo(WhileActiveEntry* e) {
         free(body); if (resp) free(resp);
         LOG("while_active: stopped siren '%s' for rule %s", e->siren_profile, e->rule_id);
     } else if (strcmp(e->atype, "recording") == 0) {
-        /* Use the stored recording_id for a precise stop of exactly our recording */
+        /* Use the stored recording handle for a precise stop of exactly our
+         * recording. On OS 13 this is a continuous-recording profile number;
+         * on older firmware a legacy recording ID. recording_stop_id() picks
+         * the correct CGI based on the product's capability. */
         if (e->recording_id[0]) {
-            char req[128];
-            snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", e->recording_id);
-            char* resp = is_remote
-                ? remote_vapix_get(e->remote_host, e->remote_user, e->remote_pass, req)
-                : ACAP_VAPIX_Get(req);
-            if (resp) free(resp);
+            recording_stop_id(is_remote ? e->remote_host : NULL,
+                              e->remote_user, e->remote_pass, e->recording_id);
             active_recording_remove_by_id(e->recording_id);
             LOG("while_active: stopped recording %s for rule %s", e->recording_id, e->rule_id);
         } else {
@@ -588,18 +590,36 @@ static void curl_apply_base(CURL* curl, long timeout) {
 }
 
 /* ---------- Remote-device VAPIX helpers ----------
- * Extract remote_host/user/pass from a cJSON action config.
- * Returns 1 if remote fields are present and non-empty, 0 for local.
- */
-static int get_remote_target(cJSON* cfg,
-                              const char** out_host,
-                              const char** out_user,
-                              const char** out_pass) {
+ * Detect and strip an http(s):// scheme prefix from a remote host string.
+ * Returns 1 for https (caller should disable TLS cert verification for the
+ * self-signed certificates Axis cameras use by default), 0 for http. */
+static int remote_scheme(const char** host) {
+    if (strncmp(*host, "https://", 8) == 0) { *host += 8; return 1; }
+    if (strncmp(*host, "http://",  7) == 0) { *host += 7; return 0; }
+    return 0;
+}
+
+/* Read remote_host from cfg, prefixing "https://" when the per-target
+ * remote_https flag is set. Writes into buf; returns buf if a remote host is
+ * configured, or NULL for a local target. */
+static const char* remote_host_scheme(cJSON* cfg, char* buf, size_t n) {
     const char* h = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    if (!h || !h[0]) return NULL;
+    cJSON* s = cJSON_GetObjectItem(cfg, "remote_https");
+    if (s && cJSON_IsTrue(s)) snprintf(buf, n, "https://%s", h);
+    else                      snprintf(buf, n, "%s", h);
+    return buf;
+}
+
+/* Extract remote target from a cJSON action config into a caller buffer.
+ * The host is written scheme-prefixed (https:// when remote_https is set).
+ * Returns 1 if remote fields are present and non-empty, 0 for local. */
+static int get_remote_target(cJSON* cfg, char* host_buf, size_t host_sz,
+                             const char** out_user,
+                             const char** out_pass) {
+    if (!remote_host_scheme(cfg, host_buf, host_sz)) return 0;
     const char* u = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
     const char* p = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
-    if (!h || !h[0]) return 0;
-    if (out_host) *out_host = h;
     if (out_user) *out_user = u ? u : "";
     if (out_pass) *out_pass = p ? p : "";
     return 1;
@@ -644,8 +664,9 @@ static size_t remote_write_cb(void* ptr, size_t sz, size_t n, void* ud) {
 /* POST JSON to a remote Axis device's axis-cgi endpoint (e.g. "record.cgi") */
 static char* remote_vapix_post(const char* host, const char* user, const char* pass,
                                 const char* cgi, const char* body) {
+    int https = remote_scheme(&host);
     char url[512];
-    snprintf(url, sizeof(url), "http://%s/axis-cgi/%s", host, cgi);
+    snprintf(url, sizeof(url), https ? "https://%s/axis-cgi/%s" : "http://%s/axis-cgi/%s", host, cgi);
     char userpwd[512];
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
 
@@ -654,6 +675,7 @@ static char* remote_vapix_post(const char* host, const char* user, const char* p
     char* response = NULL;
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -672,8 +694,9 @@ static char* remote_vapix_post(const char* host, const char* user, const char* p
 /* GET from a remote Axis device's axis-cgi endpoint (e.g. "io/port.cgi?action=...") */
 static char* remote_vapix_get(const char* host, const char* user, const char* pass,
                                const char* cgi_and_query) {
+    int https = remote_scheme(&host);
     char url[1024];
-    snprintf(url, sizeof(url), "http://%s/axis-cgi/%s", host, cgi_and_query);
+    snprintf(url, sizeof(url), https ? "https://%s/axis-cgi/%s" : "http://%s/axis-cgi/%s", host, cgi_and_query);
     char userpwd[512];
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
 
@@ -681,6 +704,7 @@ static char* remote_vapix_get(const char* host, const char* user, const char* pa
     if (!curl) return NULL;
     char* response = NULL;
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -696,8 +720,9 @@ static char* remote_vapix_get(const char* host, const char* user, const char* pa
 /* POST to an arbitrary path (not under axis-cgi/) on a remote device */
 static char* remote_vapix_post_path(const char* host, const char* user, const char* pass,
                                      const char* path, const char* body) {
+    int https = remote_scheme(&host);
     char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
     char userpwd[512];
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
 
@@ -706,6 +731,7 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
     char* response = NULL;
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -724,8 +750,9 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
 /* PUT to an arbitrary path on a remote (or local via 127.0.0.1) Axis device */
 static char* remote_vapix_put_path(const char* host, const char* user, const char* pass,
                                     const char* path, const char* body) {
+    int https = remote_scheme(&host);
     char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
     char userpwd[512];
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
 
@@ -734,6 +761,7 @@ static char* remote_vapix_put_path(const char* host, const char* user, const cha
     char* response = NULL;
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -753,8 +781,9 @@ static char* remote_vapix_put_path(const char* host, const char* user, const cha
 /* GET from a remote Axis device at an arbitrary path (not under /axis-cgi/) */
 static char* remote_vapix_get_path(const char* host, const char* user, const char* pass,
                                     const char* path) {
+    int https = remote_scheme(&host);
     char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
     char userpwd[512];
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
 
@@ -762,6 +791,7 @@ static char* remote_vapix_get_path(const char* host, const char* user, const cha
     if (!curl) return NULL;
     char* response = NULL;
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -777,8 +807,9 @@ static char* remote_vapix_get_path(const char* host, const char* user, const cha
 /* POST SOAP to a remote Axis device (e.g. /vapix/services) */
 static char* remote_soap_post(const char* host, const char* user, const char* pass,
                                const char* path, const char* soap_body) {
+    int https = remote_scheme(&host);
     char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
     char userpwd[512];
     snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
 
@@ -788,6 +819,7 @@ static char* remote_soap_post(const char* host, const char* user, const char* pa
     struct curl_slist* hdrs = curl_slist_append(NULL,
         "Content-Type: application/soap+xml; charset=utf-8");
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
@@ -964,38 +996,41 @@ static cJSON* remote_pullpoint_query(const char* host, const char* user,
 
 /* Convenience macros: call remote or local VAPIX based on cfg */
 #define VAPIX_POST(cfg, cgi, body) \
-    ({ const char*_h,*_u,*_p; \
-       get_remote_target((cfg),&_h,&_u,&_p) \
-         ? remote_vapix_post(_h,_u,_p,(cgi),(body)) \
+    ({ char _hb[192]; const char*_u,*_p; \
+       get_remote_target((cfg),_hb,sizeof(_hb),&_u,&_p) \
+         ? remote_vapix_post(_hb,_u,_p,(cgi),(body)) \
          : ACAP_VAPIX_Post((cgi),(body)); })
 
 #define VAPIX_GET(cfg, req) \
-    ({ const char*_h,*_u,*_p; \
-       get_remote_target((cfg),&_h,&_u,&_p) \
-         ? remote_vapix_get(_h,_u,_p,(req)) \
+    ({ char _hb[192]; const char*_u,*_p; \
+       get_remote_target((cfg),_hb,sizeof(_hb),&_u,&_p) \
+         ? remote_vapix_get(_hb,_u,_p,(req)) \
          : ACAP_VAPIX_Get((req)); })
 
 #define VAPIX_POST_PATH(cfg, path, body) \
-    ({ const char*_h,*_u,*_p; \
-       get_remote_target((cfg),&_h,&_u,&_p) \
-         ? remote_vapix_post_path(_h,_u,_p,(path),(body)) \
+    ({ char _hb[192]; const char*_u,*_p; \
+       get_remote_target((cfg),_hb,sizeof(_hb),&_u,&_p) \
+         ? remote_vapix_post_path(_hb,_u,_p,(path),(body)) \
          : ACAP_VAPIX_Post_Path((path),(body)); })
 
 #define VAPIX_GET_PATH(cfg, path) \
-    ({ const char*_h,*_u,*_p; \
-       get_remote_target((cfg),&_h,&_u,&_p) \
-         ? remote_vapix_get_path(_h,_u,_p,(path)) \
+    ({ char _hb[192]; const char*_u,*_p; \
+       get_remote_target((cfg),_hb,sizeof(_hb),&_u,&_p) \
+         ? remote_vapix_get_path(_hb,_u,_p,(path)) \
          : ACAP_VAPIX_Get_Path((path)); })
 
 #define VAPIX_PUT_PATH(cfg, path, body) \
-    ({ const char*_h,*_u,*_p; \
-       get_remote_target((cfg),&_h,&_u,&_p) \
-         ? remote_vapix_put_path(_h,_u,_p,(path),(body)) \
+    ({ char _hb[192]; const char*_u,*_p; \
+       get_remote_target((cfg),_hb,sizeof(_hb),&_u,&_p) \
+         ? remote_vapix_put_path(_hb,_u,_p,(path),(body)) \
          : ACAP_VAPIX_Put_Path((path),(body)); })
 
-/* Fill remote_host/user/pass into a WhileActiveEntry from a cfg JSON object */
+/* Fill remote_host/user/pass into a WhileActiveEntry from a cfg JSON object.
+ * The stored host is scheme-prefixed (https:// when remote_https is set) so the
+ * later undo call reaches the device over the same transport. */
 #define WA_SET_REMOTE(e, cfg) do { \
-    const char* _h = cJSON_GetStringValue(cJSON_GetObjectItem((cfg), "remote_host")); \
+    char _hb[sizeof((e).remote_host)]; \
+    const char* _h = remote_host_scheme((cfg), _hb, sizeof(_hb)); \
     const char* _u = cJSON_GetStringValue(cJSON_GetObjectItem((cfg), "remote_user")); \
     const char* _p = cJSON_GetStringValue(cJSON_GetObjectItem((cfg), "remote_pass")); \
     snprintf((e).remote_host, sizeof((e).remote_host), "%s", _h ? _h : ""); \
@@ -1119,7 +1154,14 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
 }
 
 /* recording
- * Uses the VAPIX Recording API (old-style CGI, not JSON):
+ * Uses the VAPIX Recording API. record.cgi / stop.cgi are removed in AXIS OS 13,
+ * so on products that support continuous recording profiles
+ * (Properties.LocalStorage.ContinuousRecording=yes) we drive recordings through
+ * record/continuous/{add,remove}configuration.cgi instead:
+ *   Start: addconfiguration.cgi?diskid=<id>&eventid=eventengine[&options=streamprofile%3D<p>]
+ *            → <configure profile="N" result="OK"/>   (profile N tracked like a rec ID)
+ *   Stop:  removeconfiguration.cgi?profile=N
+ * Products without continuous-profile support fall back to the legacy CGIs:
  *   Start: GET /axis-cgi/record/record.cgi?diskid=<id>[&options=streamprofile%3D<profile>]
  *     → returns XML with recordingid attribute
  *   Stop:  GET /axis-cgi/record/stop.cgi?recordingid=<id>
@@ -1140,6 +1182,98 @@ static int extract_xml_attr(const char* xml, const char* attr, char* out, size_t
     memcpy(out, p, len);
     out[len] = '\0';
     return 1;
+}
+
+/* ---------------------------------------------------------------------------
+ * Continuous recording helpers (OS 13 replacement for record.cgi / stop.cgi)
+ * ------------------------------------------------------------------------- */
+#define REC_EVENTID "eventengine"
+
+/* Returns 1 if the product supports continuous recording profiles. The result
+ * for the local device is cached; remote hosts are queried each time. */
+static int recording_host_uses_continuous(const char* host, const char* user, const char* pass) {
+    static int local_cache = -1; /* -1 unknown, 0 no, 1 yes (local device only) */
+    int is_remote = (host && host[0]);
+    if (!is_remote && local_cache >= 0) return local_cache;
+
+    const char* req = "param.cgi?action=list&group=Properties.LocalStorage.ContinuousRecording";
+    char* resp = is_remote ? remote_vapix_get(host, user ? user : "", pass ? pass : "", req)
+                           : ACAP_VAPIX_Get(req);
+    int yes = 0;
+    if (resp) {
+        char* p = strstr(resp, "ContinuousRecording=");
+        if (p && strncmp(p + strlen("ContinuousRecording="), "yes", 3) == 0) yes = 1;
+        free(resp);
+    }
+    if (!is_remote) local_cache = yes;
+    return yes;
+}
+
+/* cfg-based convenience wrapper around recording_host_uses_continuous(). */
+static int recording_use_continuous(cJSON* cfg) {
+    char hb[192];
+    const char* rh = remote_host_scheme(cfg, hb, sizeof(hb));
+    const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+    return recording_host_uses_continuous(rh, ru, rp);
+}
+
+/* Stop a single recording identified by the stored handle. On OS 13 the handle
+ * is a continuous-recording profile number; on older firmware a legacy recording
+ * ID. Picks the correct CGI based on the product's capability. */
+static void recording_stop_id(const char* host, const char* user, const char* pass, const char* id) {
+    if (!id || !id[0]) return;
+    char req[128];
+    if (recording_host_uses_continuous(host, user, pass))
+        snprintf(req, sizeof(req), "record/continuous/removeconfiguration.cgi?profile=%s", id);
+    else
+        snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", id);
+    char* r = (host && host[0]) ? remote_vapix_get(host, user ? user : "", pass ? pass : "", req)
+                                : ACAP_VAPIX_Get(req);
+    if (r) free(r);
+}
+
+/* Remove all continuous-recording profiles created by Event Engine (eventid
+ * "eventengine") on the given disk (or all disks if diskid is NULL/empty).
+ * Returns the number of profiles removed. */
+static int continuous_remove_ours(const char* host, const char* user, const char* pass, const char* diskid) {
+    int is_remote = (host && host[0]);
+    char* list = is_remote
+        ? remote_vapix_get(host, user ? user : "", pass ? pass : "", "record/continuous/listconfiguration.cgi")
+        : ACAP_VAPIX_Get("record/continuous/listconfiguration.cgi");
+    if (!list) return 0;
+
+    int removed = 0;
+    const char* p = list;
+    const char* elem_needle = "<continuousrecordingconfiguration";
+    while ((p = strstr(p, elem_needle)) != NULL) {
+        /* Bound the element to the next '>' so attributes don't leak across entries */
+        const char* end = strchr(p, '>');
+        size_t elen = end ? (size_t)(end - p) : strlen(p);
+        char elem[512];
+        if (elen >= sizeof(elem)) elen = sizeof(elem) - 1;
+        memcpy(elem, p, elen);
+        elem[elen] = '\0';
+
+        char eid[64] = {0}, did[64] = {0}, prof[64] = {0};
+        extract_xml_attr(elem, "eventid", eid,  sizeof(eid));
+        extract_xml_attr(elem, "diskid",  did,  sizeof(did));
+        extract_xml_attr(elem, "profile", prof, sizeof(prof));
+
+        if (strcmp(eid, REC_EVENTID) == 0 &&
+            (!diskid || !diskid[0] || strcmp(did, diskid) == 0) && prof[0]) {
+            char req[128];
+            snprintf(req, sizeof(req), "record/continuous/removeconfiguration.cgi?profile=%s", prof);
+            char* r = is_remote ? remote_vapix_get(host, user ? user : "", pass ? pass : "", req)
+                                : ACAP_VAPIX_Get(req);
+            if (r) { free(r); removed++; }
+            active_recording_remove_by_id(prof);
+            LOG("recording: removed continuous profile %s", prof);
+        }
+        p = end ? end : p + strlen(elem_needle);
+    }
+    free(list);
+    return removed;
 }
 
 /* Stop all recordings that are currently in recordingstatus="recording" in the given list.cgi XML.
@@ -1177,12 +1311,8 @@ typedef struct { char rid[64]; char host[128]; char user[64]; char pass[128]; } 
 
 static gboolean recording_stop_timeout_cb(gpointer user_data) {
     RecStopCtx* ctx = (RecStopCtx*)user_data;
-    char req[128];
-    snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", ctx->rid);
-    char* r = ctx->host[0]
-        ? remote_vapix_get(ctx->host, ctx->user, ctx->pass, req)
-        : ACAP_VAPIX_Get(req);
-    if (r) { free(r); LOG("recording: max-duration stop of %s", ctx->rid); }
+    recording_stop_id(ctx->host[0] ? ctx->host : NULL, ctx->user, ctx->pass, ctx->rid);
+    LOG("recording: max-duration stop of %s", ctx->rid);
     active_recording_remove_by_id(ctx->rid);
     free(ctx);
     return G_SOURCE_REMOVE;
@@ -1196,31 +1326,59 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
     const char* diskid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "diskid"));
     if (!diskid || !diskid[0]) diskid = "SD_DISK";
 
+    int use_continuous = recording_use_continuous(cfg);
+
     if (starting) {
-        /* Build GET request: record/record.cgi?diskid=<id>[&options=streamprofile%3D<profile>] */
         char req[512];
         const char* profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
-        if (profile && profile[0])
+        const char* opts    = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "options"));
+        /* Build the raw stream-options string. Precedence: an explicit `options`
+         * field (e.g. "resolution=1920x1080&fps=15"), then a named stream
+         * `profile` (streamprofile=NAME), then nothing. The value is percent-
+         * encoded before being placed in the options= query parameter. */
+        char opt_raw[256] = "";
+        int have_opt = 0;
+        if (opts && opts[0])            { snprintf(opt_raw, sizeof(opt_raw), "%s", opts); have_opt = 1; }
+        else if (profile && profile[0]) { snprintf(opt_raw, sizeof(opt_raw), "streamprofile=%s", profile); have_opt = 1; }
+
+        if (use_continuous) {
+            /* OS 13: addconfiguration.cgi REQUIRES the options parameter. When the
+             * user specified none we default to videocodec=h264, which keeps the
+             * sensor's native resolution/frame rate. */
+            if (!have_opt) snprintf(opt_raw, sizeof(opt_raw), "videocodec=h264");
+            char* opt_enc = curl_easy_escape(NULL, opt_raw, 0);
             snprintf(req, sizeof(req),
-                     "record/record.cgi?diskid=%s&options=streamprofile%%3D%s",
-                     diskid, profile);
-        else
-            snprintf(req, sizeof(req), "record/record.cgi?diskid=%s", diskid);
+                     "record/continuous/addconfiguration.cgi?diskid=%s&eventid=%s&options=%s",
+                     diskid, REC_EVENTID, opt_enc ? opt_enc : "videocodec%3Dh264");
+            if (opt_enc) curl_free(opt_enc);
+        } else {
+            /* Legacy record.cgi: options is optional (system default when omitted). */
+            if (have_opt) {
+                char* opt_enc = curl_easy_escape(NULL, opt_raw, 0);
+                snprintf(req, sizeof(req), "record/record.cgi?diskid=%s&options=%s",
+                         diskid, opt_enc ? opt_enc : "");
+                if (opt_enc) curl_free(opt_enc);
+            } else {
+                snprintf(req, sizeof(req), "record/record.cgi?diskid=%s", diskid);
+            }
+        }
 
         char* resp = VAPIX_GET(cfg, req);
         if (!resp) { LOG_WARN("recording: failed to start on disk %s", diskid); return; }
 
-        /* Parse recording ID from XML: <record recordingid="..." result="OK" /> */
+        /* Continuous: <configure profile="N" .../>   Legacy: <record recordingid="..." .../> */
         char recording_id[64] = {0};
-        extract_xml_attr(resp, "recordingid", recording_id, sizeof(recording_id));
+        extract_xml_attr(resp, use_continuous ? "profile" : "recordingid",
+                         recording_id, sizeof(recording_id));
         free(resp);
 
         LOG("recording: started on %s%s%s", diskid,
-            recording_id[0] ? ", id=" : "", recording_id);
+            recording_id[0] ? (use_continuous ? ", profile=" : ", id=") : "", recording_id);
 
         /* Always store so an explicit "stop" rule in a separate trigger can find it */
         if (recording_id[0]) {
-            const char* _rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+            char _hb[192];
+            const char* _rh = remote_host_scheme(cfg, _hb, sizeof(_hb));
             active_recording_store(_rh ? _rh : "", diskid, recording_id);
         }
 
@@ -1243,7 +1401,8 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
             RecStopCtx* ctx = calloc(1, sizeof(RecStopCtx));
             if (ctx) {
                 snprintf(ctx->rid,  sizeof(ctx->rid),  "%s", recording_id);
-                const char* _rh2 = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+                char _hb2[sizeof(ctx->host)];
+                const char* _rh2 = remote_host_scheme(cfg, _hb2, sizeof(_hb2));
                 const char* _ru2 = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
                 const char* _rp2 = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
                 if (_rh2) snprintf(ctx->host, sizeof(ctx->host), "%s", _rh2);
@@ -1253,26 +1412,37 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
             }
         }
     } else {
-        /* Stop: query list.cgi for all currently active recordings on this disk and stop them.
-         * This works regardless of whether the recording was started by Event Engine,
-         * the camera itself, or any other source. */
-        const char* _rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+        /* Stop. On products with continuous-recording support (OS 13) we remove all
+         * Event Engine continuous profiles on this disk. On older firmware we query
+         * list.cgi for active recordings and stop them (this also stops recordings
+         * started by the camera itself or any other source). */
         const char* _ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
         const char* _rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
-        const char* host = (_rh && _rh[0]) ? _rh : NULL;
+        char _hb[192];
+        const char* host = remote_host_scheme(cfg, _hb, sizeof(_hb)); /* NULL if local */
 
-        char list_req[256];
-        snprintf(list_req, sizeof(list_req),
-                 "record/list.cgi?recordingid=all&startstoptime=yes");
-        char* list_resp = host
-            ? remote_vapix_get(host, _ru ? _ru : "", _rp ? _rp : "", list_req)
-            : ACAP_VAPIX_Get(list_req);
+        int stopped = -1; /* -1 = query failed */
+        if (use_continuous) {
+            stopped = continuous_remove_ours(host, _ru ? _ru : "", _rp ? _rp : "", diskid);
+        } else {
+            char list_req[256];
+            snprintf(list_req, sizeof(list_req),
+                     "record/list.cgi?recordingid=all&startstoptime=yes");
+            char* list_resp = host
+                ? remote_vapix_get(host, _ru ? _ru : "", _rp ? _rp : "", list_req)
+                : ACAP_VAPIX_Get(list_req);
+            if (list_resp) {
+                stopped = stop_active_recordings_from_xml(list_resp, host,
+                                                          _ru ? _ru : "", _rp ? _rp : "");
+                free(list_resp);
+            }
+        }
 
-        if (list_resp) {
-            int n = stop_active_recordings_from_xml(list_resp, host,
-                                                    _ru ? _ru : "", _rp ? _rp : "");
-            free(list_resp);
-            if (n == 0)
+        if (stopped < 0) {
+            LOG_WARN("recording: could not query recording list on disk %s host %s",
+                     diskid, host ? host : "local");
+        } else {
+            if (stopped == 0)
                 LOG_WARN("recording: no active recordings found on disk %s host %s",
                          diskid, host ? host : "local");
             /* Clean up our tracking table entry for this disk */
@@ -1285,9 +1455,6 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
                     break;
                 }
             }
-        } else {
-            LOG_WARN("recording: could not query recording list on disk %s host %s",
-                     diskid, host ? host : "local");
         }
     }
 }
@@ -1429,7 +1596,8 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
         OverlayRemoveCtx* ctx = calloc(1, sizeof(*ctx));
         if (ctx) {
             ctx->identity = overlay_identity[channel - 1];
-            const char* rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+            char _hb[sizeof(ctx->remote_host)];
+            const char* rh = remote_host_scheme(cfg, _hb, sizeof(_hb));
             const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
             const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
             snprintf(ctx->remote_host, sizeof(ctx->remote_host), "%s", rh ? rh : "");
@@ -2413,8 +2581,8 @@ static void action_set_rule_enabled(cJSON* cfg) {
  * Local: uses a passive subscription cache (registered at rule load time).
  * Remote: uses ONVIF PullPoint to get current event state from the device. */
 static void action_vapix_query(cJSON* cfg, cJSON* trigger_data) {
-    const char* host; const char* user; const char* pass;
-    if (get_remote_target(cfg, &host, &user, &pass)) {
+    char host[192]; const char* user; const char* pass;
+    if (get_remote_target(cfg, host, sizeof(host), &user, &pass)) {
         /* ---- Remote path: ONVIF PullPoint subscription ---- */
         char topic_path[256];
         if (!build_topic_path(cfg, topic_path, sizeof(topic_path)) || !topic_path[0]) {
@@ -2892,7 +3060,8 @@ static void action_light_control(cJSON* cfg) {
         LightStrobeCtx* ctx = calloc(1, sizeof(LightStrobeCtx));
         if (ctx) {
             snprintf(ctx->light_id, sizeof(ctx->light_id), "%s", light_id);
-            const char* _rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+            char _hb[sizeof(ctx->host)];
+            const char* _rh = remote_host_scheme(cfg, _hb, sizeof(_hb));
             const char* _ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
             const char* _rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
             if (_rh) snprintf(ctx->host, sizeof(ctx->host), "%s", _rh);

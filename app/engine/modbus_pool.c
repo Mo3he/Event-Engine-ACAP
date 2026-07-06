@@ -31,6 +31,22 @@
 #include <netdb.h>
 #include <termios.h>
 
+/* --- glibc backward-compat shim (OS 13 SDK -> older AXIS OS) ---
+ * glibc 2.42 (shipped in the OS 13 SDK / Ubuntu 24.04) introduced new symbol
+ * versions for cfsetispeed()/cfsetospeed(). Left alone, the binary would
+ * require GLIBC_2.42 and fail to load on older firmware (e.g. AXIS OS 11.x):
+ *   libc.so.6: version `GLIBC_2.42' not found
+ * These are the ONLY two symbols pulling in GLIBC_2.42, and their behaviour is
+ * unchanged for the standard baud rates we use, so pin the references to each
+ * architecture's glibc baseline to keep the app loadable on older AXIS OS. */
+#if defined(__aarch64__)
+__asm__(".symver cfsetispeed,cfsetispeed@GLIBC_2.17");
+__asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.17");
+#elif defined(__arm__)
+__asm__(".symver cfsetispeed,cfsetispeed@GLIBC_2.4");
+__asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.4");
+#endif
+
 #include "modbus_pool.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "modbus_pool: " fmt, ## args)

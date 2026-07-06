@@ -573,9 +573,12 @@ Many actions support targeting a remote Axis device. Add these fields to any sup
 {
   "remote_host": "192.168.1.100",
   "remote_user": "root",
-  "remote_pass": "pass"
+  "remote_pass": "pass",
+  "remote_https": false
 }
 ```
+
+Set `remote_https` to `true` to reach the remote device over HTTPS instead of HTTP. This is required for cameras running AXIS OS 13, which are HTTPS-only by default. The remote device's self-signed certificate is accepted (no verification). Leave it `false` (or omit it) for remote devices still served over HTTP. The same `remote_host` / `remote_user` / `remote_pass` / `remote_https` fields also work on the `io_state`, `vapix_event_state`, and `aoa_occupancy` conditions.
 
 Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_clip`, `siren_light`, `guard_tour`, `set_device_param`, `ir_cut_filter`, `privacy_mask`, `wiper`, `light_control`, `acap_control`, `speaker_display`, `paging_console_execute`, `paging_console_button`.
 
@@ -637,6 +640,7 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
 {
   "type": "recording",
   "operation": "start",
+  "diskid": "SD_DISK",
   "duration": 30,
   "while_active": false
 }
@@ -645,8 +649,13 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `operation` | `"start"` \| `"stop"` | `"start"` | Start or stop recording |
+| `diskid` | string | `"SD_DISK"` | Storage disk to record to (see `/axis-cgi/disks/list.cgi`) |
+| `profile` | string | | Name of a stream profile on the camera (sent as `streamprofile=NAME`) |
+| `options` | string | | Raw VAPIX stream options, e.g. `resolution=1920x1080&fps=15` or `videocodec=h265`. Takes precedence over `profile`. If both are blank, `videocodec=h264` (native resolution) is used. |
 | `duration` | integer | `0` | Max recording duration in seconds (0 = unlimited) |
 | `while_active` | boolean | `false` | Auto-stop when triggering event goes inactive |
+
+> On AXIS OS 13 the recording action uses the continuous-recording API, which requires a stream `options` value — hence the `videocodec=h264` default when `profile` and `options` are both empty. On older firmware it falls back to the legacy recording CGI.
 
 ### 4. `overlay_text` — Dynamic Overlay Text
 
