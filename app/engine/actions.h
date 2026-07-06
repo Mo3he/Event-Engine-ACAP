@@ -38,7 +38,9 @@ extern "C" {
  *   ir_cut_filter     — force day/night mode or restore auto switching
  *   privacy_mask      — enable/disable a named privacy mask
  *   wiper             — trigger the windshield wiper
- *   light_control     — control an Axis illuminator (white/IR LED)
+ *   light_control     — control an Axis illuminator (white/IR LED); supports
+ *                       on/off/auto plus sub-second "flash" strobe
+ *                       (duration_ms, count, gap_ms)
  *   acap_control      — start/stop/restart another ACAP application
  *   speaker_display   — show/stop a text notification on an Axis speaker-display device
  */

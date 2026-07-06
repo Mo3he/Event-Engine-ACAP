@@ -2618,22 +2618,44 @@ function actionFields(a, rowIdx) {
       <div class="form-group" style="flex:0 0 140px;">
         <label>Operation</label>
         <select data-k="operation" onchange="rerenderAction(this)">
-          <option value="on"   ${op==='on'   ? 'selected':''}>On</option>
-          <option value="off"  ${op==='off'  ? 'selected':''}>Off</option>
-          <option value="auto" ${op==='auto' ? 'selected':''}>Auto</option>
+          <option value="on"    ${op==='on'    ? 'selected':''}>On</option>
+          <option value="off"   ${op==='off'   ? 'selected':''}>Off</option>
+          <option value="auto"  ${op==='auto'  ? 'selected':''}>Auto</option>
+          <option value="flash" ${op==='flash' ? 'selected':''}>Flash</option>
         </select>
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Light ID</label>
         <input type="text" data-k="light_id" value="${escHtml(a.light_id || 'led0')}" placeholder="led0">
       </div>
-      ${op === 'on' ? `
+      ${op === 'on' || op === 'flash' ? `
       <div class="form-group" style="flex:0 0 140px;">
         <label>Intensity (0–100, optional)</label>
         <input type="number" data-k="intensity" value="${a.intensity ?? ''}" min="0" max="100" placeholder="Auto">
         <div class="form-hint">Leave blank to use the camera's current intensity setting.</div>
       </div>` : ''}
-    </div>`;
+    </div>
+    ${op === 'flash' ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Flash duration (ms)</label>
+        <input type="number" data-k="duration_ms" value="${a.duration_ms ?? ''}" min="50" max="5000" placeholder="300">
+        <div class="form-hint">On-time per pulse (50–5000 ms). Bypasses the 1s schedule minimum.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Flash count</label>
+        <input type="number" data-k="count" value="${a.count ?? ''}" min="1" max="20" placeholder="1">
+        <div class="form-hint">Number of pulses (1–20).</div>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Gap (ms)</label>
+        <input type="number" data-k="gap_ms" value="${a.gap_ms ?? ''}" min="50" max="5000" placeholder="= duration">
+        <div class="form-hint">Off-time between pulses. Only used when count &gt; 1.</div>
+      </div>
+    </div>
+    <div class="form-warning">
+      &#9888; Sub-second flashing drives the illuminator directly, bypassing the firmware's 1&nbsp;second minimum. Rapid or repeated switching may exceed what the illuminator is rated for. Confirm the illuminator supports sub-second/strobe operation (especially on certified or explosion-protected models such as the Q8752) before using in production.
+    </div>` : ''}`;
   }
   if (type === 'acap_control') {
     const remoteCtrl = remoteCapControl(a, rowIdx, 'acap', 'package', a.package || '', 'e.g. com.axis.myapp');
@@ -3168,7 +3190,7 @@ function normalizeAction(a) {
                  'measurement','tags','fields','bot_token','chat_id','parse_mode',
                  'smtp_server','from','to','subject','deliver_via','line',
                  'event_key','data_key','expected','interval',
-                 'action_id','page_id','slot'];
+                 'action_id','page_id','slot','duration_ms','gap_ms','count'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   /* Remote device support */
@@ -3237,8 +3259,21 @@ function normalizeAction(a) {
     out.enabled = a.enabled === 'true' || a.enabled === true;
   if (a.type === 'set_rule_enabled')
     out.enabled = a.enabled !== 'false' && a.enabled !== false;
-  if (a.type === 'light_control' && (a.operation || 'on') === 'on' && a.intensity !== '' && a.intensity !== undefined)
-    out.intensity = parseInt(a.intensity);
+  if (a.type === 'light_control') {
+    const lcOp = a.operation || 'on';
+    if ((lcOp === 'on' || lcOp === 'flash') && a.intensity !== '' && a.intensity !== undefined)
+      out.intensity = parseInt(a.intensity);
+    if (lcOp === 'flash') {
+      out.duration_ms = (a.duration_ms !== '' && a.duration_ms !== undefined) ? parseInt(a.duration_ms) : 300;
+      out.count = (a.count !== '' && a.count !== undefined) ? parseInt(a.count) : 1;
+      if (a.gap_ms !== '' && a.gap_ms !== undefined) out.gap_ms = parseInt(a.gap_ms);
+      else delete out.gap_ms;
+    } else {
+      delete out.duration_ms;
+      delete out.count;
+      delete out.gap_ms;
+    }
+  }
   if (a.type === 'snapshot_upload' || a.type === 'guard_tour' || a.type === 'ir_cut_filter' || a.type === 'privacy_mask')
     if (out.channel !== undefined) out.channel = parseInt(out.channel) || 1;
   if (a.type === 'wiper')

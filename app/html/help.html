@@ -838,9 +838,12 @@ Content-Type: application/json
       <p>Control an Axis illuminator (white light or IR LED).</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><strong>Operation</strong></td><td><em>On</em>, <em>Off</em>, or <em>Auto</em> (restore automatic control).</td></tr>
+        <tr><td><strong>Operation</strong></td><td><em>On</em>, <em>Off</em>, <em>Auto</em> (restore automatic control), or <em>Flash</em> (strobe the light on/off one or more times).</td></tr>
         <tr><td><strong>Light ID</strong></td><td>Which illuminator to control (loaded from the camera).</td></tr>
-        <tr><td><strong>Intensity</strong></td><td>Optional brightness percentage (0–100) when turning on.</td></tr>
+        <tr><td><strong>Intensity</strong></td><td>Optional brightness percentage (0–100) when turning on or flashing.</td></tr>
+        <tr><td><strong>Flash duration (ms)</strong></td><td>For <em>Flash</em> only: on-time per pulse, in milliseconds (50–5000, default 300). Drives the LED directly, bypassing the firmware light-schedule 1&nbsp;second minimum.</td></tr>
+        <tr><td><strong>Flash count</strong></td><td>For <em>Flash</em> only: number of pulses (1–20, default 1).</td></tr>
+        <tr><td><strong>Gap (ms)</strong></td><td>For <em>Flash</em> only: off-time between pulses, in milliseconds (50–5000). Defaults to the flash duration. Only used when count is greater than 1.</td></tr>
       </table>
 
       <h3 id="act-audio">Audio Clip</h3>

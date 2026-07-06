@@ -141,7 +141,7 @@ Actions are grouped by category in the rule editor. Actions that support **while
 | **IR Cut Filter** | Force the IR cut filter **On** (day mode), **Off** (night mode), or restore **Auto** switching |
 | **Privacy Mask** | Enable or disable a named privacy mask |
 | **Wiper** | Trigger the windshield wiper |
-| **Light Control** | Control an Axis illuminator (white light or IR LED) with optional intensity |
+| **Light Control** | Control an Axis illuminator (white light or IR LED): turn **On**/**Off**, restore **Auto**, or **Flash** a sub-second strobe (configurable pulse duration, count, and gap) with optional intensity |
 
 ### Audio / Visual
 

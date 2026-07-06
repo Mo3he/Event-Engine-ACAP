@@ -2787,6 +2787,50 @@ static void action_wiper(cJSON* cfg) {
 }
 
 /* light_control — control an Axis illuminator (white/IR LED) */
+
+/* Deferred strobe engine for the "flash" operation. Drives the LED directly
+ * (activateLight / deactivateLight) on a single re-armed millisecond timer,
+ * bypassing the firmware light-schedule 1s minimum. Stores its own remote
+ * target and light ID because cfg is not guaranteed to live until the timer
+ * fires. Set intensity is sticky on the device, so re-activation keeps it. */
+typedef struct {
+    char host[128];
+    char user[64];
+    char pass[128];
+    char light_id[64];
+    int  on_ms;        /* on-time per pulse */
+    int  gap_ms;       /* off-time between pulses */
+    int  pulses_left;  /* ON pulses still to emit after the current one */
+    int  phase_off;    /* 1 = next edge turns light OFF, 0 = turns it ON */
+} LightStrobeCtx;
+
+static gboolean light_strobe_cb(gpointer user_data) {
+    LightStrobeCtx* ctx = (LightStrobeCtx*)user_data;
+    const char* method = ctx->phase_off ? "deactivateLight" : "activateLight";
+    char body[192];
+    snprintf(body, sizeof(body),
+        "{\"apiVersion\":\"1.0\",\"method\":\"%s\","
+        "\"params\":{\"lightID\":\"%s\"}}", method, ctx->light_id);
+    char* resp = ctx->host[0]
+        ? remote_vapix_post(ctx->host, ctx->user, ctx->pass, "lightcontrol.cgi", body)
+        : ACAP_VAPIX_Post("lightcontrol.cgi", body);
+    if (resp) free(resp);
+
+    if (ctx->phase_off) {
+        /* Light just turned off. Done if no more pulses remain. */
+        if (ctx->pulses_left <= 0) { free(ctx); return G_SOURCE_REMOVE; }
+        /* Otherwise wait gap_ms, then turn back on. */
+        ctx->phase_off = 0;
+        g_timeout_add((guint)ctx->gap_ms, light_strobe_cb, ctx);
+    } else {
+        /* Light just turned on (a new pulse). Turn off after on_ms. */
+        ctx->pulses_left--;
+        ctx->phase_off = 1;
+        g_timeout_add((guint)ctx->on_ms, light_strobe_cb, ctx);
+    }
+    return G_SOURCE_REMOVE;
+}
+
 static void action_light_control(cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     if (!op) op = "on";
@@ -2804,7 +2848,8 @@ static void action_light_control(cJSON* cfg) {
         cJSON_AddStringToObject(req, "method", "setAutomaticIntensityMode");
         cJSON_AddBoolToObject(p, "enabled", 1);
     } else {
-        /* "on" — activate light; optionally set manual intensity first */
+        /* "on" or "flash" — activate light; optionally set manual intensity first.
+         * "flash" additionally drives a timed strobe of one or more pulses. */
         cJSON* intensity_j = cJSON_GetObjectItem(cfg, "intensity");
         if (intensity_j) {
             cJSON_AddStringToObject(req, "method", "setManualIntensity");
@@ -2823,6 +2868,43 @@ static void action_light_control(cJSON* cfg) {
     char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
     char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
     free(body); if (resp) free(resp);
+
+    /* Sub-second strobe: the synchronous call above emitted the first ON pulse.
+     * Schedule its OFF after duration_ms, and repeat for (count-1) more pulses
+     * with gap_ms off-time between them. Drives the LED directly, bypassing the
+     * firmware light-schedule 1s minimum. */
+    if (strcmp(op, "flash") == 0) {
+        cJSON* dur_j = cJSON_GetObjectItem(cfg, "duration_ms");
+        int on_ms = dur_j ? (int)dur_j->valuedouble : 300;
+        if (on_ms < 50)   on_ms = 50;
+        if (on_ms > 5000) on_ms = 5000;
+
+        cJSON* gap_j = cJSON_GetObjectItem(cfg, "gap_ms");
+        int gap_ms = gap_j ? (int)gap_j->valuedouble : on_ms;
+        if (gap_ms < 50)   gap_ms = 50;
+        if (gap_ms > 5000) gap_ms = 5000;
+
+        cJSON* cnt_j = cJSON_GetObjectItem(cfg, "count");
+        int count = cnt_j ? (int)cnt_j->valuedouble : 1;
+        if (count < 1)  count = 1;
+        if (count > 20) count = 20;
+
+        LightStrobeCtx* ctx = calloc(1, sizeof(LightStrobeCtx));
+        if (ctx) {
+            snprintf(ctx->light_id, sizeof(ctx->light_id), "%s", light_id);
+            const char* _rh = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+            const char* _ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+            const char* _rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+            if (_rh) snprintf(ctx->host, sizeof(ctx->host), "%s", _rh);
+            if (_ru) snprintf(ctx->user, sizeof(ctx->user), "%s", _ru);
+            if (_rp) snprintf(ctx->pass, sizeof(ctx->pass), "%s", _rp);
+            ctx->on_ms       = on_ms;
+            ctx->gap_ms      = gap_ms;
+            ctx->pulses_left = count - 1; /* first pulse already emitted */
+            ctx->phase_off   = 1;         /* next edge turns the light off */
+            g_timeout_add((guint)on_ms, light_strobe_cb, ctx);
+        }
+    }
 }
 
 /* aoa_get_counts — fetch accumulated crossline counts from an AOA scenario and inject

@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`\n",
-    "version": "1.9.12",
+    "version": "1.9.13",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -956,9 +956,12 @@
             "description": "Control an Axis illuminator (white light or IR LED).",
             "properties": {
               "type":      { "type": "string", "enum": ["light_control"] },
-              "operation": { "type": "string", "enum": ["on", "off", "auto"], "default": "on", "description": "on = activateLight; off = deactivateLight; auto = setAutomaticIntensityMode. Note: the light must be enabled (hardware) before it can be activated." },
+              "operation": { "type": "string", "enum": ["on", "off", "auto", "flash"], "default": "on", "description": "on = activateLight; off = deactivateLight; auto = setAutomaticIntensityMode; flash = strobe the light on/off one or more times, driven directly to bypass the firmware light-schedule 1s minimum. Note: the light must be enabled (hardware) before it can be activated." },
               "light_id":  { "type": "string", "default": "led0", "description": "Light device ID as reported by lightcontrol.cgi", "example": "led0" },
-              "intensity": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Manual intensity (0–100). Only used when operation is on. Omit to keep current intensity." }
+              "intensity": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Manual intensity (0–100). Only used when operation is on or flash. Omit to keep current intensity." },
+              "duration_ms": { "type": "integer", "minimum": 50, "maximum": 5000, "default": 300, "description": "Per-pulse on-time in milliseconds. Only used when operation is flash. Clamped to 50–5000 ms." },
+              "gap_ms": { "type": "integer", "minimum": 50, "maximum": 5000, "description": "Off-time between pulses in milliseconds. Only used when operation is flash and count > 1. Defaults to duration_ms. Clamped to 50–5000 ms." },
+              "count": { "type": "integer", "minimum": 1, "maximum": 20, "default": 1, "description": "Number of flash pulses. Only used when operation is flash. Clamped to 1–20." }
             }
           }
         ]

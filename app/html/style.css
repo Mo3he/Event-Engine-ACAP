@@ -394,6 +394,17 @@ header .subtitle {
 .form-group select option { background: var(--surface); }
 
 .form-hint { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.form-warning {
+  font-size: 12px;
+  color: var(--accent-warning);
+  background: color-mix(in srgb, var(--accent-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 40%, transparent);
+  border-left: 3px solid var(--accent-warning);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  line-height: 1.4;
+}
 
 /* ===== Section headers ===== */
 .section-header {
