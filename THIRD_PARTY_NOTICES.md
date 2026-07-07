@@ -1,27 +1,28 @@
-This project contains code from the following copyright holders:
+# Third-Party Notices
 
-----------------------------------------------------------------------
-ACAP.c, ACAP.h — ACAP SDK Wrapper
-Copyright (c) 2025 Fred Juhlin <fred.juhlin@gmail.com>
-https://github.com/pandosme/make_acap
-Licensed under the MIT License (see below).
+The Event Engine ACAP includes the following third-party components, compiled
+into the application binary. The ACAP's own code is licensed separately (see
+`LICENSE`, BSD 3-Clause).
 
-----------------------------------------------------------------------
-cJSON.c, cJSON.h — cJSON Parser
-Copyright (c) 2009-2017 Dave Gamble and cJSON contributors
-https://github.com/DaveGamble/cJSON
-Licensed under the MIT License (see below).
+## ACAP.c, ACAP.h (ACAP SDK wrapper)
 
-----------------------------------------------------------------------
-All other files — ACAP Event Engine
-Copyright (c) 2026 Weston Blieden <mblieden@gmail.com>
-https://github.com/Mo3he
-Licensed under the MIT License (see below).
+- Copyright (c) 2025 Fred Juhlin <fred.juhlin@gmail.com>
+- Project: https://github.com/pandosme/make_acap
+- License: MIT
 
-----------------------------------------------------------------------
+## cJSON.c, cJSON.h (cJSON parser)
 
-MIT License
+- Copyright (c) 2009-2017 Dave Gamble and cJSON contributors
+- Project: https://github.com/DaveGamble/cJSON
+- License: MIT
 
+--------------------------------------------------------------------------------
+
+## MIT License
+
+The MIT License applies to the ACAP SDK wrapper and cJSON components above.
+
+```
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -39,3 +40,4 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
