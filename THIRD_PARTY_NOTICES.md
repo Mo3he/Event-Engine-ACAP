@@ -7,13 +7,13 @@ into the application binary. The ACAP's own code is licensed separately (see
 ## ACAP.c, ACAP.h (ACAP SDK wrapper)
 
 - Copyright (c) 2025 Fred Juhlin <fred.juhlin@gmail.com>
-- Project: https://github.com/pandosme/make_acap
+- Project: <https://github.com/pandosme/make_acap>
 - License: MIT
 
 ## cJSON.c, cJSON.h (cJSON parser)
 
 - Copyright (c) 2009-2017 Dave Gamble and cJSON contributors
-- Project: https://github.com/DaveGamble/cJSON
+- Project: <https://github.com/DaveGamble/cJSON>
 - License: MIT
 
 --------------------------------------------------------------------------------
@@ -22,7 +22,7 @@ into the application binary. The ACAP's own code is licensed separately (see
 
 The MIT License applies to the ACAP SDK wrapper and cJSON components above.
 
-```
+```text
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
