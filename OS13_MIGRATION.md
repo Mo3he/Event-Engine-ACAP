@@ -9,16 +9,19 @@ Target: AXIS OS 13.0, scheduled September 2026. Preview firmware available April
 ## P0 - Required to install/run on OS 13
 
 ### 1. Recompile against OS 13 SDK - DONE
+
 - **Why**: 64-bit `time_t` ABI break means existing `.eap` files won't install on OS 13. The device will rollback the upgrade if our ACAP is present.
 - **Done**: `Dockerfile` bumped to `acap-native-sdk:12.10.0` on `ubuntu24.04` (from `1.15.1`/`ubuntu22.04`). Build verified.
 - **GLib symbol gotcha (fixed)**: The SDK 12.x toolchain ships GLib 2.80. GLib 2.76+ redefines the `g_string_free()` macro to call `g_string_free_and_steal`, so a binary built with the new SDK fails at runtime on older firmware with `undefined symbol: g_string_free_and_steal`. Fixed by capping the GLib API in `app/Makefile`: `-DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_2_66 -DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_66`. Verified absent from both `.eap` binaries via `readelf --dyn-syms`.
 - **glibc symbol gotcha (fixed, validated on OS 11.11)**: The SDK 12.10 toolchain ships glibc 2.42, which bumped the symbol version of the termios calls `cfsetispeed()`/`cfsetospeed()` (used by the Modbus RTU/serial code in `modbus_pool.c`). This made the binary require `GLIBC_2.42`, so it installed but crash-looped on AXIS OS 11.x with `libc.so.6: version 'GLIBC_2.42' not found`. These were the *only* two symbols pulling in 2.42. Fixed with arch-conditional `.symver` pins in `modbus_pool.c` (aarch64 -> `@GLIBC_2.17`, armv7hf -> `@GLIBC_2.4`); behaviour is unchanged for standard baud rates. The binary now tops out at `GLIBC_2.34` and runs on AXIS OS 11.11 (verified on an AXIS P3265-LVE, FW 11.11.212).
 
 ### 2. Declare OS compatibility in manifest.json - DONE
+
 - **Why**: OS 13 refuses to install or upgrade ACAPs that don't declare OS version compatibility.
 - **Done**: Added `compatibleOsVersions: [{ "min": "11.11", "max": "13" }]` to `acapPackageConf.setup` (the field is `compatibleOsVersions`, not the earlier guessed `compatibleWith`). If only `max` is given, `acap-build` auto-injects `min` = the SDK baseline (`12.10.68`), which would needlessly block OS 12.0-12.10.67 devices (OS 11.x ignores the field entirely). Pinning `min` explicitly to `11.11` is honored and matches the real runtime floor (glibc 2.34, present since AXIS OS 11.11).
 
 ### 3. Manifest schema v2 - DONE
+
 - **Why**: OS 13 enforces manifest schema v2.
 - **Done**: `schemaVersion` bumped `1.5.0` -> `2.0.0`. Schema v2 changes that were required:
   - `vendorId` (10 hex chars) is now **required**.
@@ -27,6 +30,7 @@ Target: AXIS OS 13.0, scheduled September 2026. Preview firmware available April
   - `httpConfig` / `reverseProxy` / `resources.dbus` remained valid unchanged.
 
 ### 4. ACAP signing - TODO (manual)
+
 - **Why**: OS 13 only accepts signed ACAPs.
 - **What**: Sign each built `.eap` through the Axis ACAP Portal (ties to vendor account / `vendorId`). Cannot be automated in this repo.
 
@@ -35,6 +39,7 @@ Target: AXIS OS 13.0, scheduled September 2026. Preview firmware available April
 ## P1 - Preserve recording functionality - DONE
 
 ### 5. Replace `record/record.cgi` + `record/stop.cgi` - DONE
+
 - **Why**: Both endpoints are removed in OS 13.
 - **Where**: `app/engine/actions.c` - `action_recording()`, `while_active_undo()` recording branch, `recording_stop_timeout_cb()`, and new continuous-recording helpers.
 - **Done**: Capability-aware implementation. On products where `Properties.LocalStorage.ContinuousRecording=yes` (OS 13, and OS 12 products that support it) recordings use:
@@ -52,11 +57,13 @@ Target: AXIS OS 13.0, scheduled September 2026. Preview firmware available April
 ## P2 - User-facing issues (no code change, but users need guidance)
 
 ### 6. Camera tampering trigger migration
+
 - **Why**: `MotionRegionDetector/Motion` event is removed. Any user rules using the camera tampering trigger will silently stop firing.
 - **What**: Update docs/UI to recommend AXIS Image Health Analytics events as replacement. Consider adding a deprecation warning in the UI if the trigger type is `tnsaxis:CameraApplicationPlatform/MotionRegionDetector/Motion`.
 - **Effort**: Low.
 
 ### 7. Remote camera HTTPS enforcement - DONE (v1.9.14)
+
 - **Why**: Cameras factory-reset on OS 13 default to HTTPS-only. The `remote_host` feature previously only sent HTTP requests to remote cameras, which those devices reject.
 - **Done**: Added a per-target `remote_https` boolean to remote-capable actions and conditions (UI checkbox "Use HTTPS"). When set, the remote curl helpers in `actions.c`/`conditions.c` build `https://` URLs and disable TLS peer/host verification to accept the self-signed certificates Axis cameras use by default. Left off, the transport stays HTTP, so mixed HTTP/HTTPS fleets both work. Verified on hardware: an overlay pushed from an OS 12.10 camera to an OS 11.11 camera over HTTPS succeeded.
 
@@ -65,6 +72,7 @@ Target: AXIS OS 13.0, scheduled September 2026. Preview firmware available April
 ## P3 - Pre-existing bugs to fix opportunistically (not OS 13 specific)
 
 ### 8. Replace non-thread-safe time functions
+
 - **Why**: `localtime()` and `gmtime()` use a static buffer and are not thread-safe. HTTP handlers run in a thread pool, so these can race.
 - **Where**:
   - `app/engine/scheduler.c` lines ~162, 205 - use `gmtime_r()` / `localtime_r()`

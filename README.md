@@ -2,10 +2,11 @@
 
 # Event Engine - ACAP for Axis Cameras
 
-### Check out the [Homepage](https://mo3he.github.io/Event-Engine-ACAP/) for a full overview of everything Event Engine can do
+## Check out the [Homepage](https://mo3he.github.io/Event-Engine-ACAP/) for a full overview of everything Event Engine can do
+
 A powerful If-This-Then-That style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
 
-#### To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface.
+### To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface
 
 Want to know why you need this ACAP? Take a look at [Use Cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html)  
 A full user manual is built in to the ACAP and available here: [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)  
@@ -15,7 +16,7 @@ If you find something that doesn't work the way it should, open an [Issue](https
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-orange?style=flat&logo=buy-me-a-coffee)](https://www.buymeacoffee.com/mo3he)
 
-> **Disclaimer:** This is an independent, community-developed ACAP package and is not an official Axis Communications product. It is not affiliated with, endorsed by, or supported by Axis Communications AB. Use it at your own risk. For official Axis software, visit axis.com 
+> **Disclaimer:** This is an independent, community-developed ACAP package and is not an official Axis Communications product. It is not affiliated with, endorsed by, or supported by Axis Communications AB. Use it at your own risk. For official Axis software, visit axis.com
 
 ---
 
@@ -248,7 +249,8 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 The rule editor shows which `{{trigger.*}}` keys are available for the selected trigger type.
 
 **Example — MQTT payload with sensor data:**
-```
+
+```text
 Camera {{camera.serial}} at {{timestamp}}: {{trigger_json}}
 ```
 
@@ -356,7 +358,7 @@ Rules and settings are stored in `localdata/` on the camera and survive in-place
 
 ## Project Structure
 
-```
+```text
 app/
 ├── main.c                  # HTTP endpoints, initialisation, event dispatch
 ├── ACAP.c / ACAP.h         # Axis SDK wrapper (HTTP, events, files, device info, VAPIX)

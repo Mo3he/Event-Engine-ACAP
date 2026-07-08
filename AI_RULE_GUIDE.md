@@ -35,11 +35,13 @@ All API endpoints are at `https://<camera_ip>/local/acap_event_engine/<endpoint>
 ## API Reference
 
 ### Base URL
-```
+
+```text
 https://<camera_ip>/local/acap_event_engine
 ```
 
 ### Authentication
+
 HTTP Digest Auth (admin credentials). With curl, use `-u root:pass --anyauth`.
 
 ### Endpoints
@@ -66,6 +68,7 @@ HTTP Digest Auth (admin credentials). With curl, use `-u root:pass --anyauth`.
 | `POST` | `/remote-caps` | Query capabilities of a remote Axis device |
 
 ### Create a Rule (curl)
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -76,6 +79,7 @@ curl -s -k -u root:pass --anyauth \
 Response: `{"id":"<uuid>","status":"created"}`
 
 ### Update a Rule (curl)
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -84,6 +88,7 @@ curl -s -k -u root:pass --anyauth \
 ```
 
 ### Bulk Import (curl)
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -92,6 +97,7 @@ curl -s -k -u root:pass --anyauth \
 ```
 
 ### Fire via Webhook (curl)
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -100,6 +106,7 @@ curl -s -k -u root:pass --anyauth \
 ```
 
 ### Python Upload Example
+
 ```python
 import json, urllib.request, ssl
 
@@ -219,6 +226,7 @@ Fires on any matching Axis device event (motion detection, analytics, sensors, I
 | `value_hold_secs` | integer | Condition must hold this many seconds before firing (0 = immediate) |
 
 **Common topic patterns:**
+
 - Motion Detection: `topic0: {"tns1": "RuleEngine"}, topic1: {"tnsaxis": "MotionDetection"}`
 - Object Analytics (ACAP): `topic0: {"tnsaxis": "CameraApplicationPlatform"}, topic1: {"tnsaxis": "ObjectAnalytics"}, topic2: {"tnsaxis": "Device1Scenario1"}`
 - I/O Port: `topic0: {"tns1": "Device"}, topic1: {"tnsaxis": "IO"}, topic2: {"tnsaxis": "Port"}`
@@ -253,6 +261,7 @@ Payload data from the webhook POST body's `payload` field is available as `{{tri
 Fires on a time-based schedule. Four sub-types:
 
 **Cron:**
+
 ```json
 {
   "type": "schedule",
@@ -262,6 +271,7 @@ Fires on a time-based schedule. Four sub-types:
 ```
 
 **Interval:**
+
 ```json
 {
   "type": "schedule",
@@ -271,6 +281,7 @@ Fires on a time-based schedule. Four sub-types:
 ```
 
 **Daily Time:**
+
 ```json
 {
   "type": "schedule",
@@ -281,6 +292,7 @@ Fires on a time-based schedule. Four sub-types:
 ```
 
 **Astronomical (sunrise/sunset):**
+
 ```json
 {
   "type": "schedule",
@@ -1280,11 +1292,13 @@ All string fields in actions support `{{...}}` variable substitution:
 ## Settings & MQTT Configuration
 
 ### Get Settings
+
 ```bash
 curl -s -k -u root:pass --anyauth "https://CAMERA_IP/local/acap_event_engine/settings"
 ```
 
 ### Configure MQTT
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -1304,6 +1318,7 @@ curl -s -k -u root:pass --anyauth \
 ```
 
 ### Configure SMTP (for email actions)
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -1320,6 +1335,7 @@ curl -s -k -u root:pass --anyauth \
 ```
 
 ### Set Location (for astronomical triggers)
+
 ```bash
 curl -s -k -u root:pass --anyauth \
   -X POST -H "Content-Type: application/json" \
@@ -1404,6 +1420,7 @@ curl -s -k -u root:pass --anyauth \
 ### Example 3: MQTT Command → Arm/Disarm System
 
 **Arm rule:**
+
 ```json
 {
   "name": "Arm System via MQTT",
@@ -1424,6 +1441,7 @@ curl -s -k -u root:pass --anyauth \
 ```
 
 **Motion alert (only when armed):**
+
 ```json
 {
   "name": "Armed Motion Alert",
@@ -1576,26 +1594,33 @@ curl -s -k -u root:pass --anyauth \
 ## Common Patterns
 
 ### Pattern: State Machine with Variables
+
 Use `set_variable` and `variable_compare` to build state machines. One rule sets the state, another checks it.
 
 ### Pattern: Rule Chaining
+
 Rule A fires → `run_rule` triggers Rule B → `rule_fired` trigger on Rule C chains further.
 
 ### Pattern: Enable/Disable Rules Dynamically
+
 Use `set_rule_enabled` in one rule to activate or deactivate other rules at runtime, creating mode-switching behavior (e.g. armed/disarmed, maintenance mode).
 
 ### Pattern: Cross-Device Orchestration
+
 - Use `http_request` to POST to another camera's `/local/acap_event_engine/fire` endpoint with a webhook token
 - Use `remote_host`/`remote_user`/`remote_pass` on actions to directly control remote Axis devices
 - Use `vapix_event_state` or `io_state` conditions with `remote_host` to check state on other cameras
 
 ### Pattern: Sensor Data Pipeline
+
 1. Schedule trigger (interval) → 2. `vapix_query` action fetches sensor data → 3. `influxdb_write`/`mqtt_publish`/`http_request` sends it upstream
 
 ### Pattern: Alert Throttling
+
 Use `cooldown` to prevent floods. Use `max_executions` + `max_exec_period` to cap alerts (e.g. max 10 per hour).
 
 ### Pattern: While-Active Behavior
+
 Set `while_active: true` on recording, overlay, I/O output, siren, or speaker_display actions to automatically stop/revert when the triggering event goes inactive.
 
 ---

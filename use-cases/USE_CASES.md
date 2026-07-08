@@ -19,6 +19,7 @@ Push alerts to people and push data to systems. The camera becomes an edge senso
 Push sensor data directly to a Power BI streaming dataset via its REST API - the camera feeds the dashboard with no gateway or middleware in between.
 
 **How it works:**
+
 - A **schedule** trigger fires every 60 seconds
 - A **Device Event Query** action fetches the latest cached sensor data (temperature, humidity, CO₂) and injects the values as `{{trigger.FIELD}}` variables
 - An **HTTP Request** action POSTs a JSON array to the Power BI streaming dataset endpoint - data appears instantly on a real-time Power BI tile
@@ -32,6 +33,7 @@ Push sensor data directly to a Power BI streaming dataset via its REST API - the
 Write time-series data points directly into InfluxDB with no middleware - the camera is the data pipeline.
 
 **How it works:**
+
 - A **schedule** trigger fires every 60 seconds
 - A **Device Event Query** action fetches the latest cached sensor data
 - An **InfluxDB Write** action writes a data point with temperature, humidity, and CO₂ as fields and the camera serial as a tag - ready to query in Grafana
@@ -43,6 +45,7 @@ Write time-series data points directly into InfluxDB with no middleware - the ca
 Publish sensor data over MQTT using Home Assistant's topic conventions - sensors appear in HA with retained state updates every 60 seconds.
 
 **How it works:**
+
 - A **schedule** trigger fires every 60 seconds
 - A **Device Event Query** action fetches the latest cached sensor data
 - An **MQTT Publish** action sends a retained JSON payload to `homeassistant/sensor/<serial>/environment/state` - HA picks up temperature, humidity, and CO₂ as sensor entities
@@ -56,6 +59,7 @@ Publish sensor data over MQTT using Home Assistant's topic conventions - sensors
 **Scenario:** When motion is detected during office hours, send an alert with a camera snapshot to Slack, Microsoft Teams, and email simultaneously - so that security staff receive the notification on whichever platform they monitor.
 
 **How it works:**
+
 - A **Device Event** trigger subscribes to Motion Detection (active = true)
 - A **Time Window** condition restricts firing to weekdays 08:00–18:00
 - Three actions run in sequence: **Slack webhook**, **Teams webhook**, and **Email** - each with a template that includes the camera name, timestamp, and a snapshot attachment
@@ -70,6 +74,7 @@ Publish sensor data over MQTT using Home Assistant's topic conventions - sensors
 **Scenario:** Instead of one notification per event, buffer all motion events throughout the day and send a single summary email at 18:00 showing every event with its timestamp - a daily activity report for facility managers.
 
 **How it works:**
+
 - A **Device Event** trigger subscribes to Motion Detection (active = true)
 - A **Notification Digest** action buffers each event as one line (`{{time}} - Motion detected on {{camera.model}} ({{camera.serial}})`) and flushes via email every 86 400 seconds (24 hours)
 - A second **schedule** trigger fires at 18:00 daily to ensure the digest sends even if no motion occurs (the flush still delivers whatever is buffered)
@@ -87,6 +92,7 @@ Automate camera hardware functions. The camera adjusts its own imaging, PTZ posi
 **Scenario:** At sunset, switch the IR cut filter to night mode and turn on the onboard IR illuminator at 80% intensity. At sunrise, switch back to day mode and turn the light off. No fixed schedule - the times follow the actual sun position at the camera's coordinates.
 
 **How it works:**
+
 - Two rules using **schedule** triggers with type `sunset` and `sunrise` (with latitude/longitude from the Settings → Location tab)
 - The sunset rule runs two actions: **IR Cut Filter** (set to `night`) and **Light Control** (turn on `led0` at intensity 80)
 - The sunrise rule mirrors it: **IR Cut Filter** (set to `day`) and **Light Control** (turn off `led0`)
@@ -104,6 +110,7 @@ A camera covers both a public area and a private office. Privacy masks need to f
 **Scenario:** During business hours (Mon–Fri 08:00–18:00), enable a privacy mask over the office window for GDPR compliance. Outside business hours, disable the mask so security can monitor the full scene.
 
 **How it works:**
+
 - Two rules with **schedule** triggers - one fires at 08:00 weekdays, the other at 18:00 weekdays
 - The morning rule runs a **Privacy Mask** action that enables the mask named `"Office Window"`
 - The evening rule disables the same mask
@@ -116,6 +123,7 @@ A camera covers both a public area and a private office. Privacy masks need to f
 **Scenario:** When a fire alarm, intrusion alarm, or building management system signals an emergency, immediately disable all privacy masks for full scene visibility - regardless of schedule. When the emergency is cleared, restore normal operation.
 
 **How it works:**
+
 - An **MQTT Message** trigger listens on `building/emergency/+` (payload `"active"` or `"cleared"`), with an **HTTP Webhook** as a fallback trigger for systems that can't publish MQTT
 - The emergency rule sets `system.privacy_mode` to `"override"` (which blocks the scheduled rules from re-enabling masks), disables the privacy mask, and displays a warning overlay
 - The clear rule sets `system.privacy_mode` back to `"normal"` and re-enables the mask - the next scheduled rule resumes normal cycling
@@ -129,6 +137,7 @@ A camera covers both a public area and a private office. Privacy masks need to f
 **Scenario:** A PTZ camera runs a guard tour continuously. When Axis Object Analytics detects a person in a specific scenario zone, pause the tour, move to a PTZ preset that centres that zone, hold for 30 seconds, then resume the guard tour.
 
 **How it works:**
+
 - An **AOA Scenario** trigger fires on human detection in scenario 1
 - The action sequence: **Guard Tour** (stop tour `"Patrol Route"`), **PTZ Preset** (go to `"Zone A Close-up"`), **Delay** (30 seconds), **Guard Tour** (start tour `"Patrol Route"`)
 - A **60-second cooldown** prevents interrupting the tour repeatedly if the person lingers
@@ -142,6 +151,7 @@ A camera covers both a public area and a private office. Privacy masks need to f
 **Scenario:** When motion is detected, play a pre-uploaded audio clip through the camera speaker — useful as an on-site deterrent (warning tone or voice message) or to alert staff in the same building without sending a remote notification.
 
 **How it works:**
+
 - A **Device Event** trigger subscribes to Motion Detection (active = true)
 - An **Audio Clip** action plays the selected clip by name or ID (clips are uploaded via the camera's Audio section under Settings)
 - A **10-second cooldown** prevents the clip repeating on sustained motion
@@ -155,6 +165,7 @@ A camera covers both a public area and a private office. Privacy masks need to f
 **Scenario:** An outdoor camera accumulates condensation or debris on its lens cover overnight. Run the wiper automatically every morning at 07:00 to restore a clear view before the working day begins — no manual intervention required.
 
 **How it works:**
+
 - A **schedule** trigger fires daily at 07:00, every day of the week
 - A **Wiper** action starts wiper run 1 (the primary wiper service)
 - Adjust the time or restrict to weekdays only by changing the `days` array in the template
@@ -172,6 +183,7 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 **Scenario:** When a person is detected in a restricted zone after hours and the security system is armed, trigger a full response: start recording, activate the siren/strobe, switch an I/O output to trigger an external alarm panel, send a Telegram alert with a snapshot, and overlay "INTRUSION DETECTED" on the live stream.
 
 **How it works:**
+
 - An **AOA Scenario** trigger detects humans in the perimeter scenario
 - Two conditions: **Time Window** restricting to after-hours (19:00–06:00 every day) and **Variable Compare** checking `system.armed` = `"true"`
 - Five actions in sequence: **Recording** (start), **Siren / Light** (start profile `"Intrusion"`), **IO Output** (port 1 active, duration 30 s), **Telegram** (alert with snapshot), **Overlay Text** ("INTRUSION DETECTED" on channel 1, duration 60 s)
@@ -186,6 +198,7 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 **Scenario:** A camera monitoring a secure door uses I/O input from a card reader or push button. During business hours, a valid input opens the door via I/O output (electric strike), starts a short recording, and logs the access. Outside business hours, only an alert is sent - no door release.
 
 **How it works:**
+
 - An **IO Input** trigger on port 1 (rising edge) detects the card reader/button press
 - A **Time Window** condition checks Mon–Fri 08:00–18:00
 - If the condition passes (business hours): **IO Output** (port 2 active for 5 s - door strike), **Recording** (start, 15 s duration), **Increment Counter** (increment `door_access`)
@@ -200,6 +213,7 @@ Orchestrate full security responses on the edge. Combine detection triggers with
 **Scenario:** A retail store uses AOA to count people. When occupancy exceeds the limit (e.g., 20 people), display a warning overlay. If it exceeds a critical threshold (e.g., 30 people), send a Slack alert to the store manager and activate the door indicator light via I/O.
 
 **How it works:**
+
 - Two rules at different thresholds sharing the same AOA scenario
 - **Warning rule**: Schedule trigger (every 30 s) → **AOA Get Counts** (scenario 1) → **AOA Occupancy** condition (`human >= 20`) → **Overlay Text** ("Occupancy: {{aoa_human}} - LIMIT APPROACHING" on channel 1, duration 35 s)
 - **Critical rule**: Schedule trigger (every 30 s) → **AOA Get Counts** (scenario 1) → **AOA Occupancy** condition (`human >= 30`) → **Slack webhook** ("CRITICAL: {{aoa_human}} people in store - capacity exceeded") + **IO Output** (port 1 active for 35 s - door indicator)
@@ -217,6 +231,7 @@ Drive the built-in screen on Axis speaker-display devices (e.g. C1710) directly 
 **Scenario:** A service desk or healthcare waiting room uses a ticketing system. Whenever the next ticket is called, the ticketing system publishes an update over MQTT and the display instantly shows the current ticket number and remaining queue length — no screen controller, no separate dashboard app.
 
 **How it works:**
+
 - An **MQTT Message** trigger subscribes to `queue/reception/update`
 - The payload is expected as JSON: `{"current":"A047","waiting":3}` — fields are available as `{{trigger.current}}` and `{{trigger.waiting}}`
 - A **Speaker Display** action shows "NOW SERVING / A047 / 3 people waiting" on a dark-blue background, held for 5 minutes (or until the next update overwrites it)
@@ -237,6 +252,7 @@ An environmental sensor (or any MQTT-capable air quality device) publishes CO₂
 **Scenario:** The display always shows the latest sensor readings so occupants can see current air quality at a glance. When readings are within safe limits, the display shows a calm green dashboard updated in real-time.
 
 **How it works:**
+
 - An **MQTT Message** trigger subscribes to `sensors/airquality/data` (JSON payload: `{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}`)
 - A **Variable Compare** condition checks `system.airquality_alert != active` so the dashboard does not overwrite an active critical alert
 - A **Speaker Display** action renders the four values on a green background, replacing the previous reading every time a new message arrives
@@ -248,6 +264,7 @@ An environmental sensor (or any MQTT-capable air quality device) publishes CO₂
 **Scenario:** When CO₂ rises above 1 000 ppm or PM2.5 exceeds 35 μg/m³, the publishing system flags the reading as critical. The display immediately switches to a red scrolling alert that stays on screen until explicitly cleared — staff cannot miss it.
 
 **How it works:**
+
 - An **MQTT Message** trigger fires on `sensors/airquality/status` with payload `critical`
 - A **Set Variable** action sets `system.airquality_alert = active`, which suppresses the normal dashboard rule (4.2a)
 - A **Speaker Display** action shows a red scrolling warning with `while_active` enabled — it persists until the 4.2c clear rule fires
@@ -260,6 +277,7 @@ An environmental sensor (or any MQTT-capable air quality device) publishes CO₂
 **Scenario:** Once ventilation brings CO₂ and PM2.5 back within safe limits, the sensor system publishes `clear`. The alert is dismissed, the `system.airquality_alert` variable is reset, and the live dashboard resumes automatically.
 
 **How it works:**
+
 - An **MQTT Message** trigger fires on `sensors/airquality/status` with payload `clear`
 - A **Set Variable** action resets `system.airquality_alert = inactive`
 - A **Speaker Display** action briefly shows a green "Air Quality Normal" confirmation for 15 seconds — after which the next data message from 4.2a takes over
@@ -275,6 +293,7 @@ An environmental sensor (or any MQTT-capable air quality device) publishes CO₂
 **Scenario:** An Axis speaker-display (e.g. C1710) polls an Axis environmental sensor directly — no MQTT broker, no gateway, no middleware. Every 60 seconds the display pulls CO₂, temperature, and humidity readings straight from the remote sensor's ONVIF event stream and updates its screen.
 
 **How it works:**
+
 - A **schedule** trigger fires every 60 seconds
 - A **Device Event Query** (`vapix_query`) action targets the remote Axis sensor (IP, user, password) and queries the `Environment / AirQuality` event topic — the latest readings are injected as `{{trigger.CO2}}`, `{{trigger.Temperature}}`, and `{{trigger.Humidity}}`
 - A **Speaker Display** action renders the values on a green background with a 65-second duration (slightly longer than the poll interval so the display never goes blank between updates)
@@ -290,17 +309,20 @@ An environmental sensor (or any MQTT-capable air quality device) publishes CO₂
 **Scenario:** A building management system, sensor gateway, or automation platform pushes air quality readings to the speaker display over HTTP — no MQTT broker required. Each POST instantly updates the screen with fresh data.
 
 **How it works:**
+
 - An **HTTP Webhook** trigger listens for POSTs to `/local/acap_event_engine/fire?token=airquality-display-update` with a JSON payload: `{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}` — fields become `{{trigger.co2}}`, `{{trigger.pm25}}`, etc.
 - A **Speaker Display** action renders the four values on a green background, held for 5 minutes (or until the next webhook POST overwrites it)
 - Zero cooldown so every POST updates the display immediately
 
 **Setup:** Configure your sensor gateway or BMS to HTTP POST to:
-```
+
+```text
 POST http://<speaker-ip>/local/acap_event_engine/fire?token=airquality-display-update
 Content-Type: application/json
 
 {"payload":{"co2":750,"pm25":8,"temperature":21.5,"humidity":45}}
 ```
+
 Change the token in the template to a unique value for your deployment.
 
 **Template:** [`templates/4.4-webhook-air-quality-display.json`](templates/4.4-webhook-air-quality-display.json)
@@ -316,6 +338,7 @@ Manage the state and health of the engine itself. These templates control the en
 **Scenario:** A central security panel, Home Assistant automation, or Node-RED flow sends an MQTT command to arm or disarm the camera. Other rules (e.g. 3.1 Perimeter Intrusion Response) gate their actions on `system.armed = true` — so a single MQTT publish instantly activates or deactivates all guarded rules across the camera.
 
 **How it works:**
+
 - Two rules listen on `cameras/{{camera.serial}}/arm` — one for payload `arm`, one for `disarm`
 - Each rule runs a **Set Variable** action (`system.armed = true` or `false`) and optionally a **Syslog** entry for the audit trail
 - Publish the topic from any MQTT client — the camera updates its state within the next event cycle
@@ -329,6 +352,7 @@ Manage the state and health of the engine itself. These templates control the en
 **Scenario:** Rules that count door access events, motion detections, or other occurrences store their totals in variables (e.g. `door_access`, `motion_count`). Reset all daily counters to zero at midnight so reports always reflect the current day — no accumulated drift across days.
 
 **How it works:**
+
 - A **schedule** trigger fires daily at 00:00
 - A sequence of **Set Variable** actions resets each counter (`door_access = 0`, `motion_count = 0`) in a single rule pass
 - An optional **Syslog** action logs "Daily counters reset" for the audit trail
@@ -342,6 +366,7 @@ Manage the state and health of the engine itself. These templates control the en
 **Scenario:** External monitoring systems (Node-RED, Home Assistant, Zabbix, Grafana) need to know if the camera and engine are alive. Publish a lightweight status payload every 60 seconds — if the topic goes silent, the monitoring system raises an alert.
 
 **How it works:**
+
 - A **schedule** trigger fires every 60 seconds
 - An **MQTT Publish** action sends `{"serial":"{{camera.serial}}","model":"{{camera.model}}","time":"{{timestamp}}","armed":"{{system.armed}}"}` to `cameras/{{camera.serial}}/heartbeat`
 - Monitoring software subscribes to the topic and alerts on silence — a timeout of ~120 seconds catches any unreachable device
@@ -355,6 +380,7 @@ Manage the state and health of the engine itself. These templates control the en
 **Scenario:** Engineers arrive on-site for maintenance. A single MQTT publish activates maintenance mode — suppressing all alert rules that carry a `system.maintenance = false` condition. When work is done, a second MQTT command restores normal operation. The live-stream overlay confirms the active state at a glance.
 
 **How it works:**
+
 - Two rules listen on `cameras/{{camera.serial}}/maintenance` — one for payload `enable`, one for `disable`
 - The enable rule sets `system.maintenance = true` and adds an **Overlay Text** ("MAINTENANCE MODE ACTIVE" on channel 1) so the live stream makes the state visible
 - The disable rule sets `system.maintenance = false` and logs the restoration to syslog
@@ -369,6 +395,7 @@ Manage the state and health of the engine itself. These templates control the en
 **Scenario:** A central automation system (Home Assistant, Node-RED, SCADA) needs to dynamically switch which rules are active on the camera — enabling seasonal alert rules in winter, disabling them in summer, or activating a high-security rule set outside business hours. A single MQTT publish targets any rule by ID.
 
 **How it works:**
+
 - Two rules listen on `cameras/{{camera.serial}}/rules/<target_rule_id>/enable` — one for payload `enable`, one for `disable`
 - Each rule runs an **Enable / Disable Rule** action that directly enables or disables the target rule and logs the change to syslog
 - Replace `REPLACE_WITH_TARGET_RULE_ID` in each template with the actual UUID of the rule you want to control (copy it from the rule editor's rule list)
@@ -389,6 +416,7 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 **Scenario:** A door opens (an I/O input rising edge on the Event Engine camera), but you only want to raise an alarm if a second camera's door sensor is also active — preventing false alarms from the first sensor glitching. When both are active, show an alert on a remote speaker display.
 
 **How it works:**
+
 - An **I/O Input** trigger fires on port 1 rising edge
 - An **I/O State** condition checks port 1 on a *remote* camera (e.g. `192.168.1.101`) — rule proceeds only if that sensor is also active
 - A **Speaker Display** action shows a scrolling alert on a *remote* speaker display (e.g. `192.168.1.102`) for 15 seconds
@@ -404,6 +432,7 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 **Scenario:** Camera A detects a person via AOA, but only raises an alert if camera B also currently counts at least one person (confirming the event is real, not a far-field false positive). The response includes a speaker display on a remote device and an MQTT alert.
 
 **How it works:**
+
 - An **AOA Scenario** trigger fires when scenario 1 detects an object
 - An **AOA Occupancy** condition checks a *remote* camera (e.g. `192.168.1.101`) — passes only if occupancy > 0
 - A **Speaker Display** action shows a 10-second warning on a remote speaker display
@@ -420,6 +449,7 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 **Scenario:** Camera A (running Event Engine) periodically queries environmental sensor data from a remote Camera B and publishes it over MQTT with formatted decimal values — no Event Engine installation needed on Camera B.
 
 **How it works:**
+
 - A **Schedule** trigger fires every 60 seconds
 - A **Device Event Query** action with a remote target queries Camera B's air quality event data (temperature, humidity, CO₂) via the VAPIX event API
 - An **MQTT Publish** action sends the sensor values as a JSON object, using the `|N` format specifier to round decimals (e.g. `{{trigger.Temperature|2}}` → `20.35`)
@@ -492,6 +522,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** Low-level motion detection is normal, but 50 events in a single day suggests something unusual — a crowd, a fault, or a threat. Count every motion event throughout the day and escalate automatically when the threshold is crossed.
 
 **How it works:**
+
 - **7.1a:** A **Device Event** trigger (motion active) fires the **Increment Counter** action on every detection, accumulating `motion_count`
 - **7.1b:** A **Counter Threshold** trigger watches `motion_count >= 50`; a **Counter Compare** condition double-checks before acting; a **Slack** alert fires once per day, optionally **Run Rule** chains to a downstream response rule
 - Pair with template **5.2** to reset `motion_count` to zero at midnight
@@ -505,6 +536,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** A door I/O sensor triggers frequently for legitimate access events. Motion detection fires frequently on its own. Neither signal alone is meaningful — but if both occur within 8 seconds of each other, that strongly indicates someone followed someone else through the door without badging.
 
 **How it works:**
+
 - `trigger_logic: "AND"` and `trigger_window: 8` require both an **I/O Input** (door rising edge) and a **Device Event** (motion active) to fire within 8 seconds
 - A **Time Window** condition restricts to after-hours (18:00–08:00)
 - Actions: **Recording** (30s), **Telegram** alert with snapshot, **IO Output** (alarm relay 5s)
@@ -518,6 +550,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** A camera should only record motion events during darkness — daytime recordings are unneeded and consume storage. Rather than using a fixed time window, use the sun's actual position so the schedule adapts to sunrise/sunset automatically across the year.
 
 **How it works:**
+
 - A **Device Event** trigger fires on motion detection
 - A **Day/Night** condition (`state: "night"`) passes only when the sun is below the horizon, using the camera's configured latitude/longitude
 - A **Recording** action starts a 30-second clip, with a live-stream overlay showing the detection time
@@ -531,6 +564,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** Critical evidence snapshots must be preserved even when the primary upload server is unreachable. An `on_failure` action chain automatically reroutes to FTP backup storage if the HTTP POST fails for any reason.
 
 **How it works:**
+
 - AOA human detection (armed + after-hours) triggers a **HTTP Request** with `attach_snapshot: true`, posting a JSON body including the base64 image
 - If the request fails (curl error or non-2xx status), the `on_failure` array runs: **FTP Upload** to backup storage + **Send Syslog** warning
 - The failure path is transparent — no logic branching needed in the rule itself
@@ -544,6 +578,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** A critical ACAP application (analytics, access control, etc.) must stay running. Poll its VAPIX event state every 10 minutes; if it reports as inactive, restart it, restore a known-good device parameter, and publish an alert.
 
 **How it works:**
+
 - A **cron** schedule trigger fires every 10 minutes (`*/10 * * * *`)
 - A **Device Event State** condition checks the ACAP's running event; the condition passes (and actions run) only when the ACAP is NOT active
 - Actions: **ACAP Control** (start), **Set Device Parameter** (restore to known-good value), **Send Syslog** (warning), **MQTT Publish** (monitoring alert)
@@ -559,6 +594,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** An Axis C6110 paging console should broadcast a pre-recorded announcement at the top of every business hour — a safety reminder, a shift change call, or a building-wide notification — without any manual intervention.
 
 **How it works:**
+
 - A **cron** schedule trigger fires at `0 8-17 * * 1-5` (top of every hour, 08:00–17:00, Mon–Fri)
 - A **Paging Console Execute** action triggers the pre-configured paging action by its UUID
 - A **Send Syslog** action provides an audit trail
@@ -574,6 +610,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** Event Engine detects something (or receives an external command) and needs to notify a VMS (AXIS Camera Station, Milestone, Genetec). Rather than polling, the VMS subscribes to VAPIX events from the camera — the **Fire VAPIX Event** action emits the signal the VMS is waiting for.
 
 **How it works:**
+
 - A **manual** trigger (UI "Fire Now" button or `POST /fire` API call) or an **HTTP Webhook** from any external system starts the rule
 - A **Fire VAPIX Event** action emits a `RuleFired` VAPIX event that the VMS is subscribed to
 - An **MQTT Publish** action provides a parallel notification path
@@ -588,6 +625,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** Whenever a critical security rule fires, log it — but only if the system state warrants it. Using `condition_logic: OR`, the log fires if the system is armed OR if any motion activity has occurred today (counter > 0). Either condition is sufficient.
 
 **How it works:**
+
 - A **Rule Fired** trigger watches a specified security rule by UUID
 - Two conditions with `condition_logic: OR`: **Variable Compare** (`system.armed = true`) and **Counter Compare** (`motion_count > 0`) — either passing is enough
 - Actions: **Send Syslog** (warning level with variable interpolation) + **MQTT Publish** (to an audit topic)
@@ -603,6 +641,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 **Scenario:** A camera in an isolated network segment sends alerts to a cloud endpoint. When connectivity drops, the alert queue fills with undeliverable requests. Using an **http_check** condition, the rule verifies the endpoint is UP before acting — silently skipping when it's unreachable rather than flooding failed queues.
 
 **How it works:**
+
 - A **Device Event** trigger fires on motion detection
 - An **HTTP Check** condition makes a quick GET to `https://alerts.example.com/health` — the condition passes only if the response is HTTP 200 with body `ok`
 - A **Time Window** condition restricts to office hours
