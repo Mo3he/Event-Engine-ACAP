@@ -1,0 +1,29 @@
+---
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build_acap:
+    name: Build ACAP (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64, armv7hf]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build
+        run: RUNTIME=docker ./build.sh ${{ matrix.arch }}
+      - name: Verify
+        run: |
+          for f in *.eap; do
+            echo "Verification of $f:"
+            tar tzf "$f"
+          done

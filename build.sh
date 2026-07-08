@@ -2,7 +2,11 @@
 set -e
 trap 'echo "Build failed at line $LINENO"; exit 1' ERR
 
-if command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
+# Honor an explicit RUNTIME override (RUNTIME=docker|podman); otherwise
+# auto-detect, preferring podman when its daemon is reachable.
+if [ -n "${RUNTIME:-}" ]; then
+    CONTAINER_CMD="$RUNTIME"
+elif command -v podman &>/dev/null && podman info &>/dev/null 2>&1; then
     CONTAINER_CMD=podman
 elif command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
     CONTAINER_CMD=docker
