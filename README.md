@@ -1,94 +1,109 @@
 <img src="event_engine_icon_dark.svg" alt="Event Engine" width="72" align="right">
 
-# Event Engine - ACAP for Axis Cameras
+# Event Engine ACAP for Axis Cameras
 
-## Check out the [Homepage](https://mo3he.github.io/Event-Engine-ACAP/) for a full overview of everything Event Engine can do
+[![Release](https://img.shields.io/github/v/release/Mo3he/Event-Engine-ACAP?style=flat)](https://github.com/Mo3he/Event-Engine-ACAP/releases)
+[![License](https://img.shields.io/github/license/Mo3he/Event-Engine-ACAP?style=flat)](LICENSE)
+[![Build](https://github.com/Mo3he/Event-Engine-ACAP/actions/workflows/build.yml/badge.svg)](https://github.com/Mo3he/Event-Engine-ACAP/actions/workflows/build.yml)
+[![Super-Linter](https://github.com/Mo3he/Event-Engine-ACAP/actions/workflows/super-linter.yml/badge.svg)](https://github.com/Mo3he/Event-Engine-ACAP/actions/workflows/super-linter.yml)
+[![Sponsor](https://img.shields.io/badge/Sponsor%20My%20Work-EA4AAA?style=flat&logo=github&logoColor=white)](https://github.com/sponsors/Mo3he)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://www.buymeacoffee.com/mo3he)
 
-A powerful If-This-Then-That style automation engine that runs directly on your Axis camera. Build rules that react to camera events, schedules, MQTT messages, or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ moves, overlays, I/O outputs, siren/light signals, and more.
+A powerful If-This-Then-That style automation engine that runs directly on your
+Axis camera. Build rules that react to camera events, schedules, MQTT messages,
+or webhooks and respond with HTTP requests, MQTT publishes, recordings, PTZ
+moves, overlays, I/O outputs, siren/light signals, and more.
 
-### To get started right away, download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface
+**[Visit the Homepage](https://mo3he.github.io/Event-Engine-ACAP/)**
 
-Want to know why you need this ACAP? Take a look at [Use Cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html)  
-A full user manual is built in to the ACAP and available here: [User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)  
-API documentation can be found here: [API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json)
+> **Disclaimer:** Independent, community-developed ACAP package. Not an official
+> Axis product and not affiliated with, endorsed by, or supported by Axis
+> Communications AB. Use at your own risk.
 
-If you find something that doesn't work the way it should, open an [Issue](https://github.com/Mo3he/Event-Engine-ACAP/issues), if you would like me to add something, start a [Discussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions) and if you like my work, a coffee would help a lot
+A full user manual is built into the ACAP and is also available online as the
+[User Manual](https://mo3he.github.io/Event-Engine-ACAP/help.html). API
+documentation is in the
+[API Docs](https://petstore.swagger.io/?url=https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/app/html/openapi.json),
+and example scenarios are in [Use Cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html).
 
-[![Sponsor](https://img.shields.io/badge/Sponsor%20My%20Work-grey?logo=github)](https://github.com/sponsors/Mo3he)  
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-grey?style=flat&logo=buy-me-a-coffee)](https://www.buymeacoffee.com/mo3he)
+If you find something that doesn't work the way it should, open an
+[Issue](https://github.com/Mo3he/Event-Engine-ACAP/issues); to request a feature,
+start a [Discussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions).
 
-> **Disclaimer:** This is an independent, community-developed ACAP package and is not an official Axis Communications product. It is not affiliated with, endorsed by, or supported by Axis Communications AB. Use it at your own risk. For official Axis software, visit axis.com
+## Table of Contents
 
----
+- [Overview](#overview)
+- [Compatibility](#compatibility)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Triggers](#triggers)
+- [Conditions](#conditions)
+- [Actions](#actions)
+- [Cross-device automation](#cross-device-automation)
+- [Rule settings](#rule-settings)
+- [Dynamic variables](#dynamic-variables)
+- [MQTT](#mqtt)
+- [Use case templates](#use-case-templates)
+- [API](#api)
+- [Ports & security](#ports--security)
+- [Persistence](#persistence)
+- [Project structure](#project-structure)
+- [Build from source](#build-from-source)
+- [Roadmap](#roadmap)
+- [Links](#links)
+- [License](#license)
 
-## What It Does
+## Overview
 
-Event Engine replaces and extends the built-in Axis event system with a flexible **If This Then That** rule engine.
+Event Engine replaces and extends the built-in Axis event system with a flexible
+**If This Then That** rule engine.
 
 Each rule has:
 
-- **Triggers** — what starts the rule (one or more)
-- **Conditions** — optional checks that must pass before actions run (one or more)
-- **Actions** — what happens when the rule fires (one or more, run in sequence)
+- **Triggers:** what starts the rule (one or more)
+- **Conditions:** optional checks that must pass before actions run (one or more)
+- **Actions:** what happens when the rule fires (one or more, run in sequence)
 
-**Trigger logic** can be set to `OR` (any trigger fires the rule), `AND` (all triggers must fire within a configurable time window), or `AND_ACTIVE` (all triggers must be simultaneously in their active state). Conditions can be combined as `AND` (all must pass) or `OR` (any passes).
+**Trigger logic** can be set to `OR` (any trigger fires the rule), `AND` (all
+triggers must fire within a configurable time window), or `AND_ACTIVE` (all
+triggers must be simultaneously in their active state). Conditions can be combined
+as `AND` (all must pass) or `OR` (any passes).
 
 Rules are built in a clean web UI.
 
-<img width="410" height="591" alt="Screenshot 2026-03-21 at 06 14 58" src="https://github.com/user-attachments/assets/a01a9021-0cda-4d38-bd5a-27a52ec13a61" />
+<img width="410" height="591" alt="Rule editor screenshot" src="https://github.com/user-attachments/assets/a01a9021-0cda-4d38-bd5a-27a52ec13a61">
 
----
+## Compatibility
 
-## Requirements
+- **AXIS OS:** 11.11 through 13.
+- **Architectures:** `aarch64` and `armv7hf`.
 
-- Axis camera running **AXIS OS 11.11 or later** (required by the SDK used to build the package)
-- [Docker](https://www.docker.com/) — only needed if building from source
+## Installation
 
----
+Download the latest `.eap` from [Releases](https://github.com/Mo3he/Event-Engine-ACAP/releases) and install via the
+camera's web interface:
 
-## Install
+1. Go to `http://<camera-ip>/#settings/apps`.
+2. Click **Add app** and upload the `.eap` for your camera's architecture.
+3. Start the app.
 
-Download the latest `.eap` from [Releases](../../releases) and install via the camera's web interface:
+## Configuration
 
-1. Go to `http://<camera-ip>/#settings/apps`
-2. Click **Add app** and upload the `.eap` for your camera's architecture:
+The web UI is accessible at
+`http://<camera-ip>/local/acap_event_engine/index.html`:
 
-   - `aarch64` — newer Axis cameras (ARTPEC-8, most cameras from 2020+)
-   - `armv7hf` — older Axis cameras (ARTPEC-6/7)
-3. Start the app
-
-If you're unsure which architecture your camera uses, check **System → About** in the camera web interface, or look up the model in the [Axis Product Selector](https://www.axis.com/en-gb/support/product-selector).
-
----
-
-## Build From Source
-
-```bash
-./build.sh            # builds both aarch64 and armv7hf
-./build.sh aarch64    # build only aarch64
-./build.sh armv7hf    # build only armv7hf
-```
-
-Requires Docker. The build pulls `axisecp/acap-native-sdk:1.15.1` automatically and produces `.eap` files.
-
----
-
-## Web UI
-
-Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
-
-- **Rules** — create, edit, duplicate, enable/disable, delete, import/export, and tag rules
-- **Event Log** — per-rule firing history with timestamps and result codes
-- **Variables** — view and manage named variables and counters
-- **Settings** — location (used for sunrise/sunset), SMTP configuration, MQTT broker configuration, SOCKS5 proxy, device info, and backup/restore
-
----
+- **Rules:** create, edit, duplicate, enable/disable, delete, import/export, and
+  tag rules.
+- **Event Log:** per-rule firing history with timestamps and result codes.
+- **Variables:** view and manage named variables and counters.
+- **Settings:** location (used for sunrise/sunset), SMTP configuration, MQTT
+  broker configuration, SOCKS5 proxy, device info, and backup/restore.
 
 ## Triggers
 
 | Type | Description |
 |------|-------------|
-| **Device Event** | Any device event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition — boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
+| **Device Event** | Any device event (motion, thermometry, tampering, I/O, analytics, air quality, etc.) selected from a live dropdown. Supports an optional value condition: boolean match, or numeric threshold (is above / is below / equals / is between) with an optional hold duration requiring the condition to persist for N seconds before firing |
 | **Schedule** | Cron expression, fixed interval, daily time with day-of-week selection, or **Sunrise/Sunset** (astronomical events: sunrise, sunset, civil dawn, civil dusk with optional offset in minutes and configurable latitude/longitude) |
 | **MQTT Message** | Incoming MQTT message on a topic (wildcards `+`/`#` supported, optional payload filter) |
 | **HTTP Webhook** | External POST request with a secret token (max 120 characters). Requires admin-level camera credentials. All keys in the JSON `payload` object are flattened and injected as `{{trigger.KEY}}` variables |
@@ -112,22 +127,22 @@ Accessible at `http://<camera-ip>/local/acap_event_engine/index.html`
 | **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count. Supports **remote device** target; use Load to fetch available scenarios from the remote device |
 | **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?). Supports **remote device** target; use Load to fetch the full event catalog from the remote device |
 
----
-
 ## Actions
 
-Actions are grouped by category in the rule editor. Actions that support **while_active** automatically undo themselves when the trigger deactivates (e.g. stop a siren when motion ends).
+Actions are grouped by category in the rule editor. Actions that support
+**while_active** automatically undo themselves when the trigger deactivates (e.g.
+stop a siren when motion ends).
 
 ### Notifications
 
 | Type | Description |
 |------|-------------|
-| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error) — log, MQTT publish, or secondary HTTP request |
+| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error): log, MQTT publish, or secondary HTTP request |
 | **MQTT Publish** | Publish a message to a topic with configurable QoS (0 or 1) and retain flag |
 | **Slack** | Send a message to a Slack channel via incoming webhook. Optional channel and username override |
-| **Teams** | Send an Adaptive Card to Microsoft Teams via Power Automate / Workflows webhook. Optional title and theme colour |
+| **Teams** | Send an Adaptive Card to Microsoft Teams via Power Automate / Workflows webhook. Optional title and theme color |
 | **Telegram** | Send a message via Telegram Bot API with Markdown or HTML formatting and link preview toggle |
-| **Email (SMTP)** | Send an email with template-aware subject and body. Optional **snapshot attachment**. SMTP server, credentials, and from address are configured once in the Settings tab — each action only needs the recipient, subject, and body |
+| **Email (SMTP)** | Send an email with template-aware subject and body. Optional **snapshot attachment**. SMTP server, credentials, and from address are configured once in the Settings tab, so each action only needs the recipient, subject, and body |
 | **Snapshot Upload** | Capture a JPEG from the camera and POST or PUT it to a URL with optional Basic Auth |
 | **FTP Upload** | Capture a JPEG and upload it to an FTP or SFTP server. Template-aware path (e.g. `ftp://server/{{camera.serial}}/{{date}}_{{time}}.jpg`). Directories are created automatically. Optional **fallback action** on upload failure |
 | **Send Syslog** | Write a message to the system log |
@@ -153,7 +168,7 @@ Actions are grouped by category in the rule editor. Actions that support **while
 | **Paging Console Execute** | Execute a pre-configured action on an Axis Paging Console (e.g. Axis C6110) by action UUID. Supports **remote device** target |
 | **Paging Console Button** | Update a button slot on a Paging Console page to a specified action UUID, or clear it. GET the current layout, patch the slot, PUT it back atomically. Supports **remote device** target |
 | **Siren / Light** | Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310). Supports `while_active` auto-stop |
-| **Speaker Display** | Show text or a scrolling message on an Axis speaker display (e.g. Axis C1710). Configurable foreground/background colour, text size, scroll speed, and duration (indefinite, time, or repetitions). Supports `{{variable}}` substitution and `while_active` auto-clear. Supports **remote device** target |
+| **Speaker Display** | Show text or a scrolling message on an Axis speaker display (e.g. Axis C1710). Configurable foreground/background color, text size, scroll speed, and duration. Supports `{{variable}}` substitution and `while_active` auto-clear. Supports **remote device** target |
 
 ### I/O
 
@@ -170,7 +185,7 @@ Actions are grouped by category in the rule editor. Actions that support **while
 | **Set Variable** | Create or update a named persistent variable |
 | **Increment Counter** | Add, subtract, reset, or set a named counter |
 | **Run Rule** | Immediately trigger another rule by name |
-| **Enable / Disable Rule** | Enable or disable another rule by ID — use to activate seasonal rules, switch operational profiles, or suppress alerts from a central control system |
+| **Enable / Disable Rule** | Enable or disable another rule by ID: use it to activate seasonal rules, switch operational profiles, or suppress alerts from a central control system |
 
 ### Advanced
 
@@ -178,7 +193,7 @@ Actions are grouped by category in the rule editor. Actions that support **while
 |------|-------------|
 | **Fire ACAP Event** | Fire an ACAP event visible to the built-in event system and other Axis applications. Useful as a VMS bridge |
 | **Device Event Query** | Fetch the latest data from a device event and inject it as `{{trigger.FIELD}}` variables for subsequent actions. Supports querying a **remote Axis device** (via IP/credentials) or the local passive subscription cache |
-| **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only — incorrect values can disrupt camera operation** |
+| **Set Device Parameter** | Update any camera parameter via `param.cgi`. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera. **Expert users only: incorrect values can disrupt camera operation** |
 | **ACAP Control** | Start, stop, or restart another installed ACAP application |
 
 ### Data
@@ -199,38 +214,48 @@ Actions are grouped by category in the rule editor. Actions that support **while
 |------|-------------|
 | **AOA Get Counts** | Fetch accumulated crossline counts from an Axis Object Analytics scenario and inject them as template variables: `{{aoa_total}}`, `{{aoa_human}}`, `{{aoa_car}}`, `{{aoa_truck}}`, `{{aoa_bus}}`, `{{aoa_bike}}`, `{{aoa_otherVehicle}}`, `{{aoa_timestamp}}`. Optional **Reset after fetch** to zero the counters after reading |
 
----
+## Cross-device automation
 
-## Cross-Device Automation
+Conditions and actions marked **remote device** can target any reachable Axis
+device on the network instead of the local camera. Supply an IP/hostname,
+username, and password in the condition or action block. This enables rules that
+detect on one device, verify state on a second, and act on a third, with no server or
+middleware required.
 
-Conditions and actions marked **remote device** can target any reachable Axis device on the network instead of the local camera. Supply an IP/hostname, username, and password in the condition or action block. This enables rules that detect on one device, verify state on a second, and act on a third — no server or middleware required.
+**Conditions:** I/O State, AOA Occupancy (Load button fetches scenarios from
+remote), Device Event State (Load button fetches event catalog from remote).
 
-**Conditions:** I/O State, AOA Occupancy (Load button fetches scenarios from remote), Device Event State (Load button fetches event catalog from remote)
+**Actions:** Recording, Overlay Text, PTZ Preset, Guard Tour, IR Cut Filter,
+Privacy Mask, Wiper, Light Control, Audio Clip, Siren / Light, Speaker Display,
+I/O Output, Paging Console Execute, Paging Console Button, Device Event Query, Set
+Device Parameter, ACAP Control.
 
-**Actions:** Recording, Overlay Text, PTZ Preset, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, Audio Clip, Siren / Light, Speaker Display, I/O Output, Paging Console Execute, Paging Console Button, Device Event Query, Set Device Parameter, ACAP Control
-
----
-
-## Rule Settings
+## Rule settings
 
 Each rule has two optional execution controls:
 
-- **Cooldown** — minimum seconds between firings. Prevents alert floods when a trigger fires repeatedly.
-- **Max Executions** — limit how many times the rule can fire, with a configurable period: per minute, per hour, per day, or lifetime total. The period counter resets automatically; the lifetime counter resets when the rule is saved.
+- **Cooldown:** minimum seconds between firings. Prevents alert floods when a
+  trigger fires repeatedly.
+- **Max Executions:** limit how many times the rule can fire, with a configurable
+  period: per minute, per hour, per day, or lifetime total.
 
-### Arm / Disarm Pattern
+### Arm / disarm pattern
 
-Use the **Variable Compare** condition with a variable named `system.armed` (value `"true"` or `"false"`) to make rules only fire when the system is armed. Example rules shipped in the templates:
+Use the **Variable Compare** condition with a variable named `system.armed` (value
+`"true"` or `"false"`) to make rules only fire when the system is armed. Example
+rules shipped in the templates:
 
-1. **Arm System via MQTT** — subscribe to `cameras/<serial>/arm`, set `system.armed = "true"`
-2. **Disarm System via MQTT** — same topic, set `system.armed = "false"`
-3. **Motion Alert When Armed** — motion trigger with a Variable Compare condition on `system.armed = "true"`
+1. **Arm System via MQTT:** subscribe to `cameras/<serial>/arm`, set
+   `system.armed = "true"`.
+2. **Disarm System via MQTT:** same topic, set `system.armed = "false"`.
+3. **Motion Alert When Armed:** motion trigger with a Variable Compare condition
+   on `system.armed = "true"`.
 
----
+## Dynamic variables
 
-## Dynamic Variables
-
-Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) support `{{variable}}` substitution. Use the **Insert variable** button in the rule editor to pick from available values.
+Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.)
+support `{{variable}}` substitution. Use the **Insert variable** button in the
+rule editor to pick from available values.
 
 | Variable | Value |
 |----------|-------|
@@ -242,20 +267,19 @@ Action fields (URL, body, MQTT payload, overlay text, syslog message, etc.) supp
 | `{{camera.ip}}` | Camera IP address |
 | `{{trigger_json}}` | Full trigger event data as a compact JSON string |
 | `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.CO2}}`) |
-| `{{trigger.KEY\|N}}` | Numeric value rounded to N decimal places (e.g. `{{trigger.Temperature\|2}}` → `20.35`) |
+| `{{trigger.KEY\|N}}` | Numeric value rounded to N decimal places (e.g. `{{trigger.Temperature\|2}}` -> `20.35`) |
 | `{{var.NAME}}` | Value of a named variable |
 | `{{counter.NAME}}` | Value of a named counter |
 | `{{trigger.snapshot_base64}}` | Base64-encoded JPEG snapshot (only when **Attach snapshot** is enabled on the HTTP Request action) |
 
-The rule editor shows which `{{trigger.*}}` keys are available for the selected trigger type.
+The rule editor shows which `{{trigger.*}}` keys are available for the selected
+trigger type.
 
-**Example — MQTT payload with sensor data:**
+**Example: MQTT payload with sensor data:**
 
 ```text
 Camera {{camera.serial}} at {{timestamp}}: {{trigger_json}}
 ```
-
----
 
 ## MQTT
 
@@ -270,35 +294,43 @@ The built-in MQTT client supports MQTT 3.1.1 with the following features:
 - Thread-safe publish (mutex protected)
 - Password stored separately from the API response and never exposed via GET
 
-Configure broker, port, credentials, client ID, and TLS/proxy settings in the **MQTT** tab.
+Configure broker, port, credentials, client ID, and TLS/proxy settings in the
+**MQTT** tab.
 
----
+## Use case templates
 
-## Use Case Templates
+The [`use-cases/`](use-cases/) directory contains 50 ready-to-import JSON rule
+templates across 7 categories:
 
-The [`use-cases/`](use-cases/) directory contains 50 ready-to-import JSON rule templates across 7 categories:
+1. **Notifications & Data:** sensor data to Power BI, InfluxDB, MQTT/Home
+   Assistant; multi-platform motion alerts; daily activity digests
+2. **Camera Control:** sunrise/sunset day/night mode switching; privacy mask
+   scheduling; PTZ track-and-resume; motion-triggered audio; scheduled wiper
+3. **Security & Access:** perimeter intrusion response; business-hours access
+   control with after-hours alerts; occupancy warnings
+4. **Signage & Displays:** queue/ticket display; air quality monitoring on
+   speaker displays; webhook-driven signage
+5. **System Integration:** arm/disarm via MQTT; daily counter reset; MQTT
+   heartbeat; maintenance mode; enable/disable rules via MQTT
+6. **Cross-Device:** multi-device I/O with conditions, speaker display, and
+   paging console orchestration
+7. **Advanced Patterns:** counter-driven escalation; tailgate detection;
+   night-only recording; snapshot FTP with fallback; ACAP watchdog; VMS event
+   bridge; security audit logger; network-gated alerts; dual-zone AND_ACTIVE logic
 
-1. **Notifications & Data** — sensor data to Power BI, InfluxDB, MQTT/Home Assistant; multi-platform motion alerts; daily activity digests
-2. **Camera Control** — sunrise/sunset day/night mode switching; privacy mask scheduling with emergency override; PTZ track-and-resume; motion-triggered audio; scheduled wiper
-3. **Security & Access** — perimeter intrusion response; business-hours access control with after-hours alerts; occupancy warnings
-4. **Signage & Displays** — queue/ticket display; air quality monitoring on speaker displays; webhook-driven signage
-5. **System Integration** — arm/disarm via MQTT; daily counter reset; MQTT heartbeat; maintenance mode; enable/disable rules via MQTT
-6. **Cross-Device** — multi-device I/O with conditions, speaker display, and paging console orchestration
-7. **Advanced Patterns** — counter-driven escalation; tailgate detection; night-only recording; snapshot FTP with fallback; ACAP watchdog; paging console announcements; VMS event bridge; security audit logger; network-gated alerts; raw snapshot upload; dual-zone AND_ACTIVE logic
-
-Import a template: open the web UI → Rules tab → Import, or POST the JSON to `/local/acap_event_engine/rules?action=import`.
-
-See [`use-cases/USE_CASES.md`](use-cases/USE_CASES.md) for full descriptions and setup instructions.
-
----
+Import a template: open the web UI -> Rules tab -> Import, or POST the JSON to
+`/local/acap_event_engine/rules?action=import`. See
+[`use-cases/USE_CASES.md`](use-cases/USE_CASES.md) for full descriptions and setup
+instructions.
 
 ## API
 
-All endpoints are under `/local/acap_event_engine/` and require Digest Auth (admin credentials).
+All endpoints are under `/local/acap_event_engine/` and require Digest Auth
+(admin credentials).
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET / POST / DELETE | `/rules` | Rule CRUD — POST without `id` creates, POST with `?id=` updates, `?action=export` exports all, `?action=import` bulk imports |
+| GET / POST / DELETE | `/rules` | Rule CRUD: POST without `id` creates, POST with `?id=` updates, `?action=export` exports all, `?action=import` bulk imports |
 | POST | `/fire` | Fire a rule manually (`{"id":"UUID"}`) or via webhook token (`{"token":"...", "payload":{...}}`) |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET / POST | `/actions` | Available action types (GET) or test a single action (POST) |
@@ -309,22 +341,26 @@ All endpoints are under `/local/acap_event_engine/` and require Digest Auth (adm
 | GET / POST / DELETE | `/acapevents` | User-defined ACAP events (system events: RuleFired, RuleError, EngineReady) |
 | GET / POST | `/settings` | Engine, MQTT, SMTP, and UI configuration |
 | POST | `/remote-caps` | Proxy capability queries to remote Axis devices (ptz, audio, siren, privacy, guardtour, acap, param, aoa, vapix_events, paging) |
-| GET | `/alertStream` | Real-time multipart/mixed event stream — see [Alert Stream](#alert-stream) |
+| GET | `/alertStream` | Real-time multipart/mixed event stream, see [Alert stream](#alert-stream) |
 
-Full spec: `app/html/openapi.json`
-Interactive docs: `http://<camera-ip>/local/acap_event_engine/swagger.html`
-AI automation guide: [`AI_RULE_GUIDE.md`](AI_RULE_GUIDE.md) — complete reference for programmatically creating and uploading rules via the API
+Full spec: `app/html/openapi.json`. Interactive docs:
+`http://<camera-ip>/local/acap_event_engine/swagger.html`. AI automation guide:
+[`AI_RULE_GUIDE.md`](AI_RULE_GUIDE.md), a complete reference for programmatically
+creating and uploading rules via the API.
 
-### Alert Stream
+### Alert stream
 
-A long-lived HTTP endpoint that pushes rule-fire events in real-time as `multipart/mixed` JSON chunks — no polling required. Digest Auth is handled by the camera's Apache proxy.
+A long-lived HTTP endpoint that pushes rule-fire events in real-time as
+`multipart/mixed` JSON chunks, no polling required. Digest Auth is handled by the
+camera's Apache proxy.
 
 ```bash
 curl --digest -u admin:pass -N \
   "http://<camera-ip>/local/acap_event_engine/alertStream"
 ```
 
-The first chunk arrives immediately on connect (`{"connected":true}`). Each subsequent chunk fires when a rule executes and includes:
+The first chunk arrives immediately on connect (`{"connected":true}`). Each
+subsequent chunk fires when a rule executes and includes:
 
 | Field | Description |
 |-------|-------------|
@@ -336,9 +372,10 @@ The first chunk arrives immediately on connect (`{"connected":true}`). Each subs
 | `rule_id` / `rule_name` | Rule identity |
 | `trigger_data` | Raw trigger event fields (vary by trigger type) |
 
-Up to 8 clients can be connected simultaneously. The stream URL is shown in the Settings tab of the web UI.
+Up to 8 clients can be connected simultaneously. The stream URL is shown in the
+Settings tab of the web UI.
 
-### Webhook Example
+### Webhook example
 
 Trigger a rule from any external system:
 
@@ -349,26 +386,34 @@ curl -u admin:pass -X POST \
   -d '{"token": "my-secret-token", "payload": {"source": "doorbell"}}'
 ```
 
----
+## Ports & security
+
+Event Engine does not open its own network ports. Its web UI and API are served
+through the camera's own web server and are **reverse-proxied through the camera's
+authentication** (Digest Auth, admin credentials). The internal alert-stream
+server binds to `localhost:8888` only. The optional MQTT client is outbound and
+supports TLS and a SOCKS5 proxy. HTTP Webhook triggers require a secret token plus
+admin-level camera credentials.
 
 ## Persistence
 
-Rules and settings are stored in `localdata/` on the camera and survive in-place application updates. To preserve data across a full uninstall/reinstall, use the **Export** buttons in the Settings tab to download your rules and settings as JSON files before uninstalling.
+Rules and settings are stored in `localdata/` on the camera and survive in-place
+application updates. To preserve data across a full uninstall/reinstall, use the
+**Export** buttons in the Settings tab to download your rules and settings as JSON
+files before uninstalling.
 
----
-
-## Project Structure
+## Project structure
 
 ```text
 app/
-├── main.c                  # HTTP endpoints, initialisation, event dispatch
+├── main.c                  # HTTP endpoints, initialization, event dispatch
 ├── ACAP.c / ACAP.h         # Axis SDK wrapper (HTTP, events, files, device info, VAPIX)
 ├── cJSON.c / cJSON.h       # Bundled JSON library
-├── manifest.json           # ACAP package manifest (schemaVersion 1.5.0)
+├── manifest.json           # ACAP package manifest (schema v2)
 ├── Makefile
 ├── engine/
 │   ├── rule_engine.c       # Rule store, trigger dispatch, cooldown, rate limiting
-│   ├── triggers.c          # All trigger types — subscribe, match, threshold, hold duration
+│   ├── triggers.c          # All trigger types: subscribe, match, threshold, hold duration
 │   ├── conditions.c        # Condition evaluation (lightweight + heavy split)
 │   ├── actions.c           # All action types + {{variable}} template engine
 │   ├── scheduler.c         # Cron, interval, daily-time, and astronomical scheduler
@@ -395,25 +440,55 @@ use-cases/
 └── templates/              # 50 ready-to-import JSON rule templates
 ```
 
----
+## Build from source
+
+```bash
+./build.sh            # builds both aarch64 and armv7hf
+./build.sh aarch64    # build only aarch64
+./build.sh armv7hf    # build only armv7hf
+```
+
+Requires Docker. The build pulls `axisecp/acap-native-sdk:12.10.0` automatically
+and produces `.eap` files.
 
 ## Roadmap
 
-### AXIS OS 13 compatibility - ready as of v1.9.14
+### AXIS OS 13 compatibility: ready as of v1.9.14
 
-AXIS OS 13 ships in September 2026 and introduces several breaking changes. Event Engine is already built and validated against them (full details in the [migration notes](OS13_MIGRATION.md)):
+AXIS OS 13 ships in September 2026 and introduces several breaking changes. Event
+Engine is already built and validated against them (full details in the
+[migration notes](OS13_MIGRATION.md)):
 
-- **Rebuilt against the OS 13 SDK** (`acap-native-sdk:12.10.0`) for the 64-bit `time_t` ABI break. Two toolchain symbol-version traps were pinned so the single binary still runs on older firmware: GLib 2.76's `g_string_free_and_steal` and glibc 2.42's `cfsetispeed`/`cfsetospeed`. Verified running on both AXIS OS 11.11 and 12.10.
-- **Recording migrated off `record/record.cgi` + `record/stop.cgi`** (removed in OS 13) to the Edge Storage continuous-recording API, with an automatic fallback to the legacy CGIs on products that don't support continuous-recording profiles. Verified end-to-end on hardware.
-- **Manifest updated to schema v2** with a `compatibleOsVersions` declaration of `11.11`-`13`.
-- **Remaining for production OS 13 use:** the `.eap` must be signed via the Axis ACAP Portal (OS 13 rejects unsigned apps).
+- **Rebuilt against the OS 13 SDK** (`acap-native-sdk:12.10.0`) for the 64-bit
+  `time_t` ABI break. Two toolchain symbol-version traps were pinned so the single
+  binary still runs on older firmware: GLib 2.76's `g_string_free_and_steal` and
+  glibc 2.42's `cfsetispeed`/`cfsetospeed`. Verified running on both AXIS OS 11.11
+  and 12.10.
+- **Recording migrated off `record/record.cgi` + `record/stop.cgi`** (removed in
+  OS 13) to the Edge Storage continuous-recording API, with an automatic fallback
+  to the legacy CGIs on products that don't support continuous-recording profiles.
+- **Manifest updated to schema v2** with a `compatibleOsVersions` declaration of
+  `11.11`-`13`.
+- **Remaining for production OS 13 use:** the `.eap` must be signed via the Axis
+  ACAP Portal (OS 13 rejects unsigned apps).
 
-### Remote camera HTTPS support - added in v1.9.14
+### Remote camera HTTPS support, added in v1.9.14
 
-Cameras factory-reset on AXIS OS 13 default to HTTPS-only. The cross-device remote host feature (actions and conditions that target another camera) now has a per-target **Use HTTPS** toggle. When enabled, Event Engine reaches the remote device over HTTPS and accepts its self-signed certificate. Leave it off for remote cameras still served over HTTP, so mixed fleets work either way.
+Cameras factory-reset on AXIS OS 13 default to HTTPS-only. The cross-device remote
+host feature now has a per-target **Use HTTPS** toggle. When enabled, Event Engine
+reaches the remote device over HTTPS and accepts its self-signed certificate.
+Leave it off for remote cameras still served over HTTP, so mixed fleets work
+either way.
 
----
+## Links
+
+- [Homepage](https://mo3he.github.io/Event-Engine-ACAP/)
+- [User manual](https://mo3he.github.io/Event-Engine-ACAP/help.html)
+- [Use cases](https://mo3he.github.io/Event-Engine-ACAP/use-cases.html)
+- [Axis Communications](https://www.axis.com/)
 
 ## License
 
-MIT
+The packaging and app code in this repository is licensed under BSD 3-Clause (see
+[LICENSE](LICENSE)). Bundled upstream components (`ACAP.c` by Fred Juhlin and cJSON,
+both MIT) are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
