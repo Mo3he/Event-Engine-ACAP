@@ -1,5 +1,11 @@
 # Release Notes
 
+## v1.9.14-Signed - Signed release
+
+- Packages are now signed with the Axis ACAP signing service and install normally on AXIS OS 12.10 and later.
+- Vendor updated to `moshe@mohome.net` with the registered vendor ID.
+- Upgrading from an earlier unsigned version can fail with "Couldn't install: app" (device log: "Vendor ID in manifest does not match the vendor ID of the previous version"). Back up your config, uninstall the old version, then install this one.
+
 ## v1.9.14 — AXIS OS 13 ready
 
 ### AXIS OS 13 compatibility
