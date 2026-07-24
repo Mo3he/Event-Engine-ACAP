@@ -76,6 +76,7 @@ Rules are built in a clean web UI.
 ## Compatibility
 
 - **AXIS OS:** 11.11 through 13.
+- **Verified on AXIS OS 13** (13.0.0, aarch64).
 - **Architectures:** `aarch64` and `armv7hf`.
 
 ## Installation
@@ -462,17 +463,18 @@ and produces `.eap` files.
 
 ## Roadmap
 
-### AXIS OS 13 compatibility: ready as of v1.9.14
+### AXIS OS 13 compatibility: verified (v1.9.14+)
 
-AXIS OS 13 ships in September 2026 and introduces several breaking changes. Event
-Engine is already built and validated against them (full details in the
+AXIS OS 13 introduces several breaking changes. Event
+Engine is built and validated against them, and has been verified running on
+AXIS OS 13.0.0 (aarch64) hardware (full details in the
 [migration notes](OS13_MIGRATION.md)):
 
 - **Rebuilt against the OS 13 SDK** (`acap-native-sdk:12.10.0`) for the 64-bit
   `time_t` ABI break. Two toolchain symbol-version traps were pinned so the single
   binary still runs on older firmware: GLib 2.76's `g_string_free_and_steal` and
-  glibc 2.42's `cfsetispeed`/`cfsetospeed`. Verified running on both AXIS OS 11.11
-  and 12.10.
+  glibc 2.42's `cfsetispeed`/`cfsetospeed`. Verified running on AXIS OS 11.11,
+  12.10, and 13.0 (aarch64).
 - **Recording migrated off `record/record.cgi` + `record/stop.cgi`** (removed in
   OS 13) to the Edge Storage continuous-recording API, with an automatic fallback
   to the legacy CGIs on products that don't support continuous-recording profiles.
