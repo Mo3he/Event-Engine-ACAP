@@ -102,11 +102,15 @@ void SPB_Metric_Set_Value(SPB_Metric* m, const char* text) {
         return;
     }
     if (dt_is_unsigned_int(m->datatype)) {
-        m->i64 = (int64_t)strtoull(text, NULL, 10);
+        m->i64 = strpbrk(text, ".eE") ? (int64_t)(uint64_t)strtod(text, NULL)
+                                      : (int64_t)strtoull(text, NULL, 10);
         return;
     }
-    /* Accept "12.7" for integer metrics rather than dropping the reading */
-    m->i64 = (int64_t)strtod(text, NULL);
+    /* Parse integers exactly: routing them through a double would silently
+     * round anything beyond 2^53. Only decimal input falls back to strtod, so
+     * that "12.7" still yields a reading rather than nothing. */
+    m->i64 = strpbrk(text, ".eE") ? (int64_t)strtod(text, NULL)
+                                  : (int64_t)strtoll(text, NULL, 10);
 }
 
 /* =====================================================

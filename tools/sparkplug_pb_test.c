@@ -91,6 +91,11 @@ int main(void) {
     roundtrip("Int from float",  SPB_DT_INT32,    "12.7",        "12");
     roundtrip("DateTime",        SPB_DT_DATETIME, "1750000000000", "1750000000000");
 
+    /* Beyond 2^53: proves integers are not routed through a double */
+    roundtrip("Int64 precision",  SPB_DT_INT64,  "9007199254740993",  "9007199254740993");
+    roundtrip("Int64 min",        SPB_DT_INT64,  "-9223372036854775808", "-9223372036854775808");
+    roundtrip("UInt64 precision", SPB_DT_UINT64, "18446744073709551615", "18446744073709551615");
+
     /* Float is 32-bit, so only check it survives to single precision */
     {
         SPB_Metric m;

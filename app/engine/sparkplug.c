@@ -84,6 +84,12 @@ static char cmd_filter_node[SPB_TOPIC_LEN] = "";
 static char cmd_filter_dev[SPB_TOPIC_LEN]  = "";
 static char state_filter[SPB_TOPIC_LEN]    = "";
 
+/* Exact topics this node owns. A rule may subscribe the shared MQTT client to a
+ * broad filter such as "#", in which case every Sparkplug node's commands arrive
+ * here; matching on substrings would let a foreign NCMD drive this device. */
+static char cmd_topic_node[SPB_TOPIC_LEN] = "";
+static char cmd_topic_dev[SPB_TOPIC_LEN]  = "";
+
 /* ACAP event subscriptions may only be torn down on the GMainLoop thread, but
  * settings arrive on the FastCGI thread, so retired ids queue up here. */
 static int pending_unsub[SPB_MAX_METRICS];
@@ -334,14 +340,26 @@ static int publish_data(SPB_Metric* metrics, int count) {
 /* =====================================================
  * Subscriptions
  * ===================================================== */
+/* True when topic is exactly prefix, or a deeper level below it. */
+static int topic_matches(const char* topic, const char* prefix) {
+    if (!prefix[0]) return 0;
+    size_t n = strlen(prefix);
+    if (strncmp(topic, prefix, n) != 0) return 0;
+    return topic[n] == '\0' || topic[n] == '/';
+}
+
 static void update_command_subscriptions(void) {
     char node[SPB_TOPIC_LEN], dev[SPB_TOPIC_LEN], state[SPB_TOPIC_LEN];
     node[0] = dev[0] = state[0] = '\0';
+    cmd_topic_node[0] = cmd_topic_dev[0] = '\0';
 
     if (enabled && valid_id(group_id) && valid_id(edge_node_id)) {
-        snprintf(node, sizeof(node), SPB_NAMESPACE "/%s/NCMD/%s/#", group_id, edge_node_id);
-        if (device_id[0])
-            snprintf(dev, sizeof(dev), SPB_NAMESPACE "/%s/DCMD/%s/%s", group_id, edge_node_id, device_id);
+        snprintf(cmd_topic_node, sizeof(cmd_topic_node), SPB_NAMESPACE "/%s/NCMD/%s", group_id, edge_node_id);
+        snprintf(node, sizeof(node), "%s/#", cmd_topic_node);
+        if (device_id[0]) {
+            snprintf(cmd_topic_dev, sizeof(cmd_topic_dev), SPB_NAMESPACE "/%s/DCMD/%s/%s", group_id, edge_node_id, device_id);
+            snprintf(dev, sizeof(dev), "%s", cmd_topic_dev);
+        }
         if (primary_host[0]) {
             /* Sparkplug 3.0 moved STATE under the spBv1.0 namespace */
             if (spec_version == SPB_SPEC_3_0)
@@ -492,11 +510,8 @@ void Sparkplug_On_MQTT_Message(const char* topic, const char* payload, int paylo
     if (!topic || !enabled) return;
 
     pthread_mutex_lock(&spb_lock);
-    int is_cmd   = (cmd_filter_node[0] && strncmp(topic, SPB_NAMESPACE "/", 8) == 0 &&
-                    strstr(topic, "/NCMD/") != NULL) ||
-                   (cmd_filter_dev[0] && strstr(topic, "/DCMD/") != NULL);
-    int is_state = state_filter[0] && strstr(topic, "STATE/") != NULL &&
-                   strstr(topic, primary_host) != NULL;
+    int is_cmd   = topic_matches(topic, cmd_topic_node) || topic_matches(topic, cmd_topic_dev);
+    int is_state = state_filter[0] && strcmp(topic, state_filter) == 0;
     pthread_mutex_unlock(&spb_lock);
 
     if (is_state) {
