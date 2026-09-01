@@ -1061,6 +1061,11 @@
         <p>Read and write Modbus TCP/RTU registers and coils. Bridge camera events to PLCs, energy meters, and industrial sensors over RS-485 or Ethernet.</p>
       </div>
       <div class="feature-card">
+        <div class="feature-icon cyan">🌐</div>
+        <h3>Sparkplug B Edge Node</h3>
+        <p>Publish device data as MQTT Sparkplug B and accept commands back, so Ignition, Honeywell EBI and other Tahu-compatible hosts can consume it with no industrial gateway in between.</p>
+      </div>
+      <div class="feature-card">
         <div class="feature-icon amber">📦</div>
         <h3>Variables & State</h3>
         <p>Store key-value variables on the device. Use <code style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:12px;">{{variable}}</code> expressions in any field, and gate rules on variable comparisons.</p>
@@ -1103,6 +1108,7 @@
           <li class="has-desc"><div class="tca-item-row"><span class="ico">#️⃣</span> Counter Threshold</div><span class="tca-item-desc">Fire when a counter crosses a value</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">🔗</span> Rule Chain</div><span class="tca-item-desc">Trigger when another rule fires</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">🏭</span> Modbus Read</div><span class="tca-item-desc">Poll Modbus TCP/RTU registers over RS-485 or Ethernet</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">⚡</span> Sparkplug Command</div><span class="tca-item-desc">Fires when a Sparkplug B host writes a metric via NCMD/DCMD</span></li>
         </ul>
       </div>
 
@@ -1166,6 +1172,7 @@
           <li class="has-desc"><div class="tca-item-row"><span class="ico">👥</span> AOA Get Counts</div><span class="tca-item-desc">Fetch live occupancy counts</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">📓</span> Send Syslog</div><span class="tca-item-desc">Forward to syslog server</span></li>
           <li class="has-desc"><div class="tca-item-row"><span class="ico">🏭</span> Modbus Write</div><span class="tca-item-desc">Write coils or registers on PLCs and industrial devices</span></li>
+          <li class="has-desc"><div class="tca-item-row"><span class="ico">🌐</span> Sparkplug B Publish</div><span class="tca-item-desc">Publish metrics as Sparkplug B NDATA to a SCADA host</span></li>
         </ul>
       </div>
     </div>

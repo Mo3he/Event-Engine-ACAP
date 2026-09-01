@@ -649,7 +649,7 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 
 **Template:** [`templates/7.9-network-gated-alert.json`](templates/7.9-network-gated-alert.json)
 
-### 7.10 Sparkplug B Telemetry to a SCADA Host
+### 7.13 Sparkplug B Telemetry to a SCADA Host
 
 **Scenario:** An industrial or building-automation platform (Ignition, Honeywell
 EBI, Cirrus Link, any Tahu-compatible host) expects MQTT Sparkplug B. The usual
@@ -667,9 +667,9 @@ network. With Event Engine the device *is* the edge node, so no gateway is neede
 and declare the metrics `Camera/Temperature`, `Camera/Humidity` and `Camera/CO2`
 (Double). The host discovers them from the `NBIRTH` automatically.
 
-**Template:** [`templates/7.10-sparkplug-telemetry.json`](templates/7.10-sparkplug-telemetry.json)
+**Template:** [`templates/7.13-sparkplug-telemetry.json`](templates/7.13-sparkplug-telemetry.json)
 
-### 7.11 Sparkplug B Command Handler
+### 7.14 Sparkplug B Command Handler
 
 **Scenario:** The SCADA host needs to *control* the device, not just read from it
 — for example triggering an announcement on a speaker from the operator console.
@@ -687,7 +687,7 @@ and declare the metrics `Camera/Temperature`, `Camera/Humidity` and `Camera/CO2`
 name works for the trigger — it does not need to be declared, since inbound
 commands are not part of the birth certificate.
 
-**Template:** [`templates/7.11-sparkplug-command-handler.json`](templates/7.11-sparkplug-command-handler.json)
+**Template:** [`templates/7.14-sparkplug-command-handler.json`](templates/7.14-sparkplug-command-handler.json)
 
 ---
 

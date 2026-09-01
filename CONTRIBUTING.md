@@ -41,6 +41,25 @@ repository root. To try a build, install the `.eap` on a camera under
   angle brackets and give code fences a language.
 - Match the surrounding code and keep diffs minimal.
 
+## Documentation
+
+The user manual exists twice: `app/html/help.html` ships inside the ACAP, and
+`docs/help.html` is published on the project site. They differ only in the header
+navigation, and `docs/help.html` is generated:
+
+```sh
+tools/sync-docs.sh           # regenerate docs/help.html
+tools/sync-docs.sh --check   # what CI runs
+```
+
+Edit `app/html/help.html`, then run the script and commit both. CI fails if they
+drift apart.
+
+`docs/index.html` and `docs/use-cases.html` are maintained by hand. When adding a
+trigger or action, update the feature lists there too, and when adding a rule
+template add it to `use-cases/USE_CASES.md` and `docs/use-cases.html` with the
+next free number.
+
 ## Licensing
 
 By contributing, you agree that your contributions are licensed under this

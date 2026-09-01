@@ -8,6 +8,14 @@ on:
   workflow_dispatch:
 
 jobs:
+  docs_sync:
+    name: Docs in sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check docs/help.html matches the in-app manual
+        run: ./tools/sync-docs.sh --check
+
   build_acap:
     name: Build ACAP (${{ matrix.arch }})
     runs-on: ubuntu-latest

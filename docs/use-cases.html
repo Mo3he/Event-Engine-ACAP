@@ -328,6 +328,8 @@
     <a href="#uc7-10" class="sub">7.10 Raw Snapshot Upload</a>
     <a href="#uc7-11" class="sub">7.11 Paging Button State</a>
     <a href="#uc7-12" class="sub">7.12 Dual-Zone AND_ACTIVE</a>
+    <a href="#uc7-13" class="sub">7.13 Sparkplug B Telemetry</a>
+    <a href="#uc7-14" class="sub">7.14 Sparkplug B Commands</a>
 
     <div class="sidebar-group">Reference</div>
     <a href="#summary">Template Summary</a>
@@ -1196,6 +1198,53 @@
       </div>
     </div>
 
+    <div class="uc-card" id="uc7-13">
+      <h3>7.13 Sparkplug B Telemetry to a SCADA Host</h3>
+      <p class="scenario">An industrial or building-automation platform (Ignition, Honeywell EBI, Cirrus Link) expects MQTT Sparkplug B. The usual answer is an industrial gateway between the Axis device and the Sparkplug network — here the device is the edge node itself.</p>
+      <div class="tags">
+        <span class="tag trigger">schedule (30s)</span>
+        <span class="tag action">vapix_query</span>
+        <span class="tag action">sparkplug_publish</span>
+        <span class="tag feature">protobuf NDATA</span>
+        <span class="tag feature">no gateway</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>schedule</strong> trigger fires every 30 seconds</li>
+        <li data-step="2"><strong>Device Event Query</strong> fetches the latest cached sensor values</li>
+        <li data-step="3"><strong>Sparkplug B Publish</strong> emits them as a protobuf <code>NDATA</code> on <code>spBv1.0/{group}/NDATA/{edge_node}</code>, using the aliases from the birth certificate</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Enable MQTT, then Settings → <strong>Sparkplug B Edge Node</strong>: set a Group ID and declare the metrics <code>Camera/Temperature</code>, <code>Camera/Humidity</code> and <code>Camera/CO2</code> as Double. The host discovers them from the <code>NBIRTH</code> automatically.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.13-sparkplug-telemetry')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.13 — Sparkplug B Telemetry</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc7-14">
+      <h3>7.14 Sparkplug B Command Handler</h3>
+      <p class="scenario">The SCADA host needs to <em>control</em> the device, not just read from it — for example triggering an announcement on a speaker from the operator console.</p>
+      <div class="tags">
+        <span class="tag trigger">sparkplug_command</span>
+        <span class="tag action">audio_clip</span>
+        <span class="tag action">set_variable</span>
+        <span class="tag action">sparkplug_publish</span>
+        <span class="tag feature">bidirectional</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">The host writes the metric <code>Speaker/Play</code> via <code>NCMD</code></li>
+        <li data-step="2">An <strong>Audio Clip</strong> action plays the clip named in <span class="var">{{trigger.value}}</span></li>
+        <li data-step="3">A <strong>Set Variable</strong> action records the command</li>
+        <li data-step="4"><strong>Sparkplug B Publish</strong> acknowledges by writing the result back as telemetry, so the host sees the command was carried out</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Declare a <code>Camera/LastCommand</code> (String) metric in Settings. Any metric name works for the trigger — inbound commands do not need to be declared, since only metrics the device <em>publishes</em> appear in the birth certificate.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('7.14-sparkplug-command-handler')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 7.14 — Sparkplug B Commands</button>
+      </div>
+    </div>
+
     <!-- ═══════════════════════ SUMMARY ═══════════════════════ -->
     <div class="section-header" id="summary">
       <h2>Template Summary</h2>
@@ -1258,6 +1307,8 @@
         <tr><td>7.11a</td><td>paging-button-arm</td><td>Advanced</td><td>MQTT armed → paging_console_button (set emergency slot)</td></tr>
         <tr><td>7.11b</td><td>paging-button-disarm</td><td>Advanced</td><td>MQTT disarmed → paging_console_button (restore normal slot)</td></tr>
         <tr><td>7.12</td><td>dual-zone-and-active</td><td>Advanced</td><td>Door + Motion AND_ACTIVE → recording + MQTT (on_failure → syslog)</td></tr>
+        <tr><td>7.13</td><td>sparkplug-telemetry</td><td>Advanced</td><td>Schedule + vapix_query → sparkplug_publish (protobuf NDATA)</td></tr>
+        <tr><td>7.14</td><td>sparkplug-command-handler</td><td>Advanced</td><td>sparkplug_command → audio_clip + set_variable + sparkplug_publish</td></tr>
       </tbody>
     </table>
 
