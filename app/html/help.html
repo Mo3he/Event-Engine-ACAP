@@ -1187,7 +1187,7 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
         <li><code>bdSeq</code> is persisted across app restarts, so a late death certificate from a previous session cannot be mistaken for the current one.</li>
         <li>The death certificate is registered as the MQTT will <em>and</em> published explicitly on a graceful shutdown, because a clean MQTT disconnect suppresses the will.</li>
         <li>Metrics collected while the broker is unreachable are buffered in memory and replayed on reconnect, flagged as historical.</li>
-        <li>QoS 1 messages are sent once without retransmission. Sparkplug expects QoS 1 for birth and death certificates; in practice a lost message is covered by the reconnect-and-rebirth path.</li>
+        <li>QoS 1 publishes are resent with the DUP flag until the broker acknowledges them or the retry budget runs out. Sessions are always clean, as Sparkplug requires, so anything still unacknowledged when a connection drops is discarded and the reconnect publishes a fresh birth certificate instead.</li>
       </ul>
 
       <!-- ═══════════════════════════════════════════ SETTINGS -->

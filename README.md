@@ -342,7 +342,7 @@ first. Payloads are protobuf-encoded; no additional libraries are bundled.
 - Metrics collected while the broker is unreachable are buffered in memory and
   replayed on reconnect with `is_historical` set
 
-### Configuration
+### Edge node configuration
 
 Settings → **Sparkplug B Edge Node**:
 
@@ -402,11 +402,16 @@ pip install paho-mqtt
     --node B8A44F000000 --write "Speaker/Play=true" --write-type Boolean
 ```
 
-### Known limitation
+### Delivery guarantees
 
-The MQTT client sends QoS 1 messages once and does not retransmit. Sparkplug
-expects QoS 1 for birth and death certificates. In practice a lost message is
-covered by the reconnect-and-rebirth path, but it is a strict-compliance gap.
+Sparkplug uses QoS 1 for birth and death certificates. Unacknowledged QoS 1
+publishes are resent with the DUP flag until the broker acknowledges them or the
+retry budget is exhausted, and the number still in flight is reported as
+`qos1_inflight` in the status endpoint.
+
+Sessions are always clean, as Sparkplug requires, so anything still
+unacknowledged when a connection drops is discarded rather than replayed. The
+reconnect publishes a fresh birth certificate, which resynchronises the host.
 
 ## Use case templates
 

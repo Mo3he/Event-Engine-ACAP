@@ -9,7 +9,7 @@ usual answer to a Sparkplug requirement is to place an industrial gateway betwee
 the Axis device and the Sparkplug network; with this release the device is the
 edge node itself.
 
-### New
+### What is new in 1.9.15
 
 - **Sparkplug B Edge Node** settings section: group / edge node / device /
   primary host ids, a choice of Sparkplug 3.0 or 2.2, and a central metric list.
@@ -40,7 +40,7 @@ Protobuf encoding is implemented in-tree, so no new libraries are bundled.
 - Metrics collected while the broker is unreachable are buffered and replayed on
   reconnect flagged as historical.
 
-### Fixes
+### Fixes in 1.9.15
 
 - **MQTT could stop reconnecting permanently after a settings change.** Changing
   the broker host or port closed the worker thread's socket from another thread.
