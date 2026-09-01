@@ -155,7 +155,8 @@ const RULE_TYPE_LABELS = {
   trigger: {
     vapix_event: 'Device Event', schedule: 'Schedule', mqtt_message: 'MQTT',
     http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
-    rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario', manual: 'Manual'
+    rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario', manual: 'Manual',
+    modbus_read: 'Modbus Read', sparkplug_command: 'Sparkplug Cmd'
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
@@ -164,6 +165,7 @@ const RULE_TYPE_LABELS = {
   },
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
+    sparkplug_publish: 'Sparkplug',
     overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output',
     audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
     set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',

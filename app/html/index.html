@@ -241,6 +241,86 @@
         </form>
       </div>
 
+      <!-- Sparkplug B Settings -->
+      <div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">SPARKPLUG B EDGE NODE</h3>
+          <div id="spb-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+            <span id="spb-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
+            <span id="spb-status-text">Loading…</span>
+          </div>
+        </div>
+        <div class="form-hint" style="margin-bottom:14px;">
+          Publishes device data as Sparkplug B over the MQTT broker configured above,
+          so a Sparkplug host (Ignition, Honeywell EBI, …) can consume it without an
+          industrial gateway in between. Enable MQTT first.
+        </div>
+        <form id="spb-form" onsubmit="saveSparkplugSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
+          <div class="form-row" style="align-items:center;">
+            <div class="form-group" style="flex:0 0 auto;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <span style="font-size:13px;">Enabled</span>
+                <label class="toggle">
+                  <input type="checkbox" name="enabled">
+                  <span class="toggle-slider"></span>
+                </label>
+              </label>
+            </div>
+            <div class="form-group" style="flex:0 0 180px;">
+              <label>Specification</label>
+              <select name="spec_version">
+                <option value="3.0">Sparkplug 3.0</option>
+                <option value="2.2">Sparkplug B 2.2</option>
+              </select>
+              <div class="form-hint">Only the host STATE topic differs.</div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Group ID <span style="color:var(--accent-danger);">*</span></label>
+              <input type="text" name="group_id" placeholder="Building1">
+              <div class="form-hint">Required. Must not contain <code>/</code>, <code>+</code> or <code>#</code>.</div>
+            </div>
+            <div class="form-group">
+              <label>Edge Node ID</label>
+              <input type="text" name="edge_node_id" placeholder="(device serial)">
+              <div class="form-hint">Defaults to this device's serial number.</div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Device ID <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="text" name="device_id" placeholder="(none — publish at node level)">
+              <div class="form-hint">Set to expose the metrics as a child device (DBIRTH/DDATA).</div>
+            </div>
+            <div class="form-group">
+              <label>Primary Host ID <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <input type="text" name="primary_host_id" placeholder="ScadaHost1">
+              <div class="form-hint">Rebirth automatically when this host comes back online.</div>
+            </div>
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <label style="margin:0;">Metrics</label>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="addSparkplugMetric()">Add Metric</button>
+            </div>
+            <div class="form-hint" style="margin-bottom:8px;">
+              Every metric is declared in the birth certificate. Bind one to a device
+              event to publish it automatically whenever the value changes, or leave it
+              unbound and drive it from a <strong>Sparkplug B Publish</strong> rule action.
+            </div>
+            <div id="spb-metrics"></div>
+          </div>
+
+          <div id="spb-live"></div>
+
+          <div style="display:flex;justify-content:flex-end;">
+            <button type="submit" class="btn btn-primary">Save Sparkplug Settings</button>
+          </div>
+        </form>
+      </div>
+
       <!-- SMTP Settings -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">EMAIL (SMTP)</h3>

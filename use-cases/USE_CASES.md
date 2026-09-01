@@ -649,6 +649,46 @@ Templates demonstrating advanced Engine capabilities: compound triggers, counter
 
 **Template:** [`templates/7.9-network-gated-alert.json`](templates/7.9-network-gated-alert.json)
 
+### 7.10 Sparkplug B Telemetry to a SCADA Host
+
+**Scenario:** An industrial or building-automation platform (Ignition, Honeywell
+EBI, Cirrus Link, any Tahu-compatible host) expects MQTT Sparkplug B. The usual
+answer is to put an industrial gateway between the Axis device and the Sparkplug
+network. With Event Engine the device *is* the edge node, so no gateway is needed.
+
+**How it works:**
+
+- A **schedule** trigger fires every 30 seconds
+- A **Device Event Query** action fetches the latest cached sensor values
+- A **Sparkplug B Publish** action emits them as a protobuf `NDATA` on
+  `spBv1.0/{group}/NDATA/{edge_node}` with the aliases from the birth certificate
+
+**Setup:** Enable MQTT, then Settings → **Sparkplug B Edge Node**: set a Group ID
+and declare the metrics `Camera/Temperature`, `Camera/Humidity` and `Camera/CO2`
+(Double). The host discovers them from the `NBIRTH` automatically.
+
+**Template:** [`templates/7.10-sparkplug-telemetry.json`](templates/7.10-sparkplug-telemetry.json)
+
+### 7.11 Sparkplug B Command Handler
+
+**Scenario:** The SCADA host needs to *control* the device, not just read from it
+— for example triggering an announcement on a speaker from the operator console.
+
+**How it works:**
+
+- A **Sparkplug Command** trigger fires when the host writes the metric
+  `Speaker/Play` via `NCMD`
+- An **Audio Clip** action plays the clip named in `{{trigger.value}}`
+- A **Set Variable** action records the command
+- A **Sparkplug B Publish** action acknowledges by writing the result back as
+  telemetry, so the host sees the command was carried out
+
+**Setup:** Declare a `Camera/LastCommand` (String) metric in Settings. Any metric
+name works for the trigger — it does not need to be declared, since inbound
+commands are not part of the birth certificate.
+
+**Template:** [`templates/7.11-sparkplug-command-handler.json`](templates/7.11-sparkplug-command-handler.json)
+
 ---
 
 ## Customisation
@@ -664,4 +704,5 @@ Every template is designed to be imported and then customised in the web UI:
 - **AOA scenarios** - match scenario IDs to your configured analytics scenarios
 - **PTZ presets / Guard tours / Privacy masks** - use names that match your camera configuration
 - **Thresholds and timings** - adjust cooldowns, hold durations, and value thresholds to your environment
+- **Sparkplug B** - declare every metric a template publishes in Settings first; undeclared names are rejected because they are absent from the birth certificate
 - **Decimal formatting** - append `|N` to any numeric variable to control precision (e.g. `{{trigger.Temperature|2}}` for 2 decimal places)

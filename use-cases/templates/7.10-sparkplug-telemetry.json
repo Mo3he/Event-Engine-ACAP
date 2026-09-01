@@ -1,0 +1,34 @@
+{
+  "name": "Sparkplug B — Publish Device Telemetry to a SCADA Host",
+  "description": "Every 30 seconds, read environmental sensor data and publish it as a Sparkplug B NDATA so an Ignition, Honeywell EBI or any Tahu-compatible host consumes it directly. The device is its own edge node — no industrial gateway in between. Requires MQTT and Sparkplug B enabled in Settings, with matching metrics declared there.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "schedule",
+      "schedule_type": "interval",
+      "interval_seconds": 30
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tns1": "Environment" },
+      "topic1": { "tnsaxis": "AirQuality" }
+    },
+    {
+      "type": "sparkplug_publish",
+      "metrics": [
+        { "name": "Camera/Temperature", "value": "{{trigger.Temperature}}" },
+        { "name": "Camera/Humidity",    "value": "{{trigger.Humidity}}" },
+        { "name": "Camera/CO2",         "value": "{{trigger.CO2}}" }
+      ]
+    }
+  ]
+}

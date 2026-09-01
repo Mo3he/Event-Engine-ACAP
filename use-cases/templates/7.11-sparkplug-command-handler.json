@@ -1,0 +1,37 @@
+{
+  "name": "Sparkplug B — SCADA Host Commands the Device",
+  "description": "A Sparkplug host writes the metric Speaker/Play via NCMD and the device reacts: it plays an audio clip, records the command in a variable, and acknowledges by publishing the result back as Sparkplug telemetry. Demonstrates bidirectional Sparkplug B integration. Requires Sparkplug B enabled in Settings with a Camera/LastCommand metric declared.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "sparkplug_command",
+      "metric": "Speaker/Play"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "audio_clip",
+      "clip": "{{trigger.value}}",
+      "volume": 70,
+      "repeat": 1
+    },
+    {
+      "type": "set_variable",
+      "name": "last_scada_command",
+      "value": "{{trigger.metric}}={{trigger.value}}"
+    },
+    {
+      "type": "sparkplug_publish",
+      "metrics": [
+        { "name": "Camera/LastCommand", "value": "{{trigger.metric}}={{trigger.value}} @ {{time}}" }
+      ]
+    }
+  ]
+}

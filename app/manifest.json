@@ -8,7 +8,7 @@
       "vendorId": "70ee172dd9",
       "vendorUrl": "https://github.com/Mo3he",
       "runMode": "respawn",
-      "version": "1.9.14",
+      "version": "1.9.15",
       "compatibleOsVersions": [
         {
           "min": "11.11",
@@ -31,7 +31,8 @@
         {"name": "fire",         "access": "admin", "type": "fastCgi"},
         {"name": "variables","access": "admin", "type": "fastCgi"},
         {"name": "aoa",          "access": "admin", "type": "fastCgi"},
-        {"name": "remote-caps",  "access": "admin", "type": "fastCgi"}
+        {"name": "remote-caps",  "access": "admin", "type": "fastCgi"},
+        {"name": "sparkplug",    "access": "admin", "type": "fastCgi"}
       ],
       "reverseProxy": [
         {"apiPath": "alertStream", "target": "http://localhost:8888", "access": "admin"}

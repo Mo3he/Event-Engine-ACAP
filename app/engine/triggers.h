@@ -49,6 +49,9 @@ void Triggers_On_Rule_Fired(const char* fired_rule_id);
 /* Called by MQTT client when a message arrives (dispatched on GMainLoop) */
 void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payload_len);
 
+/* Dispatch a metric write received from a Sparkplug host (NCMD/DCMD) */
+void Triggers_On_Sparkplug_Command(const char* metric, const char* value);
+
 /* Called every 1s from main loop — checks counter threshold triggers */
 void Triggers_Tick(void);
 

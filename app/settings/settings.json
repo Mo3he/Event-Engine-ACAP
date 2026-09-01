@@ -23,6 +23,15 @@
     "keepalive": 60,
     "use_tls": false
   },
+  "sparkplug": {
+    "enabled": false,
+    "spec_version": "3.0",
+    "group_id": "",
+    "edge_node_id": "",
+    "device_id": "",
+    "primary_host_id": "",
+    "metrics": []
+  },
   "ui": {
     "rule_order": [],
     "rule_tags": {}

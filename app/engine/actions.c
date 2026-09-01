@@ -12,6 +12,7 @@
 #include "triggers.h"
 #include "variables.h"
 #include "mqtt_client.h"
+#include "sparkplug.h"
 #include "event_log.h"
 #include "rule_engine.h"
 #include "modbus_pool.h"
@@ -1991,6 +1992,37 @@ static void action_mqtt_publish(const char* rule_id, cJSON* cfg, cJSON* trigger_
     free(payload);
 }
 
+/* sparkplug_publish */
+static void action_sparkplug_publish(cJSON* cfg, cJSON* trigger_data) {
+    cJSON* list = cJSON_GetObjectItem(cfg, "metrics");
+    if (!list || !cJSON_IsArray(list) || cJSON_GetArraySize(list) == 0) {
+        LOG_ACTION_ERR("sparkplug_publish: no metrics configured");
+        return;
+    }
+
+    cJSON* out = cJSON_CreateArray();
+    cJSON* item;
+    cJSON_ArrayForEach(item, list) {
+        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(item, "name"));
+        if (!name || !name[0]) continue;
+        const char* tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(item, "value"));
+        char* value = Actions_Expand_Template(tmpl ? tmpl : "", trigger_data);
+
+        cJSON* m = cJSON_CreateObject();
+        cJSON_AddStringToObject(m, "name",  name);
+        cJSON_AddStringToObject(m, "value", value ? value : "");
+        cJSON_AddItemToArray(out, m);
+        free(value);
+    }
+
+    if (cJSON_GetArraySize(out) == 0)
+        LOG_ACTION_ERR("sparkplug_publish: every metric row is missing a name");
+    else if (!Sparkplug_Publish(out))
+        LOG_ACTION_ERR("sparkplug_publish failed — edge node disabled, or metric not declared in Settings");
+
+    cJSON_Delete(out);
+}
+
 /* slack_webhook */
 static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
     const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "webhook_url"));
@@ -3362,6 +3394,7 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);
         else if (strcmp(type, "increment_counter") == 0) action_increment_counter(action);
         else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(rule_id, action, trigger_data);
+        else if (strcmp(type, "sparkplug_publish") == 0) action_sparkplug_publish(action, trigger_data);
         else if (strcmp(type, "slack_webhook")    == 0) action_slack_webhook(action, trigger_data);
         else if (strcmp(type, "teams_webhook")    == 0) action_teams_webhook(action, trigger_data);
         else if (strcmp(type, "influxdb_write")   == 0) action_influxdb_write(action, trigger_data);

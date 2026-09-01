@@ -46,6 +46,7 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 #define TRIG_AOA_SCENARIO      7
 #define TRIG_MANUAL            8
 #define TRIG_MODBUS_READ       9
+#define TRIG_SPARKPLUG_COMMAND 10
 
 typedef struct {
     int    type;
@@ -97,6 +98,10 @@ typedef struct {
     /* mqtt_message */
     char   mqtt_topic_filter[256]; /* supports MQTT wildcards + / # */
     char   mqtt_payload_filter[256]; /* optional substring match; empty = any payload */
+
+    /* sparkplug_command */
+    char   spb_metric[128];      /* metric name written by the host; empty = any */
+    char   spb_value_filter[128];/* optional exact value match; empty = any */
 
     /* aoa_scenario */
     int    aoa_scenario_id;          /* AOA scenario number (1-based) */
@@ -361,6 +366,13 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             const char* pf = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "payload_filter"));
             snprintf(s->mqtt_payload_filter, sizeof(s->mqtt_payload_filter), "%s", pf ? pf : "");
             MQTT_Subscribe(s->mqtt_topic_filter);
+
+        } else if (strcmp(type, "sparkplug_command") == 0) {
+            s->type = TRIG_SPARKPLUG_COMMAND;
+            const char* mn = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "metric"));
+            snprintf(s->spb_metric, sizeof(s->spb_metric), "%s", mn ? mn : "");
+            const char* vf = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "value_filter"));
+            snprintf(s->spb_value_filter, sizeof(s->spb_value_filter), "%s", vf ? vf : "");
 
         } else if (strcmp(type, "aoa_scenario") == 0) {
             s->type = TRIG_AOA_SCENARIO;
@@ -668,6 +680,24 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
     }
 }
 
+void Triggers_On_Sparkplug_Command(const char* metric, const char* value) {
+    if (!fire_fn || !metric) return;
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->type != TRIG_SPARKPLUG_COMMAND) continue;
+        if (s->spb_metric[0] && strcmp(s->spb_metric, metric) != 0) continue;
+        if (s->spb_value_filter[0] &&
+            (!value || strcmp(s->spb_value_filter, value) != 0)) continue;
+
+        cJSON* tdata = cJSON_CreateObject();
+        cJSON_AddStringToObject(tdata, "type",   "sparkplug_command");
+        cJSON_AddStringToObject(tdata, "metric", metric);
+        cJSON_AddStringToObject(tdata, "value",  value ? value : "");
+        fire_fn(s->rule_id, s->trigger_index, tdata);
+        cJSON_Delete(tdata);
+    }
+}
+
 void Triggers_Tick(void) {
     Scheduler_Tick();
 
@@ -864,8 +894,8 @@ int Triggers_Any_Active(const char* rule_id) {
         } else if (s->type == TRIG_COUNTER_THRESHOLD) {
             if (s->counter_hysteresis) return 1;
         }
-        /* Other trigger types (schedule, webhook, mqtt, io_input, rule_fired) are
-         * momentary — no persistent active state to check. */
+        /* Other trigger types (schedule, webhook, mqtt, io_input, rule_fired,
+         * sparkplug_command) are momentary — no persistent active state. */
     }
     return 0;
 }
@@ -903,9 +933,9 @@ int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index) 
         } else if (s->type == TRIG_COUNTER_THRESHOLD) {
             active = Counter_Compare(s->counter_name, s->counter_op, s->counter_threshold);
         } else {
-            /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual)
-             * have no persistent state. They are only active if they are the
-             * trigger that just fired (already handled above); otherwise 0. */
+            /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual,
+             * sparkplug_command) have no persistent state. They are only active
+             * if they are the trigger that just fired (handled above). */
             active = 0;
         }
 
@@ -976,6 +1006,12 @@ cJSON* Triggers_Catalog(void) {
     cJSON_AddStringToObject(t, "type", "modbus_read");
     cJSON_AddStringToObject(t, "label", "Modbus Read");
     cJSON_AddStringToObject(t, "description", "Polls a Modbus register (TCP or RTU/RS-485) and fires when the value crosses a threshold");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "sparkplug_command");
+    cJSON_AddStringToObject(t, "label", "Sparkplug Command");
+    cJSON_AddStringToObject(t, "description", "Fires when a Sparkplug host writes a metric via NCMD/DCMD");
     cJSON_AddItemToArray(arr, t);
 
     return arr;

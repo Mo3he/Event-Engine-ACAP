@@ -43,6 +43,7 @@ start a [Discussion](https://github.com/Mo3he/Event-Engine-ACAP/discussions).
 - [Rule settings](#rule-settings)
 - [Dynamic variables](#dynamic-variables)
 - [MQTT](#mqtt)
+- [Sparkplug B](#sparkplug-b)
 - [Use case templates](#use-case-templates)
 - [API](#api)
 - [Ports & security](#ports--security)
@@ -123,6 +124,7 @@ The web UI is accessible at
 | **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}`, `{{trigger.active}}`, and `{{trigger.reason}}` |
 | **Manual** | Fired via the **Fire Now** button in the UI or `POST /fire` with a rule ID. Useful for testing and one-shot actions |
 | **Modbus Read** | Poll a Modbus register on a configurable interval and fire when the value crosses a threshold. Supports Modbus TCP and RTU/RS-485. Register types: holding (FC03), input (FC04), coil (FC01), discrete (FC02). Threshold operators: `gt`, `gte`, `lt`, `lte`, `eq`, `between`. Port 502 works on all firmware versions |
+| **Sparkplug Command** | Fires when a Sparkplug B host writes a metric to this edge node via `NCMD`/`DCMD`. Optional metric-name and exact-value filters. Injects `{{trigger.metric}}` and `{{trigger.value}}`. Lets a SCADA host command the device, not just read from it |
 
 ## Conditions
 
@@ -218,6 +220,12 @@ stop a siren when motion ends).
 |------|-------------|
 | **Modbus Write** | Write a value to a Modbus register via TCP or RTU/RS-485. Supports FC06 (write single holding register) and FC05 (write single coil). Uses the same connection parameters as Modbus Read |
 
+### Industrial
+
+| Type | Description |
+|------|-------------|
+| **Sparkplug B Publish** | Publish declared metrics as a Sparkplug B `NDATA` (or `DDATA`). Metrics are entered one `MetricName=value` per line and values are template-aware. Names must already be declared in **Settings → Sparkplug B** so they appear in the birth certificate. See [Sparkplug B](#sparkplug-b) |
+
 ### Analytics
 
 | Type | Description |
@@ -306,6 +314,99 @@ The built-in MQTT client supports MQTT 3.1.1 with the following features:
 
 Configure broker, port, credentials, client ID, and TLS/proxy settings in the
 **MQTT** tab.
+
+## Sparkplug B
+
+Event Engine can act as a **Sparkplug B edge node**, turning the device into its
+own IIoT gateway. A Sparkplug host (Ignition, Honeywell EBI, Cirrus Link, any
+Tahu-compatible SCADA system) can then consume device data and send commands back
+without an industrial gateway sitting in between.
+
+Sparkplug rides on the broker configured in the **MQTT** section, so enable MQTT
+first. Payloads are protobuf-encoded; no additional libraries are bundled.
+
+### What is implemented
+
+- `NBIRTH` / `NDATA` / `NDEATH` at node level, and `DBIRTH` / `DDATA` when a
+  device id is set
+- `NCMD` / `DCMD` inbound, including `Node Control/Rebirth`
+- The full session state machine: `bdSeq` (persisted across restarts so a late
+  `NDEATH` cannot kill a new session), a 0-255 `seq` reset on every birth, and a
+  hard guarantee that no `NDATA` is emitted before its birth certificate
+- `NDEATH` registered as the MQTT Will **and** published explicitly on a graceful
+  shutdown, since a clean MQTT DISCONNECT suppresses the will
+- Optional primary host `STATE` tracking, which triggers a rebirth when the host
+  comes back online
+- Selectable **Sparkplug 3.0** or **Sparkplug B 2.2** (only the host `STATE`
+  topic and payload differ)
+- Metrics collected while the broker is unreachable are buffered in memory and
+  replayed on reconnect with `is_historical` set
+
+### Configuration
+
+Settings → **Sparkplug B Edge Node**:
+
+| Field | Description |
+|-------|-------------|
+| **Group ID** | Required. Sparkplug group namespace, e.g. `Building1` |
+| **Edge Node ID** | Defaults to the device serial number so two devices never collide |
+| **Device ID** | Optional. Set it to expose the metrics as a child device (`DBIRTH`/`DDATA`) instead of at node level |
+| **Primary Host ID** | Optional. Rebirth automatically when this host announces itself online |
+| **Specification** | `3.0` or `2.2` |
+
+Ids must not contain `/`, `+` or `#`.
+
+### Metrics
+
+Every metric is declared centrally so the birth certificate is stable and aliases
+are consistent for the life of a session. Each metric has a name, a datatype, and
+one of two sources:
+
+- **Bound to a device event** — published automatically whenever the value
+  changes (report by exception). Pick the event and the field to read.
+- **Unbound** — driven by a **Sparkplug B Publish** rule action, which lets you
+  attach conditions, schedules, templates and any other engine feature.
+
+Changing the metric list or the node identity forces a new birth certificate.
+`bdSeq` and `Node Control/Rebirth` are reserved and added automatically.
+
+Topics follow the standard namespace:
+
+```text
+spBv1.0/{group_id}/NBIRTH|NDATA|NDEATH|NCMD/{edge_node_id}
+spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}
+```
+
+Live session state and current metric values are available at
+`GET /local/acap_event_engine/sparkplug` and are shown in the Settings tab.
+
+### Testing without a SCADA system
+
+[`tools/sparkplug_host.py`](tools/sparkplug_host.py) is a minimal validation host.
+It decodes the protobuf itself (only `paho-mqtt` is required) and checks the parts
+of the spec that are easy to get wrong: birth before data, `seq` continuity,
+`bdSeq` matching between `NBIRTH` and `NDEATH`, and alias resolution.
+
+```bash
+pip install paho-mqtt
+
+# Watch an edge node and validate its traffic
+./tools/sparkplug_host.py --broker 192.168.1.10 --group Building1
+
+# Request a rebirth
+./tools/sparkplug_host.py --broker 192.168.1.10 --group Building1 \
+    --node B8A44F000000 --rebirth
+
+# Write a metric back to the device (fires a Sparkplug Command trigger)
+./tools/sparkplug_host.py --broker 192.168.1.10 --group Building1 \
+    --node B8A44F000000 --write "Speaker/Play=true" --write-type Boolean
+```
+
+### Known limitation
+
+The MQTT client sends QoS 1 messages once and does not retransmit. Sparkplug
+expects QoS 1 for birth and death certificates. In practice a lost message is
+covered by the reconnect-and-rebirth path, but it is a strict-compliance gap.
 
 ## Use case templates
 

@@ -16,6 +16,7 @@
 #include "engine/actions.h"
 #include "engine/conditions.h"
 #include "engine/mqtt_client.h"
+#include "engine/sparkplug.h"
 #include "engine/alert_stream.h"
 
 #define APP_PACKAGE "acap_event_engine"
@@ -73,7 +74,8 @@ static int validate_rule_steps(const char* label, cJSON* arr,
 static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) {
     static const char* const trigger_types[] = {
         "vapix_event", "schedule", "mqtt_message", "http_webhook", "io_input",
-        "counter_threshold", "rule_fired", "aoa_scenario", "manual", "modbus_read", NULL
+        "counter_threshold", "rule_fired", "aoa_scenario", "manual", "modbus_read",
+        "sparkplug_command", NULL
     };
     static const char* const condition_types[] = {
         "time_window", "io_state", "counter", "variable_compare", "http_check",
@@ -88,7 +90,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         "fire_vapix_event", "vapix_query", "set_device_param", "acap_control",
         "influxdb_write", "aoa_get_counts", "speaker_display",
         "paging_console_execute", "paging_console_button",
-        "modbus_write",
+        "modbus_write", "sparkplug_publish",
         NULL
     };
     static const char* const trigger_logic_values[] = {"OR", "AND", "AND_ACTIVE", NULL};
@@ -194,6 +196,7 @@ static const char* app_version(void) {
  *=====================================================*/
 static void Event_Callback(cJSON* event, void* user_data) {
     (void)user_data;
+    Sparkplug_On_Device_Event(event);
     RuleEngine_Dispatch_Event(event);
 }
 
@@ -274,7 +277,18 @@ static void apply_mqtt_config(cJSON* mqtt_json) {
 static void mqtt_message_cb(const char* topic, const char* payload,
                              int payload_len, void* user_data) {
     (void)user_data;
+    Sparkplug_On_MQTT_Message(topic, payload, payload_len);
     Triggers_On_MQTT_Message(topic, payload, payload_len);
+}
+
+/* A Sparkplug host writing a metric via NCMD/DCMD fires rules the same way an
+ * inbound MQTT message does. */
+static void sparkplug_command_cb(const char* metric, const char* value) {
+    Triggers_On_Sparkplug_Command(metric, value);
+}
+
+static void apply_sparkplug_config(cJSON* cfg) {
+    if (cfg) Sparkplug_Configure(cfg);
 }
 
 static void apply_proxy_config(cJSON* engine_cfg) {
@@ -343,6 +357,8 @@ static void Settings_Updated(const char* service, cJSON* data) {
         apply_proxy_config(data);
     else if (strcmp(service, "smtp") == 0)
         apply_smtp_config(data);
+    else if (strcmp(service, "sparkplug") == 0)
+        apply_sparkplug_config(data);
 }
 
 /*=====================================================
@@ -671,6 +687,7 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     const struct { const char* type; const char* label; const char* desc; } action_types[] = {
         {"http_request",      "HTTP Request",      "Make an HTTP GET/POST/PUT request to any URL"},
         {"mqtt_publish",      "MQTT Publish",      "Publish a message to an MQTT topic"},
+        {"sparkplug_publish", "Sparkplug B Publish", "Publish declared metrics as Sparkplug B NDATA/DDATA"},
         {"slack_webhook",     "Slack",             "Send a message to a Slack channel via incoming webhook"},
         {"teams_webhook",     "Teams",             "Send an Adaptive Card to Microsoft Teams via webhook"},
         {"telegram",          "Telegram",          "Send a message via Telegram Bot API"},
@@ -954,6 +971,8 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON* mqtt_st = MQTT_Status();
     cJSON_AddItemToObject(obj, "mqtt", mqtt_st);
 
+    cJSON_AddItemToObject(obj, "sparkplug", Sparkplug_Status());
+
     cJSON* dev = cJSON_AddObjectToObject(obj, "device");
     const char* dp;
     dp = ACAP_DEVICE_Prop("serial");   cJSON_AddStringToObject(dev, "serial",   dp ? dp : "");
@@ -961,6 +980,18 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     dp = ACAP_DEVICE_Prop("IPv4");     cJSON_AddStringToObject(dev, "ip",       dp ? dp : "");
     dp = ACAP_DEVICE_Prop("firmware"); cJSON_AddStringToObject(dev, "firmware", dp ? dp : "");
 
+    ACAP_HTTP_Respond_JSON(resp, obj);
+    cJSON_Delete(obj);
+}
+
+/*=====================================================
+ * GET /local/acap_event_engine/sparkplug
+ * Edge node session state plus the declared metrics and their current values
+ *=====================================================*/
+static void HTTP_Sparkplug(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    (void)req;
+    cJSON* obj = Sparkplug_Status();
+    cJSON_AddItemToObject(obj, "metrics", Sparkplug_Metrics());
     ACAP_HTTP_Respond_JSON(resp, obj);
     cJSON_Delete(obj);
 }
@@ -1627,6 +1658,11 @@ int main(void) {
     EventLog_Init();
     EventLog_Load();
 
+    /* Sparkplug B edge node — registers the MQTT state callback that publishes
+     * the birth certificate, so it must exist before the worker thread starts. */
+    Sparkplug_Init();
+    Sparkplug_Set_Command_Callback(sparkplug_command_cb);
+
     /* MQTT — must init before RuleEngine so subscriptions can be set up */
     {
         MQTT_Config mc;
@@ -1634,6 +1670,8 @@ int main(void) {
         fill_mqtt_config(cJSON_GetObjectItem(settings, "mqtt"), &mc);
         MQTT_Init(&mc, mqtt_message_cb, NULL);
     }
+
+    Sparkplug_Configure(cJSON_GetObjectItem(settings, "sparkplug"));
 
     /* SMTP — load saved password into in-memory config */
     load_smtp_password();
@@ -1671,6 +1709,7 @@ int main(void) {
     ACAP_HTTP_Node("variables", HTTP_Variables);
     ACAP_HTTP_Node("aoa",        HTTP_AOA);
     ACAP_HTTP_Node("remote-caps", HTTP_RemoteCaps);
+    ACAP_HTTP_Node("sparkplug",  HTTP_Sparkplug);
 
     /* 1-second engine tick */
     g_timeout_add_seconds(1, Engine_Tick, NULL);
@@ -1694,6 +1733,7 @@ int main(void) {
     ACAP_EVENTS_Fire_State("EngineReady", 0);
     AlertStream_Cleanup();
     RuleEngine_Cleanup();
+    Sparkplug_Cleanup();
     MQTT_Cleanup();
     EventLog_Cleanup();
     Variables_Cleanup();

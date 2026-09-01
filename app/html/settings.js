@@ -32,6 +32,8 @@ async function loadStatus() {
 
     /* Update MQTT status badge (non-destructive — doesn't touch the form) */
     updateMqttStatusBadge(s.mqtt || {});
+    updateSparkplugStatusBadge(s.sparkplug || {});
+    loadSparkplugLiveMetrics();
     updateStreamStatusBadge(s);
     renderDeviceCapabilities();
     checkSerialPort();
@@ -377,6 +379,391 @@ async function saveMqttSettings(event) {
   }
 }
 
+/* ===== Sparkplug B ===== */
+const SPB_DATATYPES = ['Boolean','Int32','Int64','UInt32','UInt64','Float','Double','String','DateTime','Text'];
+
+let sparkplugMetrics = [];
+
+function updateSparkplugStatusBadge(sp) {
+  const dot  = document.getElementById('spb-dot');
+  const text = document.getElementById('spb-status-text');
+  if (!dot || !text) return;
+
+  if (!sp || !sp.enabled) {
+    dot.style.background = 'var(--text-dim)';
+    text.textContent = 'Disabled';
+    return;
+  }
+  if (sp.online) {
+    dot.style.background = 'var(--accent-success)';
+    const buffered = sp.buffered ? ` · ${sp.buffered} buffered` : '';
+    text.textContent = `Online · bdSeq ${sp.bdseq} · seq ${sp.seq} · ${sp.metric_count} metrics${buffered}`;
+  } else {
+    dot.style.background = 'var(--accent-warning)';
+    text.textContent = sp.buffered ? `Offline · ${sp.buffered} samples buffered` : 'Offline';
+  }
+}
+
+/* The SOAP catalog only carries a namespace prefix on the levels where the XML
+ * document declares one ("tnsaxis:CameraApplicationPlatform" but a bare
+ * "acap_event_engine" below it), while saved config qualifies every level.
+ * Compare local names only — which is also what the event system matches on. */
+function normalizeTopicPath(path) {
+  return String(path || '')
+    .split('/')
+    .map(seg => { const i = seg.indexOf(':'); return i > 0 ? seg.slice(i + 1) : seg; })
+    .filter(Boolean)
+    .join('/');
+}
+
+function sparkplugCatalogIndex(m) {
+  if (!m._sourcePath || !Array.isArray(vapixEventCatalog)) return -1;
+  const want = normalizeTopicPath(m._sourcePath);
+  return vapixEventCatalog.findIndex(ev => normalizeTopicPath(vapixCatalogTopicPath(ev)) === want);
+}
+
+function topicPathFromSource(source) {
+  return ['topic0','topic1','topic2','topic3']
+    .filter(k => source && source[k])
+    .map(k => {
+      const [ns, val] = Object.entries(source[k])[0] || ['', ''];
+      return ns ? `${ns}:${val}` : val;
+    })
+    .join('/');
+}
+
+/* "tnsaxis:CameraApplicationPlatform/tnsaxis:ObjectAnalytics/..." -> topic0..3.
+ * A segment without a namespace defaults to tns1 at the root and tnsaxis below,
+ * which matches how Axis names its standard and vendor topics. */
+function sourceFromTopicPath(path) {
+  const parts = String(path || '').split('/').map(s => s.trim()).filter(Boolean).slice(0, 4);
+  if (!parts.length) return null;
+  const source = {};
+  parts.forEach((part, i) => {
+    const sep  = part.indexOf(':');
+    const ns   = sep > 0 ? part.slice(0, sep) : (i === 0 ? 'tns1' : 'tnsaxis');
+    const name = sep > 0 ? part.slice(sep + 1) : part;
+    source[`topic${i}`] = { [ns]: name };
+  });
+  return source;
+}
+
+/* A binding may reference an event the SOAP catalog does not list (it omits
+ * CameraApplicationPlatform topics entirely), so offer both a "keep" option and
+ * a way to type a topic path directly. */
+function sparkplugEventOptions(m) {
+  const bound  = !!m.source;
+  const catIdx = sparkplugCatalogIndex(m);
+  const manual = !!m._manual;
+  const opts   = [`<option value="-1" ${(!bound && !manual) ? 'selected' : ''}>Not bound (rule-driven)</option>`];
+
+  if (bound && catIdx < 0 && !manual)
+    opts.push(`<option value="keep" selected>${escHtml(normalizeTopicPath(m._sourcePath) || 'current binding')} (not in catalog)</option>`);
+
+  opts.push(`<option value="manual" ${manual ? 'selected' : ''}>Enter a topic path manually…</option>`);
+
+  if (Array.isArray(vapixEventCatalog) && vapixEventCatalog.length) {
+    vapixEventCatalog.forEach((ev, i) => {
+      opts.push(`<option value="${i}" ${(!manual && i === catIdx) ? 'selected' : ''}>${escHtml(ev.label)}</option>`);
+    });
+  } else {
+    opts.push('<option value="-2" disabled>(loading device event list…)</option>');
+  }
+  return opts.join('');
+}
+
+function sparkplugMetricSummary(m) {
+  const name = m.name ? escHtml(m.name) : '<em style="opacity:.6">unnamed metric</em>';
+  const bind = m.source
+    ? `bound to ${escHtml(normalizeTopicPath(m._sourcePath) || 'event')}${m.source_key ? ' · ' + escHtml(m.source_key) : ''}`
+    : 'rule-driven';
+  return `<strong>${name}</strong>
+          <span style="color:var(--text-muted);font-size:12px;margin-left:8px;">
+            ${escHtml(m.datatype || 'String')} · ${bind}
+          </span>`;
+}
+
+function renderSparkplugMetrics() {
+  const el = document.getElementById('spb-metrics');
+  if (!el) return;
+
+  if (!sparkplugMetrics.length) {
+    el.innerHTML = '<div class="form-hint">No metrics declared yet.</div>';
+    return;
+  }
+
+  el.innerHTML = sparkplugMetrics.map((m, i) => {
+    const header = `
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleSparkplugMetric(${i})"
+                style="flex:0 0 auto;width:28px;" title="${m._open ? 'Collapse' : 'Expand'}">${m._open ? '▾' : '▸'}</button>
+        <div style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;"
+             onclick="toggleSparkplugMetric(${i})">${sparkplugMetricSummary(m)}</div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="removeSparkplugMetric(${i})"
+                style="flex:0 0 auto;">Remove</button>
+      </div>`;
+
+    if (!m._open)
+      return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">${header}</div>`;
+
+    const catIdx = sparkplugCatalogIndex(m);
+    const keys = (catIdx >= 0 && vapixEventCatalog[catIdx].dataKeys) || [];
+    const keyField = keys.length
+      ? `<select data-spb="source_key" data-i="${i}">${
+           keys.map(k => `<option value="${escHtml(k)}" ${k === m.source_key ? 'selected' : ''}>${escHtml(k)}</option>`).join('')
+         }</select>`
+      : `<input type="text" data-spb="source_key" data-i="${i}" value="${escHtml(m.source_key || '')}" placeholder="state">`;
+
+    return `
+    <div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
+      ${header}
+      <div style="margin-top:10px;">
+        <div class="form-row">
+          <div class="form-group" style="flex:2 1 220px;">
+            <label>Metric name</label>
+            <input type="text" data-spb="name" data-i="${i}" value="${escHtml(m.name || '')}"
+                   placeholder="Speaker/Motion" oninput="refreshSparkplugSummary(${i})">
+          </div>
+          <div class="form-group" style="flex:1 1 130px;">
+            <label>Type</label>
+            <select data-spb="datatype" data-i="${i}" onchange="refreshSparkplugSummary(${i})">
+              ${SPB_DATATYPES.map(d => `<option value="${d}" ${d === (m.datatype || 'String') ? 'selected' : ''}>${d}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:2 1 260px;">
+            <label>Bind to device event</label>
+            <select data-spb="catalog" data-i="${i}" onchange="applySparkplugMetricEvent(${i}, this.value)">
+              ${sparkplugEventOptions(m)}
+            </select>
+            ${m._manual ? `
+            <input type="text" data-spb="_pathInput" data-i="${i}" style="margin-top:6px;"
+                   value="${escHtml(m._sourcePath || '')}"
+                   placeholder="tnsaxis:CameraApplicationPlatform/tnsaxis:ObjectAnalytics/tnsaxis:Device1Scenario1"
+                   onchange="applySparkplugManualPath(${i}, this.value)">
+            <div class="form-hint">Slash-separated topic levels. Use this for events the
+            dropdown does not list, such as ACAP events
+            (<code>tnsaxis:CameraApplicationPlatform/…</code>).</div>` : `
+            <div class="form-hint">Leave unbound to drive this metric from a Sparkplug B Publish action.</div>`}
+          </div>
+          <div class="form-group" style="flex:1 1 160px;">
+            <label>Field</label>
+            ${keyField}
+            <div class="form-hint">Event field to read.</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function collectSparkplugMetrics() {
+  document.querySelectorAll('#spb-metrics [data-spb]').forEach(inp => {
+    const i = parseInt(inp.dataset.i, 10);
+    const k = inp.dataset.spb;
+    if (isNaN(i) || !sparkplugMetrics[i] || k === 'catalog') return;
+    sparkplugMetrics[i][k] = inp.value;
+  });
+}
+
+function toggleSparkplugMetric(i) {
+  collectSparkplugMetrics();
+  if (!sparkplugMetrics[i]) return;
+  sparkplugMetrics[i]._open = !sparkplugMetrics[i]._open;
+  renderSparkplugMetrics();
+}
+
+/* Update the collapsed summary without re-rendering (which would drop focus) */
+function refreshSparkplugSummary(i) {
+  collectSparkplugMetrics();
+  const row = document.querySelector(`#spb-metrics [data-spb="name"][data-i="${i}"]`);
+  const head = row && row.closest('div[style*="border"]').querySelector('div[onclick^="toggleSparkplugMetric"]');
+  if (head) head.innerHTML = sparkplugMetricSummary(sparkplugMetrics[i]);
+}
+
+function applySparkplugMetricEvent(i, value) {
+  collectSparkplugMetrics();
+  const m = sparkplugMetrics[i];
+  if (!m) return;
+
+  if (value === 'keep') return;   /* binding kept exactly as loaded */
+
+  if (value === 'manual') {
+    m._manual = true;
+    renderSparkplugMetrics();
+    return;
+  }
+
+  delete m._manual;
+  const idx = parseInt(value, 10);
+  const ev = (idx >= 0 && vapixEventCatalog) ? vapixEventCatalog[idx] : null;
+  if (!ev) {
+    delete m.source;
+    delete m._sourcePath;
+  } else {
+    m.source = ev.topics;
+    m._sourcePath = vapixCatalogTopicPath(ev);
+    if (!ev.dataKeys.includes(m.source_key))
+      m.source_key = ev.dataKeys.length ? ev.dataKeys[0] : 'state';
+  }
+  renderSparkplugMetrics();
+}
+
+function applySparkplugManualPath(i, path) {
+  collectSparkplugMetrics();
+  const m = sparkplugMetrics[i];
+  if (!m) return;
+
+  const source = sourceFromTopicPath(path);
+  if (!source) {
+    delete m.source;
+    delete m._sourcePath;
+  } else {
+    m.source = source;
+    m._sourcePath = topicPathFromSource(source);
+    if (!m.source_key) m.source_key = 'state';
+  }
+  renderSparkplugMetrics();
+}
+
+function addSparkplugMetric() {
+  collectSparkplugMetrics();
+  sparkplugMetrics.push({ name: '', datatype: 'String', source_key: '', _open: true });
+  renderSparkplugMetrics();
+}
+
+function removeSparkplugMetric(i) {
+  collectSparkplugMetrics();
+  sparkplugMetrics.splice(i, 1);
+  renderSparkplugMetrics();
+}
+
+async function loadSparkplugSettings(settings) {
+  try {
+    if (!settings) settings = await API.get('settings');
+    const sp = (settings && settings.sparkplug) || {};
+    const form = document.getElementById('spb-form');
+    if (!form) return;
+
+    form.querySelector('[name="enabled"]').checked       = !!sp.enabled;
+    form.querySelector('[name="spec_version"]').value    = sp.spec_version || '3.0';
+    form.querySelector('[name="group_id"]').value        = sp.group_id || '';
+    form.querySelector('[name="edge_node_id"]').value    = sp.edge_node_id || '';
+    form.querySelector('[name="device_id"]').value       = sp.device_id || '';
+    form.querySelector('[name="primary_host_id"]').value = sp.primary_host_id || '';
+
+    sparkplugMetrics = (sp.metrics || []).map(m => {
+      const copy = { name: m.name || '', datatype: m.datatype || 'String', source_key: m.source_key || '' };
+      if (m.source && Object.keys(m.source).length) {
+        copy.source = m.source;
+        copy._sourcePath = topicPathFromSource(m.source);
+      }
+      return copy;
+    });
+    renderSparkplugMetrics();
+
+    /* The event catalog loads asynchronously; redraw once it arrives so bound
+     * metrics resolve to their catalog entry instead of the raw topic path. */
+    if (vapixEventCatalog === null && typeof loadVapixEventCatalog === 'function')
+      loadVapixEventCatalog().then(renderSparkplugMetrics).catch(() => {});
+
+    const status = await API.getStatus();
+    updateSparkplugStatusBadge((status && status.sparkplug) || {});
+    loadSparkplugLiveMetrics();
+  } catch(e) {
+    toast('Failed to load Sparkplug settings', 'error');
+  }
+}
+
+/* Live metric values straight from the running edge node */
+async function loadSparkplugLiveMetrics() {
+  const el = document.getElementById('spb-live');
+  if (!el) return;
+  try {
+    const data = await API.get('sparkplug');
+    const metrics = (data && data.metrics) || [];
+    if (!metrics.length) { el.innerHTML = ''; return; }
+
+    el.innerHTML = `
+      <h4 style="font-size:12px;color:var(--text-muted);margin:16px 0 8px;">LIVE METRIC VALUES</h4>
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <tr style="color:var(--text-muted);text-align:left;">
+          <th style="padding:4px 8px 4px 0;font-weight:500;">Metric</th>
+          <th style="padding:4px 8px;font-weight:500;width:80px;">Alias</th>
+          <th style="padding:4px 8px;font-weight:500;width:90px;">Type</th>
+          <th style="padding:4px 8px;font-weight:500;width:80px;">Source</th>
+          <th style="padding:4px 0;font-weight:500;">Value</th>
+        </tr>
+        ${metrics.map(m => `
+          <tr style="border-top:1px solid var(--border);">
+            <td style="padding:5px 8px 5px 0;">${escHtml(m.name)}</td>
+            <td style="padding:5px 8px;color:var(--text-muted);">@${m.alias}</td>
+            <td style="padding:5px 8px;color:var(--text-muted);">${escHtml(m.datatype)}</td>
+            <td style="padding:5px 8px;color:var(--text-muted);">${m.auto ? 'event' : 'rule'}</td>
+            <td style="padding:5px 0;">${m.value === null || m.value === undefined
+                ? '<span style="color:var(--text-dim);">null</span>'
+                : escHtml(String(m.value))}</td>
+          </tr>`).join('')}
+      </table>`;
+  } catch(e) {
+    el.innerHTML = '';
+  }
+}
+
+async function saveSparkplugSettings(event) {
+  event.preventDefault();
+  collectSparkplugMetrics();
+
+  const form = document.getElementById('spb-form');
+  const enabled = form.querySelector('[name="enabled"]').checked;
+  const groupId = form.querySelector('[name="group_id"]').value.trim();
+
+  if (enabled && !groupId) { toast('Group ID is required', 'error'); return; }
+
+  const bad = /[\/+#]/;
+  for (const [label, name] of [['Group ID','group_id'], ['Edge Node ID','edge_node_id'],
+                               ['Device ID','device_id'], ['Primary Host ID','primary_host_id']]) {
+    const v = form.querySelector(`[name="${name}"]`).value.trim();
+    if (v && bad.test(v)) { toast(`${label} must not contain / + or #`, 'error'); return; }
+  }
+
+  const seen = new Set();
+  const metrics = [];
+  let unnamed = 0;
+  for (const m of sparkplugMetrics) {
+    const name = (m.name || '').trim();
+    if (!name) { unnamed++; continue; }
+    if (seen.has(name)) { toast(`Duplicate metric name: ${name}`, 'error'); return; }
+    seen.add(name);
+    const out = { name, datatype: m.datatype || 'String' };
+    if (m.source) { out.source = m.source; out.source_key = (m.source_key || 'state').trim(); }
+    metrics.push(out);
+  }
+  if (unnamed) toast(`${unnamed} metric row(s) without a name were dropped`, 'warning');
+
+  const payload = {
+    sparkplug: {
+      enabled,
+      spec_version:    form.querySelector('[name="spec_version"]').value,
+      group_id:        groupId,
+      edge_node_id:    form.querySelector('[name="edge_node_id"]').value.trim(),
+      device_id:       form.querySelector('[name="device_id"]').value.trim(),
+      primary_host_id: form.querySelector('[name="primary_host_id"]').value.trim(),
+      metrics
+    }
+  };
+
+  try {
+    await API.post('settings', payload);
+    toast('Sparkplug settings saved');
+    /* Give the edge node time to reconnect and rebirth before reading status */
+    setTimeout(() => loadSparkplugSettings(), 2000);
+  } catch(e) {
+    toast('Failed to save: ' + e.message, 'error');
+  }
+}
+
 /* Fetch /settings once and populate all settings sections */
 async function loadAllSettings() {
   try {
@@ -385,6 +772,7 @@ async function loadAllSettings() {
     loadProxySettings(settings);
     loadSmtpSettings(settings);
     loadMqttSettings(settings);
+    loadSparkplugSettings(settings);
   } catch(e) { /* non-fatal — individual loaders will show errors as needed */ }
 }
 

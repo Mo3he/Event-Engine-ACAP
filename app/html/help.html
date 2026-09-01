@@ -347,6 +347,7 @@
       <a href="#trig-counter" class="sub">Counter Threshold</a>
       <a href="#trig-chain" class="sub">Rule Chain</a>
       <a href="#trig-aoa" class="sub">AOA Scenario</a>
+      <a href="#trig-sparkplug" class="sub">Sparkplug Command</a>
 
       <div class="sidebar-group-label">Conditions</div>
       <a href="#conditions">All Conditions</a>
@@ -364,6 +365,7 @@
       <a href="#actions">All Actions</a>
       <a href="#act-http" class="sub">HTTP Request</a>
       <a href="#act-mqtt-pub" class="sub">MQTT Publish</a>
+      <a href="#act-sparkplug-pub" class="sub">Sparkplug B Publish</a>
       <a href="#act-slack" class="sub">Slack</a>
       <a href="#act-teams" class="sub">Teams</a>
       <a href="#act-telegram" class="sub">Telegram</a>
@@ -403,6 +405,7 @@
       <a href="#templates">Rule Templates</a>
       <a href="#arm-disarm">Arm / Disarm</a>
       <a href="#mqtt-setup">MQTT Setup</a>
+      <a href="#sparkplug-setup">Sparkplug B Setup</a>
       <a href="#settings">Application Settings</a>
       <a href="#device-capabilities">Device Capabilities</a>
       <a href="#event-log">Event Log</a>
@@ -567,6 +570,16 @@ Content-Type: application/json
       </table>
       <p>Variables injected: <span class="var">{{trigger.scenario_id}}</span>, <span class="var">{{trigger.active}}</span>, <span class="var">{{trigger.reason}}</span> (detected object class, e.g. <code>Human</code>).</p>
 
+      <h3 id="trig-sparkplug">Sparkplug Command</h3>
+      <p>Fires when a <strong>Sparkplug B</strong> host writes a metric to this device via <code>NCMD</code> or <code>DCMD</code>. This is how a SCADA system commands the device rather than just reading from it. Requires Sparkplug B to be enabled in Settings.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Metric name</strong></td><td>Optional. The metric the host writes, e.g. <code>Speaker/Play</code>. Leave empty to fire on any metric write.</td></tr>
+        <tr><td><strong>Value filter</strong></td><td>Optional. Fire only on an exact value match. Booleans arrive as <code>true</code> or <code>false</code>.</td></tr>
+      </table>
+      <p>Variables injected: <span class="var">{{trigger.metric}}</span>, <span class="var">{{trigger.value}}</span>.</p>
+      <p>Command metrics do not have to be declared in Settings — only metrics the device <em>publishes</em> need to appear in the birth certificate.</p>
+
       <!-- ═══════════════════════════════════════════ CONDITIONS -->
       <h2 id="conditions">Conditions</h2>
       <p>Conditions act as guards. By default (AND logic), <em>all</em> conditions must evaluate to <code>true</code> before actions run. With OR logic (configurable in <a href="#rule-settings">Rule Settings</a>), any single passing condition is sufficient. If no conditions pass, the rule silently does nothing for that firing.</p>
@@ -698,6 +711,15 @@ Content-Type: application/json
         <tr><td><strong>QoS</strong></td><td>Quality of service: 0 (at most once) or 1 (at least once).</td></tr>
         <tr><td><strong>Retain</strong></td><td>Set the MQTT retain flag so the broker keeps the last message for new subscribers.</td></tr>
       </table>
+
+      <h3 id="act-sparkplug-pub">Sparkplug B Publish</h3>
+      <p>Publish declared metrics as a Sparkplug B <code>NDATA</code> (or <code>DDATA</code> when a device id is configured). Requires Sparkplug B to be enabled in <strong>Settings → Sparkplug B Edge Node</strong>.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Metrics</strong></td><td>One <code>MetricName=value</code> per line. Values support template substitution, e.g. <code>Camera/Temperature={{trigger.MaxTemp}}</code>.</td></tr>
+      </table>
+      <p><strong>Metric names must already be declared in Settings.</strong> Sparkplug requires every metric to appear in the birth certificate, so an undeclared name is rejected and logged rather than published.</p>
+      <p>Values are converted to the datatype declared for that metric, so <code>23.7</code> becomes a Double, <code>true</code> becomes a Boolean, and so on.</p>
 
       <h3 id="act-slack">Slack</h3>
       <p>Send a message to a Slack channel via an incoming webhook.</p>
@@ -1128,6 +1150,45 @@ Content-Type: application/json
         <li>TLS/SSL encryption</li>
       </ul>
       <p>The Settings tab shows a live connection status indicator next to "MQTT BROKER".</p>
+
+      <!-- ═══════════════════════════════════════════ SPARKPLUG -->
+      <h2 id="sparkplug-setup">Sparkplug B Setup</h2>
+      <p>Event Engine can act as a <strong>Sparkplug B edge node</strong>, so an industrial or building-automation host (Ignition, Honeywell EBI, Cirrus Link and other Tahu-compatible systems) can consume device data and send commands back. Normally this requires an industrial gateway between the Axis device and the Sparkplug network; here the device is the edge node itself.</p>
+      <p>Sparkplug uses the broker configured above, so <strong>enable MQTT first</strong>.</p>
+
+      <h3>Identity</h3>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Group ID</strong></td><td>Required. The Sparkplug group namespace, e.g. <code>Building1</code>.</td></tr>
+        <tr><td><strong>Edge Node ID</strong></td><td>Defaults to the device serial number so two devices never collide.</td></tr>
+        <tr><td><strong>Device ID</strong></td><td>Optional. Set it to expose the metrics as a child device (<code>DBIRTH</code>/<code>DDATA</code>) instead of at node level.</td></tr>
+        <tr><td><strong>Primary Host ID</strong></td><td>Optional. The device republishes its birth certificate when this host announces itself online.</td></tr>
+        <tr><td><strong>Specification</strong></td><td>Sparkplug 3.0 (Eclipse standard) or Sparkplug B 2.2. Only the host <code>STATE</code> topic and payload differ.</td></tr>
+      </table>
+      <p>Ids must not contain <code>/</code>, <code>+</code> or <code>#</code>.</p>
+
+      <h3>Metrics</h3>
+      <p>Every metric is declared once here so the birth certificate stays stable and aliases are consistent for the life of a session. Each metric has a name, a datatype, and one of two sources:</p>
+      <ul>
+        <li><strong>Bound to a device event</strong> — published automatically whenever the value changes (report by exception). Choose the event and the field to read.</li>
+        <li><strong>Unbound</strong> — driven by a <strong>Sparkplug B Publish</strong> rule action, so you can add conditions, schedules and templates.</li>
+      </ul>
+      <p>Changing the metric list or the node identity publishes a fresh birth certificate. <code>bdSeq</code> and <code>Node Control/Rebirth</code> are reserved and added automatically.</p>
+      <p>Topics follow the standard namespace:</p>
+      <pre>spBv1.0/{group_id}/NBIRTH|NDATA|NDEATH|NCMD/{edge_node_id}
+spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
+
+      <h3>Status</h3>
+      <p>The Settings tab shows a live indicator next to "SPARKPLUG B EDGE NODE" with the session <code>bdSeq</code>, the current sequence number, the metric count and how many samples are buffered. Below the metric editor a table lists every declared metric with its alias and last known value. The same data is available from <code>GET /local/acap_event_engine/sparkplug</code>.</p>
+
+      <h3>Behaviour worth knowing</h3>
+      <ul>
+        <li>No data message is ever sent before its birth certificate.</li>
+        <li><code>bdSeq</code> is persisted across app restarts, so a late death certificate from a previous session cannot be mistaken for the current one.</li>
+        <li>The death certificate is registered as the MQTT will <em>and</em> published explicitly on a graceful shutdown, because a clean MQTT disconnect suppresses the will.</li>
+        <li>Metrics collected while the broker is unreachable are buffered in memory and replayed on reconnect, flagged as historical.</li>
+        <li>QoS 1 messages are sent once without retransmission. Sparkplug expects QoS 1 for birth and death certificates; in practice a lost message is covered by the reconnect-and-rebirth path.</li>
+      </ul>
 
       <!-- ═══════════════════════════════════════════ SETTINGS -->
       <h2 id="settings">Application Settings</h2>

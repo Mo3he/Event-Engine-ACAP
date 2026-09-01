@@ -1,5 +1,64 @@
 # Release Notes
 
+## v1.9.15 — Sparkplug B edge node
+
+Event Engine can now act as a **Sparkplug B edge node**, so an industrial or
+building-automation host (Ignition, Honeywell EBI, Cirrus Link and other
+Tahu-compatible systems) can consume device data and send commands back. The
+usual answer to a Sparkplug requirement is to place an industrial gateway between
+the Axis device and the Sparkplug network; with this release the device is the
+edge node itself.
+
+### New
+
+- **Sparkplug B Edge Node** settings section: group / edge node / device /
+  primary host ids, a choice of Sparkplug 3.0 or 2.2, and a central metric list.
+  Metrics can be bound to a device event (published automatically on change) or
+  left unbound and driven from a rule.
+- **Sparkplug B Publish** action — publish declared metrics as `NDATA`/`DDATA`
+  with template-aware values.
+- **Sparkplug Command** trigger — fires when a host writes a metric via
+  `NCMD`/`DCMD`, injecting `{{trigger.metric}}` and `{{trigger.value}}`. This is
+  what lets a SCADA system command the device, not just read from it.
+- `GET /sparkplug` returns the live session state and every metric's current
+  value; the Settings tab renders it as a table.
+- `tools/sparkplug_host.py`, a dependency-light validation host that decodes the
+  protobuf itself and checks birth-before-data, `seq` continuity, `bdSeq`
+  matching and alias resolution.
+
+Protobuf encoding is implemented in-tree, so no new libraries are bundled.
+
+### Correctness details
+
+- `bdSeq` is persisted across restarts, so a late death certificate from a
+  previous session cannot be mistaken for the current one.
+- The death certificate is registered as the MQTT will **and** published
+  explicitly on a graceful shutdown, because a clean MQTT disconnect suppresses
+  the will.
+- Sequence numbers are allocated in one place under a lock, so concurrent rules
+  cannot interleave them.
+- Metrics collected while the broker is unreachable are buffered and replayed on
+  reconnect flagged as historical.
+
+### Fixes
+
+- **MQTT could stop reconnecting permanently after a settings change.** Changing
+  the broker host or port closed the worker thread's socket from another thread.
+  `select()` does not reliably notice that, and once the file descriptor number
+  was reused elsewhere in the process the worker kept operating on an unrelated
+  socket: it never reconnected and could write MQTT bytes into another
+  connection. Reconnects are now requested through a wakeup pipe so the worker
+  always closes its own socket, and a deliberate reconnect no longer waits out
+  the failure backoff. Changing the username, password or client ID now also
+  triggers a reconnect.
+- MQTT: packets larger than the 4 KB receive buffer were parsed past the end of
+  that buffer and left the stream unframed. Oversized packets are now drained
+  safely.
+- MQTT: `MQTT_Publish` measured payloads with `strlen`, which truncated any
+  payload containing a NUL byte. Binary publishing is now supported.
+- Settings: repeated no-op settings callbacks no longer cycle ACAP event
+  subscriptions.
+
 ## v1.9.14-Signed - Signed release
 
 - Packages are now signed with the Axis ACAP signing service and install normally on AXIS OS 12.10 and later.

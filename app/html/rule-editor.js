@@ -183,6 +183,7 @@ const TRIGGER_GROUPS = [
   ]},
   { label: 'External', types: [
     { value: 'mqtt_message',      label: 'MQTT Message' },
+    { value: 'sparkplug_command', label: 'Sparkplug Command' },
     { value: 'http_webhook',      label: 'HTTP Webhook' },
   ]},
   { label: 'Logic', types: [
@@ -511,6 +512,19 @@ function triggerFields(t, rowIdx) {
         <label>Payload Filter <span style="font-weight:normal;opacity:.7">(optional)</span></label>
         <input type="text" data-k="payload_filter" value="${escHtml(t.payload_filter || '')}" placeholder="e.g. motion or &quot;state&quot;:true">
         <div class="form-hint">Rule fires only if the payload contains this substring. Leave empty to match any payload.</div>
+      </div>
+    </div>`;
+  if (type === 'sparkplug_command') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Metric Name <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="metric" value="${escHtml(t.metric || '')}" placeholder="Speaker/Play">
+        <div class="form-hint">Fires when a Sparkplug host writes this metric via NCMD/DCMD. Leave empty to fire on any metric write. Injects <code>{{trigger.metric}}</code> and <code>{{trigger.value}}</code>.</div>
+      </div>
+      <div class="form-group">
+        <label>Value Filter <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="value_filter" value="${escHtml(t.value_filter || '')}" placeholder="true">
+        <div class="form-hint">Fires only on an exact value match. Booleans arrive as <code>true</code> / <code>false</code>.</div>
       </div>
     </div>`;
   if (type === 'aoa_scenario') {
@@ -1261,6 +1275,9 @@ const ACTION_GROUPS = [
   ]},
   { label: 'Modbus', types: [
     { value: 'modbus_write',      label: 'Modbus Write' },
+  ]},
+  { label: 'Industrial', types: [
+    { value: 'sparkplug_publish', label: 'Sparkplug B Publish' },
   ]},
 ];
 
@@ -2135,6 +2152,22 @@ function actionFields(a, rowIdx) {
         <input type="number" data-k="delta" value="${a.delta !== undefined ? a.delta : 1}">
       </div>
     </div>`;
+  if (type === 'sparkplug_publish') {
+    const lines = Array.isArray(a.metrics)
+      ? a.metrics.map(m => `${m.name || ''}=${m.value || ''}`).join('\n')
+      : (a.metric_lines || '');
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Metrics</label>
+        <textarea data-k="metric_lines" rows="4" placeholder="Speaker/Motion={{trigger.active}}">${escHtml(lines)}</textarea>
+        <div class="form-hint">One <code>MetricName=value</code> per line. Names must already be declared in
+        <strong>Settings &rarr; Sparkplug B</strong>, otherwise they are missing from the birth
+        certificate and will be rejected. Values are template-aware.</div>
+        ${hint}
+      </div>
+    </div>`;
+  }
   if (type === 'mqtt_publish') return `
     <div class="form-row">
       <div class="form-group">
@@ -3132,6 +3165,9 @@ function normalizeTrigger(t) {
   } else if (t.type === 'mqtt_message') {
     out.topic_filter = t.topic_filter || '#';
     if (t.payload_filter) out.payload_filter = t.payload_filter;
+  } else if (t.type === 'sparkplug_command') {
+    if (t.metric)       out.metric       = t.metric.trim();
+    if (t.value_filter) out.value_filter = t.value_filter.trim();
   } else if (t.type === 'aoa_scenario') {
     out.scenario_id = parseInt(t.scenario_id) || 1;
     if (t.object_class && t.object_class !== 'any') out.object_class = t.object_class;
@@ -3253,6 +3289,20 @@ function normalizeAction(a) {
     } else if (fbType === 'http_request') {
       out.on_failure = [{ type: 'http_request', url: a.on_failure_url || '', method: 'GET' }];
     }
+  }
+  if (a.type === 'sparkplug_publish') {
+    /* The form edits a "Name=value" text block; the engine wants an array */
+    const src = a.metric_lines !== undefined
+      ? a.metric_lines
+      : (Array.isArray(a.metrics) ? a.metrics.map(m => `${m.name || ''}=${m.value || ''}`).join('\n') : '');
+    out.metrics = String(src).split('\n').map(line => {
+      const eq = line.indexOf('=');
+      if (eq < 0) return null;
+      const name = line.slice(0, eq).trim();
+      if (!name) return null;
+      return { name, value: line.slice(eq + 1).trim() };
+    }).filter(Boolean);
+    delete out.metric_lines;
   }
   if (a.type === 'vapix_query') {
     /* Reconstruct topic0-3 objects from the hidden _ns / _val fields (flat form after collectRows)
@@ -3378,6 +3428,9 @@ async function saveRule() {
     const label = `Action ${i + 1} (${ruleTypeLabel('action', a.type)})`;
     if (a.type === 'http_request'    && !a.url)         { toast(`${label}: URL is required`, 'error'); return; }
     if (a.type === 'mqtt_publish'    && !a.topic)       { toast(`${label}: Topic is required`, 'error'); return; }
+    if (a.type === 'sparkplug_publish' && !(a.metrics || []).length) {
+      toast(`${label}: add at least one MetricName=value line`, 'error'); return;
+    }
     if (a.type === 'email'           && !a.to)          { toast(`${label}: "To" address is required`, 'error'); return; }
     if (a.type === 'slack_webhook'   && !a.webhook_url) { toast(`${label}: Webhook URL is required`, 'error'); return; }
     if (a.type === 'teams_webhook'   && !a.webhook_url) { toast(`${label}: Webhook URL is required`, 'error'); return; }

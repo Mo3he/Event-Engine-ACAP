@@ -13,3 +13,4 @@ app/engine/*.o
 
 # Local Claude Code settings (may contain credentials)
 .claude/settings.local.json
+__pycache__/

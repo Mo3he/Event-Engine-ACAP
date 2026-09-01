@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`\n",
-    "version": "1.9.14",
+    "version": "1.9.15",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -110,7 +110,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "modbus_read"],
+            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "modbus_read", "sparkplug_command"],
             "description": "Trigger type"
           }
         }
@@ -386,6 +386,21 @@
         ]
       },
 
+      "TriggerSparkplugCommand": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "description": "Fires when a Sparkplug host writes a metric to this edge node via NCMD or DCMD. Injects {{trigger.metric}} and {{trigger.value}}. Requires Sparkplug B to be enabled in Settings.",
+            "properties": {
+              "type":         { "type": "string", "enum": ["sparkplug_command"] },
+              "metric":       { "type": "string", "example": "Speaker/Play", "description": "Metric name written by the host. Omit to fire on any metric write." },
+              "value_filter": { "type": "string", "example": "true", "description": "Fire only on an exact value match. Booleans arrive as 'true' or 'false'." }
+            }
+          }
+        ]
+      },
+
       "Condition": {
         "type": "object",
         "required": ["type"],
@@ -540,7 +555,7 @@
               "fire_vapix_event", "send_syslog", "delay",
               "guard_tour", "set_device_param", "snapshot_upload",
               "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control",
-              "speaker_display", "modbus_write"
+              "speaker_display", "modbus_write", "sparkplug_publish"
             ]
           },
           "remote_host": {
@@ -633,6 +648,32 @@
                 "type": "boolean",
                 "default": false,
                 "description": "If true, fetches a JPEG snapshot and exposes it as {{trigger.snapshot_base64}} for payload template expansion"
+              }
+            }
+          }
+        ]
+      },
+
+      "ActionSparkplugPublish": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Publishes declared metrics as a Sparkplug B NDATA (or DDATA when a device id is configured). Metric names must already exist in Settings -> Sparkplug B, otherwise they are absent from the birth certificate and are rejected.",
+            "required": ["metrics"],
+            "properties": {
+              "type": { "type": "string", "enum": ["sparkplug_publish"] },
+              "metrics": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "value"],
+                  "properties": {
+                    "name":  { "type": "string", "example": "Camera/Temperature", "description": "Must match a metric declared in Settings" },
+                    "value": { "type": "string", "example": "{{trigger.MaxTemp}}", "description": "Template-aware; converted to the metric's declared datatype" }
+                  }
+                }
               }
             }
           }
@@ -1482,7 +1523,8 @@
                   { "type": "io_input",           "label": "I/O Input",          "description": "Fire on digital input port state change" },
                   { "type": "counter_threshold",  "label": "Counter Threshold",  "description": "Fire when a counter crosses a value" },
                   { "type": "rule_fired",         "label": "Rule Chain",         "description": "Fire when another rule executes" },
-                  { "type": "modbus_read",        "label": "Modbus Read",        "description": "Poll a Modbus register and fire when value crosses a threshold" }
+                  { "type": "modbus_read",        "label": "Modbus Read",        "description": "Poll a Modbus register and fire when value crosses a threshold" },
+                  { "type": "sparkplug_command",  "label": "Sparkplug Command",  "description": "Fires when a Sparkplug host writes a metric via NCMD/DCMD" }
                 ]
               }
             }
@@ -1628,6 +1670,58 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/EngineStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/sparkplug": {
+      "get": {
+        "summary": "Get Sparkplug B edge node session state and live metric values",
+        "operationId": "getSparkplug",
+        "tags": ["Monitoring"],
+        "description": "Reports the current session (bdSeq, seq, birth state, buffered sample count) together with every declared metric and its last known value.",
+        "responses": {
+          "200": {
+            "description": "Edge node state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled":        { "type": "boolean" },
+                    "spec_version":   { "type": "string", "enum": ["2.2", "3.0"] },
+                    "group_id":       { "type": "string" },
+                    "edge_node_id":   { "type": "string" },
+                    "device_id":      { "type": "string" },
+                    "primary_host_id":{ "type": "string" },
+                    "online":         { "type": "boolean", "description": "Connected and birth certificate published" },
+                    "birth_sent":     { "type": "boolean" },
+                    "bdseq":          { "type": "integer", "description": "Birth/death sequence, persisted across restarts" },
+                    "seq":            { "type": "integer", "description": "Next Sparkplug sequence number (0-255)" },
+                    "metric_count":   { "type": "integer" },
+                    "buffered":       { "type": "integer", "description": "Samples captured while offline, replayed on reconnect" },
+                    "data_published": { "type": "integer" },
+                    "data_topic":     { "type": "string", "example": "spBv1.0/Building1/NDATA/B8A44F000000" },
+                    "metrics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name":        { "type": "string" },
+                          "datatype":    { "type": "string" },
+                          "alias":       { "type": "integer" },
+                          "auto":        { "type": "boolean", "description": "True when bound to a device event" },
+                          "source_path": { "type": "string" },
+                          "source_key":  { "type": "string" },
+                          "value":       { "type": "string", "nullable": true }
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
