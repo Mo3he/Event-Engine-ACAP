@@ -1161,6 +1161,57 @@
                 "description": "Backup brokers as 'host' or 'host:port', tried in order when the primary is unreachable. A bare host reuses the primary port."
               }
             }
+          },
+          "sparkplug": {
+            "type": "object",
+            "description": "Sparkplug B edge node configuration. Uses the broker configured under 'mqtt', so MQTT must be enabled too.",
+            "properties": {
+              "enabled":         { "type": "boolean", "default": false },
+              "spec_version":    { "type": "string", "enum": ["3.0", "2.2"], "default": "3.0", "description": "Only the host STATE topic and payload differ between the two." },
+              "group_id":        { "type": "string", "example": "Building1", "description": "Required. Must not contain '/', '+' or '#'." },
+              "edge_node_id":    { "type": "string", "example": "B8A44F000000", "description": "Defaults to the device serial number." },
+              "device_id":       { "type": "string", "description": "Optional. When set, metrics are published as a child device (DBIRTH/DDATA) instead of at node level." },
+              "primary_host_id": { "type": "string", "example": "ScadaHost1", "description": "Optional. The node rebirths when this host announces itself online and buffers data while it reports itself offline." },
+              "metrics": {
+                "type": "array",
+                "maxItems": 128,
+                "description": "Metric registry. The order fixes the aliases, so changing the list publishes a fresh birth certificate.",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "datatype"],
+                  "properties": {
+                    "name":     { "type": "string", "maxLength": 128, "example": "Camera/Temperature" },
+                    "datatype": {
+                      "type": "string",
+                      "enum": ["Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64",
+                               "Float", "Double", "Boolean", "String", "DateTime", "Text", "UUID"],
+                      "example": "Double"
+                    },
+                    "source": {
+                      "type": "object",
+                      "description": "Optional device event to bind to. Present means the metric is published automatically whenever the event value changes; absent means it is driven by a Sparkplug B Publish rule action. This is the writable form of the binding — 'source_path' in GET /sparkplug is derived from it and is not accepted here.",
+                      "properties": {
+                        "topic0": { "type": "object", "additionalProperties": { "type": "string" } },
+                        "topic1": { "type": "object", "additionalProperties": { "type": "string" } },
+                        "topic2": { "type": "object", "additionalProperties": { "type": "string" } },
+                        "topic3": { "type": "object", "additionalProperties": { "type": "string" } }
+                      },
+                      "example": {
+                        "topic0": { "tnsaxis": "Device" },
+                        "topic1": { "tnsaxis": "IO" },
+                        "topic2": { "tnsaxis": "VirtualPort" }
+                      }
+                    },
+                    "source_key": {
+                      "type": "string",
+                      "default": "state",
+                      "description": "Which field of the bound event payload to read.",
+                      "example": "state"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -1847,7 +1898,7 @@
     { "name": "Catalog",    "description": "Available trigger and action types" },
     { "name": "Variables",  "description": "Named variables and counters" },
     { "name": "Monitoring", "description": "Engine status and event log" },
-    { "name": "Settings",   "description": "Engine and MQTT configuration" },
+    { "name": "Settings",   "description": "Engine, MQTT and Sparkplug B configuration" },
     { "name": "Remote",     "description": "Remote device capability queries" }
   ]
 }
