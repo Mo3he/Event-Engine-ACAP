@@ -90,6 +90,11 @@ Protobuf encoding is implemented in-tree, so no new libraries are bundled.
   the same id**, leaving get, update and delete ambiguous. Importing a backup on
   top of the rules it came from duplicated every one of them. Such a request now
   updates the existing rule.
+- Sparkplug: `GET /sparkplug` reported a metric binding only as the flattened
+  `source_path`, which the settings endpoint does not accept, so posting that
+  response back silently dropped every binding. The response now also carries the
+  writable `source` object, and a metric that arrives with `source_path` but no
+  `source` is reported by name in the log instead of being quietly ignored.
 - Settings: repeated no-op settings callbacks no longer cycle ACAP event
   subscriptions.
 

@@ -832,6 +832,14 @@ int Sparkplug_Configure(cJSON* cfg) {
             source_to_path(d->source, d->source_path, sizeof(d->source_path));
             const char* key = cJSON_GetStringValue(cJSON_GetObjectItem(item, "source_key"));
             snprintf(d->source_key, sizeof(d->source_key), "%s", key && key[0] ? key : "state");
+        } else if (cJSON_GetObjectItem(item, "source_path")) {
+            /* 'source_path' is derived output. Subscribing needs the namespace
+             * prefix of every level, which the flattened path has lost. */
+            LOG_WARN("metric '%s' declares 'source_path' but no 'source' — it will be "
+                     "rule-driven, not event-bound. Send the 'source' topic object instead.",
+                     d->name);
+        } else if (source) {
+            LOG_WARN("metric '%s' has an unusable 'source' — expected an object with topic0..topic3", d->name);
         }
 
         /* Carry forward the last known value so a rebirth is not all-null */
@@ -954,6 +962,8 @@ cJSON* Sparkplug_Metrics(void) {
         if (defs[i].source) {
             cJSON_AddStringToObject(m, "source_path", defs[i].source_path);
             cJSON_AddStringToObject(m, "source_key",  defs[i].source_key);
+            /* The writable form, so this response can be posted straight back. */
+            cJSON_AddItemToObject(m, "source", cJSON_Duplicate(defs[i].source, 1));
         }
         if (defs[i].has_value) cJSON_AddStringToObject(m, "value", defs[i].value);
         else                   cJSON_AddNullToObject(m,   "value");

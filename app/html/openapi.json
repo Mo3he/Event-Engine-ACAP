@@ -1189,7 +1189,7 @@
                     },
                     "source": {
                       "type": "object",
-                      "description": "Optional device event to bind to. Present means the metric is published automatically whenever the event value changes; absent means it is driven by a Sparkplug B Publish rule action. This is the writable form of the binding — 'source_path' in GET /sparkplug is derived from it and is not accepted here.",
+                      "description": "Optional device event to bind to. Present means the metric is published automatically whenever the event value changes; absent means it is driven by a Sparkplug B Publish rule action. GET /sparkplug returns this field alongside the derived read-only 'source_path', so a metric read from there can be written straight back.",
                       "properties": {
                         "topic0": { "type": "object", "additionalProperties": { "type": "string" } },
                         "topic1": { "type": "object", "additionalProperties": { "type": "string" } },
@@ -1772,8 +1772,9 @@
                           "datatype":    { "type": "string" },
                           "alias":       { "type": "integer" },
                           "auto":        { "type": "boolean", "description": "True when bound to a device event" },
-                          "source_path": { "type": "string" },
+                          "source_path": { "type": "string", "readOnly": true, "description": "Flattened event path, derived from 'source' for display. Not accepted when writing settings." },
                           "source_key":  { "type": "string" },
+                          "source":      { "type": "object", "description": "The writable binding, as accepted by the settings endpoint. Present only for event-bound metrics." },
                           "value":       { "type": "string", "nullable": true }
                         }
                       }
