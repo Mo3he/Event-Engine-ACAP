@@ -235,6 +235,13 @@
               </label>
             </div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Backup Brokers <span style="color:var(--text-muted);font-weight:400;">(optional, one per line)</span></label>
+              <textarea name="servers" rows="2" placeholder="backup1.example.com:1883&#10;10.0.0.5" style="font-family:var(--mono,monospace);font-size:12px;"></textarea>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Tried in order when the broker above is unreachable. Omit the port to reuse the one above.</div>
+            </div>
+          </div>
           <div style="display:flex;justify-content:flex-end;">
             <button type="submit" class="btn btn-primary">Save MQTT Settings</button>
           </div>

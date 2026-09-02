@@ -45,9 +45,21 @@ typedef void (*MQTT_Message_Callback)(const char* topic, const char* payload,
  * out before anything else on a fresh session. */
 typedef void (*MQTT_State_Callback)(int state, void* user_data);
 
+/* Sparkplug expects an edge node to be given a list of MQTT servers and to move
+ * to the next one when a connection cannot be established. Entry 0 is the
+ * primary; alternates are tried in order and the list wraps. */
+#define MQTT_MAX_SERVERS 8
+
 typedef struct {
     char host[256];
     int  port;
+} MQTT_Server;
+
+typedef struct {
+    char host[256];        /* primary broker, mirrored in servers[0] */
+    int  port;
+    MQTT_Server servers[MQTT_MAX_SERVERS];
+    int  server_count;     /* 0 is treated as "just the primary" */
     char client_id[128];
     char username[128];
     char password[128];

@@ -263,6 +263,33 @@ static void fill_mqtt_config(cJSON* cfg, MQTT_Config* mc) {
     if (ka) mc->keepalive = (int)ka->valuedouble;
     mc->use_tls = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "use_tls")) ? 1 : 0;
     mc->enabled = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "enabled")) ? 1 : 0;
+
+    /* Broker list for Sparkplug-style failover: entry 0 is always the primary
+     * above, "servers" holds alternates as "host" or "host:port" strings. */
+    snprintf(mc->servers[0].host, sizeof(mc->servers[0].host), "%s", mc->host);
+    mc->servers[0].port = mc->port;
+    mc->server_count = mc->host[0] ? 1 : 0;
+
+    cJSON* alt;
+    cJSON_ArrayForEach(alt, cJSON_GetObjectItem(cfg, "servers")) {
+        if (mc->server_count >= MQTT_MAX_SERVERS) break;
+        const char* entry = cJSON_GetStringValue(alt);
+        if (!entry || !entry[0]) continue;
+
+        MQTT_Server* s = &mc->servers[mc->server_count];
+        const char* colon = strrchr(entry, ':');
+        if (colon && colon[1]) {
+            size_t hlen = (size_t)(colon - entry);
+            if (hlen >= sizeof(s->host)) hlen = sizeof(s->host) - 1;
+            memcpy(s->host, entry, hlen);
+            s->host[hlen] = '\0';
+            s->port = atoi(colon + 1);
+        } else {
+            snprintf(s->host, sizeof(s->host), "%s", entry);
+            s->port = mc->port;
+        }
+        if (s->host[0] && s->port > 0 && s->port < 65536) mc->server_count++;
+    }
 }
 
 static void apply_mqtt_config(cJSON* mqtt_json) {

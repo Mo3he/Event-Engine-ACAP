@@ -341,6 +341,7 @@ async function loadMqttSettings(settings) {
     form.querySelector('[name="keepalive"]').value = mq.keepalive || 60;
     form.querySelector('[name="use_tls"]').checked = !!mq.use_tls;
     form.querySelector('[name="enabled"]').checked = !!mq.enabled;
+    form.querySelector('[name="servers"]').value = (mq.servers || []).join('\n');
     /* Don't pre-fill password — leave placeholder "(unchanged)" */
 
     /* Also refresh the status badge */
@@ -363,7 +364,9 @@ async function saveMqttSettings(event) {
       client_id: form.querySelector('[name="client_id"]').value.trim(),
       username:  form.querySelector('[name="username"]').value.trim(),
       keepalive: parseInt(form.querySelector('[name="keepalive"]').value, 10) || 60,
-      use_tls:   form.querySelector('[name="use_tls"]').checked
+      use_tls:   form.querySelector('[name="use_tls"]').checked,
+      servers:   form.querySelector('[name="servers"]').value
+                     .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 7)
     }
   };
   /* Only include password if user typed something */

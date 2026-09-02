@@ -16,6 +16,18 @@ jobs:
       - name: Check docs/help.html matches the in-app manual
         run: ./tools/sync-docs.sh --check
 
+  sparkplug_codec:
+    name: Sparkplug B codec tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run the protobuf round-trip tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -Iapp/engine \
+             -o /tmp/sparkplug_pb_test \
+             tools/sparkplug_pb_test.c app/engine/sparkplug_pb.c
+          /tmp/sparkplug_pb_test
+
   build_acap:
     name: Build ACAP (${{ matrix.arch }})
     runs-on: ubuntu-latest

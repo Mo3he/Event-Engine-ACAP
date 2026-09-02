@@ -25,6 +25,9 @@ edge node itself.
 - `tools/sparkplug_host.py`, a dependency-light validation host that decodes the
   protobuf itself and checks birth-before-data, `seq` continuity, `bdSeq`
   matching and alias resolution.
+- **Backup brokers.** The MQTT settings take a list of alternate brokers that are
+  tried in order when the primary is unreachable, so a Sparkplug node is not tied
+  to the availability of a single broker.
 
 Protobuf encoding is implemented in-tree, so no new libraries are bundled.
 
@@ -38,7 +41,14 @@ Protobuf encoding is implemented in-tree, so no new libraries are bundled.
 - Sequence numbers are allocated in one place under a lock, so concurrent rules
   cannot interleave them.
 - Metrics collected while the broker is unreachable are buffered and replayed on
-  reconnect flagged as historical.
+  reconnect flagged as historical. The same applies while a configured primary
+  host reports itself offline. A node with no primary host, or one whose host has
+  never published `STATE`, always publishes, so a misconfigured host id cannot
+  silently mute a device.
+- Commands are accepted only on the node's own command topics, and a command
+  delivered twice because a rule subscribes to an overlapping topic filter is
+  acted on once.
+- Both `Node Control/Rebirth` and `Device Control/Rebirth` are honoured.
 
 ### Fixes in 1.9.15
 
@@ -56,6 +66,22 @@ Protobuf encoding is implemented in-tree, so no new libraries are bundled.
   safely.
 - MQTT: `MQTT_Publish` measured payloads with `strlen`, which truncated any
   payload containing a NUL byte. Binary publishing is now supported.
+- **Turning MQTT off left the broker connection open.** The worker only checked
+  the enabled flag before starting a connection, never while one was running, so
+  a disabled client kept pinging and receiving until something else dropped the
+  socket.
+- MQTT: the broker configuration was read by the worker thread while the settings
+  thread overwrote it, which could pair a host from one configuration with the
+  credentials or TLS setting of another. All access now goes through a lock and
+  each connection attempt works from a private snapshot.
+- MQTT: correcting the broker address while the client was backing off could take
+  up to a minute to apply. Retry waits are now interrupted by a settings change.
+- MQTT: a malformed remaining-length field could make the receive loop drain
+  hundreds of megabytes and lose framing. It is now rejected.
+- MQTT: packet assembly ignored allocation failures and could dereference a null
+  pointer under memory pressure.
+- Sparkplug: a failed replay of buffered samples discarded them anyway, losing
+  exactly the data the buffer exists to protect.
 - Settings: repeated no-op settings callbacks no longer cycle ACAP event
   subscriptions.
 

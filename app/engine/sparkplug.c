@@ -77,6 +77,17 @@ static uint64_t data_published = 0;
 static uint64_t config_hash = 0;
 static int      config_seen = 0;
 
+/* When a primary host is configured, its STATE tells us whether anyone is
+ * listening. Data collected while it is offline is buffered instead of being
+ * published into the void, then replayed when it returns. */
+static int      host_online = 1;
+
+/* Overlapping subscriptions (a rule filtering on "#" alongside our own command
+ * topic) make the broker deliver the same command twice. */
+static uint64_t last_cmd_hash = 0;
+static uint64_t last_cmd_ms   = 0;
+#define SPB_CMD_DEDUPE_MS 500
+
 /* spBv1.0/<group>/DCMD/<node>/<device> with three 128-byte ids */
 #define SPB_TOPIC_LEN 512
 
@@ -306,11 +317,16 @@ static void flush_history(void) {
         n++;
     }
 
-    hist_head = hist_count = 0;
-    if (n) {
-        publish_payload(device_id[0] ? "DDATA" : "NDATA", m, n, 1, take_seq(), 0);
-        LOG("replayed %d buffered metric samples", n);
+    if (!n) { hist_head = hist_count = 0; return; }
+
+    /* Only drop the buffer once the replay is actually on the wire, otherwise a
+     * send failure would silently destroy the very data we buffered. */
+    if (!publish_payload(device_id[0] ? "DDATA" : "NDATA", m, n, 1, take_seq(), 0)) {
+        LOG_WARN("replay of %d buffered samples failed, keeping them buffered", n);
+        return;
     }
+    hist_head = hist_count = 0;
+    LOG("replayed %d buffered metric samples", n);
 }
 
 /* Caller must hold spb_lock. */
@@ -331,7 +347,7 @@ static void buffer_sample(int def_idx, const char* value, uint64_t ts) {
 /* Caller must hold spb_lock. */
 static int publish_data(SPB_Metric* metrics, int count) {
     if (!count) return 1;
-    if (!birth_sent || !MQTT_Is_Connected()) return 0;
+    if (!birth_sent || !host_online || !MQTT_Is_Connected()) return 0;
     int ok = publish_payload(device_id[0] ? "DDATA" : "NDATA", metrics, count, 1, take_seq(), 0);
     if (ok) data_published++;
     return ok;
@@ -438,6 +454,10 @@ static void mqtt_state_cb(int state, void* user_data) {
 
     if (state == MQTT_STATE_PRECONNECT) {
         pthread_mutex_lock(&spb_lock);
+        /* The previous session's view of the host does not carry over: a new
+         * broker may hold no STATE at all, and staying OFFLINE would mute the
+         * node forever. A retained OFFLINE will arrive right after SUBSCRIBE. */
+        host_online = 1;
         if (enabled && valid_id(group_id) && valid_id(edge_node_id)) {
             bdseq++;
             save_bdseq();
@@ -496,7 +516,8 @@ static void command_metric_handler(const char* name, uint64_t alias, int has_ali
     }
     if (!resolved || !resolved[0]) return;
 
-    if (strcmp(resolved, SPB_METRIC_REBIRTH) == 0) {
+    if (strcmp(resolved, SPB_METRIC_REBIRTH) == 0 ||
+        strcmp(resolved, "Device Control/Rebirth") == 0) {
         if (value_str && strcasecmp(value_str, "true") == 0) batch->rebirth = 1;
         return;
     }
@@ -515,20 +536,43 @@ void Sparkplug_On_MQTT_Message(const char* topic, const char* payload, int paylo
     pthread_mutex_unlock(&spb_lock);
 
     if (is_state) {
-        /* A primary host coming back online invalidates our session state.
-         * 2.2 sends the bare word ONLINE, 3.0 sends {"online":true,...}. */
-        int host_online = payload && payload_len > 0 &&
-                          (strstr(payload, "ONLINE") || strstr(payload, "\"online\":true") ||
-                           strstr(payload, "\"online\": true"));
-        if (host_online) {
+        /* 2.2 sends the bare word ONLINE/OFFLINE, 3.0 sends {"online":true,...} */
+        int online = payload && payload_len > 0 &&
+                     (strstr(payload, "\"online\":true") || strstr(payload, "\"online\": true") ||
+                      (strstr(payload, "ONLINE") && !strstr(payload, "OFFLINE")));
+
+        pthread_mutex_lock(&spb_lock);
+        int was_online = host_online;
+        host_online = online;
+        if (online && !was_online) {
             LOG("primary host '%s' online — rebirthing", primary_host);
-            pthread_mutex_lock(&spb_lock);
             publish_birth();
-            pthread_mutex_unlock(&spb_lock);
+            if (birth_sent) flush_history();
+        } else if (online) {
+            publish_birth();
+        } else if (was_online) {
+            LOG("primary host '%s' offline — buffering data until it returns", primary_host);
         }
+        pthread_mutex_unlock(&spb_lock);
         return;
     }
     if (!is_cmd || !payload || payload_len <= 0) return;
+
+    /* Suppress the duplicate copy the broker sends when another subscription
+     * also matches this topic. */
+    uint64_t hash = 1469598103934665603ULL;
+    hash_field(&hash, topic);
+    for (int i = 0; i < payload_len; i++) {
+        hash ^= (unsigned char)payload[i];
+        hash *= 1099511628211ULL;
+    }
+    uint64_t now = now_ms();
+    pthread_mutex_lock(&spb_lock);
+    int duplicate = (hash == last_cmd_hash) && (now - last_cmd_ms) < SPB_CMD_DEDUPE_MS;
+    last_cmd_hash = hash;
+    last_cmd_ms   = now;
+    pthread_mutex_unlock(&spb_lock);
+    if (duplicate) return;
 
     CommandBatch batch;
     memset(&batch, 0, sizeof(batch));
@@ -597,7 +641,7 @@ void Sparkplug_On_Device_Event(cJSON* event) {
         SPB_Metric_Set_Value(&m[n], values[n]);
         n++;
 
-        if (!birth_sent || !MQTT_Is_Connected()) buffer_sample(i, text, ts);
+        if (!birth_sent || !host_online || !MQTT_Is_Connected()) buffer_sample(i, text, ts);
     }
 
     if (n) publish_data(m, n);
@@ -648,13 +692,13 @@ int Sparkplug_Publish(cJSON* metrics) {
         SPB_Metric_Set_Value(&m[n], values[n]);
         n++;
 
-        if (!birth_sent || !MQTT_Is_Connected())
+        if (!birth_sent || !host_online || !MQTT_Is_Connected())
             buffer_sample((int)(d - defs), text, ts);
     }
 
     int ok = n ? publish_data(m, n) : 0;
     /* Buffered for replay counts as accepted */
-    if (!ok && n && (!birth_sent || !MQTT_Is_Connected())) ok = 1;
+    if (!ok && n && (!birth_sent || !host_online || !MQTT_Is_Connected())) ok = 1;
     pthread_mutex_unlock(&spb_lock);
     return ok;
 }
@@ -736,10 +780,17 @@ int Sparkplug_Configure(cJSON* cfg) {
 
     enabled      = new_enabled;
     spec_version = new_spec;
+    char prev_host[128];
+    snprintf(prev_host, sizeof(prev_host), "%s", primary_host);
     snprintf(group_id,     sizeof(group_id),     "%s", new_group);
     snprintf(edge_node_id, sizeof(edge_node_id), "%s", new_node);
     snprintf(device_id,    sizeof(device_id),    "%s", new_dev);
     snprintf(primary_host, sizeof(primary_host), "%s", new_host);
+
+    /* A different (or no) primary host means the old host's ONLINE/OFFLINE
+     * state no longer applies. Assume online until the new host says otherwise,
+     * so telemetry is never suppressed by a host that never reports. */
+    if (!primary_host[0] || strcmp(new_host, prev_host) != 0) host_online = 1;
 
     /* Rebuild the metric registry. Aliases are positional and stable for the
      * life of a session; any change to the list forces a new birth. */
@@ -874,6 +925,7 @@ cJSON* Sparkplug_Status(void) {
     cJSON_AddStringToObject(s, "device_id",      device_id);
     cJSON_AddStringToObject(s, "primary_host_id", primary_host);
     cJSON_AddBoolToObject(s,   "online",         enabled && birth_sent && MQTT_Is_Connected());
+    cJSON_AddBoolToObject(s,   "host_online",    host_online);
     cJSON_AddBoolToObject(s,   "birth_sent",     birth_sent);
     cJSON_AddNumberToObject(s, "bdseq",          (double)bdseq);
     cJSON_AddNumberToObject(s, "seq",            (double)seq);

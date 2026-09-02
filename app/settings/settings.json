@@ -21,7 +21,8 @@
     "username": "",
     "password": "",
     "keepalive": 60,
-    "use_tls": false
+    "use_tls": false,
+    "servers": []
   },
   "sparkplug": {
     "enabled": false,

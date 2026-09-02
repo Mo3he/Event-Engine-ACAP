@@ -351,10 +351,17 @@ Settings → **Sparkplug B Edge Node**:
 | **Group ID** | Required. Sparkplug group namespace, e.g. `Building1` |
 | **Edge Node ID** | Defaults to the device serial number so two devices never collide |
 | **Device ID** | Optional. Set it to expose the metrics as a child device (`DBIRTH`/`DDATA`) instead of at node level |
-| **Primary Host ID** | Optional. Rebirth automatically when this host announces itself online |
+| **Primary Host ID** | Optional. Rebirth when this host announces itself online, and stop publishing data while it reports itself offline |
 | **Specification** | `3.0` or `2.2` |
 
 Ids must not contain `/`, `+` or `#`.
+
+When a Primary Host ID is set, the node follows that host's `STATE` topic. While
+the host is offline there is nobody to receive telemetry, so data is buffered
+instead of published and replayed as historical once the host returns. A node
+with no Primary Host ID always publishes, and so does a node whose host has never
+published a `STATE` message, so a misconfigured host id cannot silently mute a
+device.
 
 ### Metrics
 
@@ -412,6 +419,22 @@ retry budget is exhausted, and the number still in flight is reported as
 Sessions are always clean, as Sparkplug requires, so anything still
 unacknowledged when a connection drops is discarded rather than replayed. The
 reconnect publishes a fresh birth certificate, which resynchronises the host.
+
+If a command arrives more than once because a rule subscribes to a topic filter
+that also matches the node's own command topic, only the first copy is acted on.
+
+### Redundant brokers
+
+Settings → **MQTT** → **Backup Brokers** takes one `host` or `host:port` per
+line, up to seven. They are tried in order whenever the broker above them cannot
+be reached, one second apart, and the usual backoff only grows after a full sweep
+of the list. A settings change always restarts from the primary. The broker in
+use is reported as `active_host` in the MQTT status.
+
+Each broker is a separate MQTT session, so the node republishes its birth
+certificate after every switch. Brokers must not be clustered behind a shared
+session store unless that store replicates the will message, otherwise a
+failover can leave a stale `NDEATH` undelivered.
 
 ## Use case templates
 

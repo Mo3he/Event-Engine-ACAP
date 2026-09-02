@@ -1153,7 +1153,13 @@
               "username":  { "type": "string" },
               "password":  { "type": "string", "format": "password", "description": "Write-only. Never returned in GET responses." },
               "keepalive": { "type": "integer", "default": 60 },
-              "use_tls":   { "type": "boolean", "default": false, "description": "Enable TLS for the broker connection." }
+              "use_tls":   { "type": "boolean", "default": false, "description": "Enable TLS for the broker connection." },
+              "servers":   {
+                "type": "array",
+                "maxItems": 7,
+                "items": { "type": "string", "example": "backup.example.com:1883" },
+                "description": "Backup brokers as 'host' or 'host:port', tried in order when the primary is unreachable. A bare host reuses the primary port."
+              }
             }
           }
         }
@@ -1698,6 +1704,7 @@
                     "device_id":      { "type": "string" },
                     "primary_host_id":{ "type": "string" },
                     "online":         { "type": "boolean", "description": "Connected and birth certificate published" },
+                    "host_online":    { "type": "boolean", "description": "State of the configured primary host. Data is buffered while false. Always true when no primary host is configured." },
                     "birth_sent":     { "type": "boolean" },
                     "bdseq":          { "type": "integer", "description": "Birth/death sequence, persisted across restarts" },
                     "seq":            { "type": "integer", "description": "Next Sparkplug sequence number (0-255)" },

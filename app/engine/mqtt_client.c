@@ -44,6 +44,9 @@
 #define RECONNECT_DELAY_MAX  60
 #define MAX_SUBSCRIPTIONS    32
 #define MQTT_BUF_SIZE      4096
+/* Largest packet we are willing to assemble for sending. Sparkplug birth
+ * certificates are the biggest thing we produce and stay far below this. */
+#define MQTT_MAX_PACKET    (1024 * 1024)
 #define MQTT_WILL_MAX      1024
 #define MQTT_MAX_INFLIGHT    64   /* unacknowledged QoS 1 publishes held for resend */
 #define MQTT_ACK_TIMEOUT_SEC  5
@@ -83,6 +86,15 @@ static int                   will_len    = 0;
 static int                   will_qos    = 0;
 static int                   will_retain = 0;
 
+/* Index into cfg.servers of the broker currently being used, and a snapshot of
+ * it for status reporting. `cfg`, `server_index` and the active host are shared
+ * between the worker thread and the settings/status callers, so every access
+ * outside MQTT_Init goes through cfg_lock. */
+static pthread_mutex_t       cfg_lock = PTHREAD_MUTEX_INITIALIZER;
+static int                   server_index = 0;
+static char                  active_host[256] = "";
+static int                   active_port = 0;
+
 /* QoS 1 publishes awaiting a PUBACK. The whole serialised packet is kept so a
  * resend only has to set the DUP flag. Clean sessions cannot be resumed, so the
  * queue is dropped on disconnect rather than replayed. */
@@ -106,15 +118,26 @@ typedef struct {
     uint8_t* data;
     int      len;
     int      cap;
+    int      failed;   /* sticky: set when an allocation could not be satisfied */
 } Buf;
 
-static void buf_init(Buf* b) { b->data = malloc(64); b->cap = 64; b->len = 0; }
-static void buf_free(Buf* b) { free(b->data); b->data = NULL; b->len = b->cap = 0; }
+static void buf_init(Buf* b) {
+    b->data = malloc(64);
+    b->cap = b->data ? 64 : 0;
+    b->len = 0;
+    b->failed = b->data ? 0 : 1;
+}
+static void buf_free(Buf* b) { free(b->data); b->data = NULL; b->len = b->cap = 0; b->failed = 0; }
 
 static void buf_append(Buf* b, const uint8_t* src, int n) {
+    if (b->failed || n < 0) return;
+    if (n > MQTT_MAX_PACKET || b->len > MQTT_MAX_PACKET - n) { b->failed = 1; return; }
     if (b->len + n > b->cap) {
-        b->cap = b->len + n + 64;
-        b->data = realloc(b->data, b->cap);
+        int cap = b->len + n + 64;
+        uint8_t* grown = realloc(b->data, cap);
+        if (!grown) { b->failed = 1; return; }   /* b->data still valid, freed by buf_free */
+        b->data = grown;
+        b->cap  = cap;
     }
     memcpy(b->data + b->len, src, n);
     b->len += n;
@@ -395,7 +418,7 @@ static int recv_exact(int fd, SSL* ssl, uint8_t* buf, int n, int timeout_sec) {
 /* =====================================================
  * MQTT packet builders
  * ===================================================== */
-static int send_connect(int fd, SSL* ssl) {
+static int send_connect(int fd, SSL* ssl, const MQTT_Config* c) {
     Buf payload; buf_init(&payload);
     buf_append_str(&payload, "MQTT");           /* protocol name */
     buf_append_u8(&payload, 4);                 /* protocol level 3.1.1 */
@@ -409,19 +432,19 @@ static int send_connect(int fd, SSL* ssl) {
         connect_flags |= (uint8_t)((will_qos & 0x03) << 3); /* will QoS */
         if (will_retain) connect_flags |= 0x20;
     }
-    if (cfg.username[0]) connect_flags |= 0x80;
-    if (cfg.username[0] && cfg.password[0]) connect_flags |= 0x40;
+    if (c->username[0]) connect_flags |= 0x80;
+    if (c->username[0] && c->password[0]) connect_flags |= 0x40;
     buf_append_u8(&payload, connect_flags);
-    buf_append_u16(&payload, (uint16_t)(cfg.keepalive > 0 ? cfg.keepalive : 60));
-    buf_append_str(&payload, cfg.client_id[0] ? cfg.client_id : "acap_event_engine");
+    buf_append_u16(&payload, (uint16_t)(c->keepalive > 0 ? c->keepalive : 60));
+    buf_append_str(&payload, c->client_id[0] ? c->client_id : "acap_event_engine");
     if (have_will) {
         buf_append_str(&payload, will_topic);
         buf_append_bytes(&payload, will_payload, will_len);
     }
     pthread_mutex_unlock(&will_lock);
 
-    if (cfg.username[0]) buf_append_str(&payload, cfg.username);
-    if (cfg.username[0] && cfg.password[0]) buf_append_str(&payload, cfg.password);
+    if (c->username[0]) buf_append_str(&payload, c->username);
+    if (c->username[0] && c->password[0]) buf_append_str(&payload, c->password);
 
     uint8_t rl[4];
     int rl_len = encode_remaining_length(rl, payload.len);
@@ -432,6 +455,7 @@ static int send_connect(int fd, SSL* ssl) {
     buf_append(&pkt, payload.data, payload.len);
     buf_free(&payload);
 
+    if (pkt.failed) { LOG_WARN("could not build CONNECT packet"); buf_free(&pkt); return 0; }
     int ret = send_all(fd, ssl, pkt.data, pkt.len);
     buf_free(&pkt);
     return ret > 0 ? 1 : 0;
@@ -466,6 +490,7 @@ static int send_subscribe(int fd, SSL* ssl, const char* topic_filter) {
     buf_append(&pkt, payload.data, payload.len);
     buf_free(&payload);
 
+    if (pkt.failed) { buf_free(&pkt); pthread_mutex_unlock(&send_lock); return 0; }
     int ret = send_all(fd, ssl, pkt.data, pkt.len);
     buf_free(&pkt);
     pthread_mutex_unlock(&send_lock);
@@ -489,6 +514,7 @@ static int send_unsubscribe(int fd, SSL* ssl, const char* topic_filter) {
     buf_append(&pkt, payload.data, payload.len);
     buf_free(&payload);
 
+    if (pkt.failed) { buf_free(&pkt); pthread_mutex_unlock(&send_lock); return 0; }
     int ret = send_all(fd, ssl, pkt.data, pkt.len);
     buf_free(&pkt);
     pthread_mutex_unlock(&send_lock);
@@ -625,6 +651,7 @@ static void handle_publish(const uint8_t* buf, int remaining_len, uint8_t qos, i
     if (pos + topic_len > remaining_len) return;
 
     char* topic = malloc(topic_len + 1);
+    if (!topic) return;
     memcpy(topic, buf + pos, topic_len);
     topic[topic_len] = '\0';
     pos += topic_len;
@@ -639,10 +666,12 @@ static void handle_publish(const uint8_t* buf, int remaining_len, uint8_t qos, i
 
     int payload_len = remaining_len - pos;
     char* payload = malloc(payload_len + 1);
+    if (!payload) { free(topic); return; }
     memcpy(payload, buf + pos, payload_len);
     payload[payload_len] = '\0';
 
     IncomingMsg* m = malloc(sizeof(IncomingMsg));
+    if (!m) { free(topic); free(payload); return; }
     m->topic       = topic;
     m->payload     = payload;
     m->payload_len = payload_len;
@@ -652,6 +681,31 @@ static void handle_publish(const uint8_t* buf, int remaining_len, uint8_t qos, i
 /* =====================================================
  * Worker thread — connect, receive loop, keepalive
  * ===================================================== */
+/* Advance to the next broker in the list after a failed attempt.
+ * Returns 1 when the list wrapped back to the primary. */
+static int next_server(int count) {
+    if (count <= 1) return 1;
+    pthread_mutex_lock(&cfg_lock);
+    server_index = (server_index + 1) % count;
+    int wrapped = (server_index == 0);
+    pthread_mutex_unlock(&cfg_lock);
+    return wrapped;
+}
+
+/* Sleep between connection attempts, but wake immediately when the settings
+ * change so a corrected broker address is not stuck behind a long backoff. */
+static void wait_before_retry(int secs) {
+    if (wake_pipe[0] < 0 || shutdown_pipe[0] < 0) { sleep(secs); return; }
+    fd_set rfds; FD_ZERO(&rfds);
+    FD_SET(wake_pipe[0], &rfds);
+    FD_SET(shutdown_pipe[0], &rfds);
+    int maxfd = wake_pipe[0] > shutdown_pipe[0] ? wake_pipe[0] : shutdown_pipe[0];
+    struct timeval tv = { secs, 0 };
+    /* shutdown_pipe is only polled here; the outer loop consumes it. */
+    if (select(maxfd + 1, &rfds, NULL, NULL, &tv) > 0 && FD_ISSET(wake_pipe[0], &rfds))
+        drain_pipe(wake_pipe[0]);
+}
+
 static int do_subscribe_all(int fd, SSL* ssl) {
     pthread_mutex_lock(&sub_lock);
     for (int i = 0; i < sub_count; i++) {
@@ -674,28 +728,66 @@ static void* worker_fn(void* arg) {
         struct timeval tv_zero = {0, 0};
         if (select(shutdown_pipe[0] + 1, &check, NULL, NULL, &tv_zero) > 0) break;
 
-        if (!cfg.enabled || !cfg.host[0]) {
-            sleep(2);
+        /* Take a private copy so a concurrent MQTT_Reconfigure cannot swap the
+         * host out from under us mid-handshake. */
+        MQTT_Config active;
+        pthread_mutex_lock(&cfg_lock);
+        memcpy(&active, &cfg, sizeof(active));
+        pthread_mutex_unlock(&cfg_lock);
+
+        if (!active.enabled || !active.host[0]) {
+            wait_before_retry(2);
             continue;
         }
 
-        LOG("connecting to %s:%d%s", cfg.host, cfg.port, cfg.use_tls ? " with TLS" : "");
+        /* Pick the broker to try. Entry 0 is the primary; the list wraps. */
+        int count = active.server_count > 0 ? active.server_count : 1;
+        if (count > MQTT_MAX_SERVERS) count = MQTT_MAX_SERVERS;
+
+        pthread_mutex_lock(&cfg_lock);
+        if (server_index >= count) server_index = 0;
+        int idx = server_index;
+        pthread_mutex_unlock(&cfg_lock);
+
+        char cur_host[256];
+        int  cur_port;
+        if (active.server_count > 0) {
+            snprintf(cur_host, sizeof(cur_host), "%s", active.servers[idx].host);
+            cur_port = active.servers[idx].port;
+        } else {
+            snprintf(cur_host, sizeof(cur_host), "%s", active.host);
+            cur_port = active.port;
+        }
+        if (!cur_host[0]) { next_server(count); wait_before_retry(1); continue; }
+
+        pthread_mutex_lock(&cfg_lock);
+        snprintf(active_host, sizeof(active_host), "%s", cur_host);
+        active_port = cur_port;
+        pthread_mutex_unlock(&cfg_lock);
+
+        if (count > 1)
+            LOG("connecting to %s:%d%s (broker %d of %d)", cur_host, cur_port,
+                active.use_tls ? " with TLS" : "", idx + 1, count);
+        else
+            LOG("connecting to %s:%d%s", cur_host, cur_port, active.use_tls ? " with TLS" : "");
         drain_pipe(wake_pipe[0]);   /* ignore reconnect requests made while offline */
-        int fd = tcp_connect(cfg.host, cfg.port);
+        int fd = tcp_connect(cur_host, cur_port);
         if (fd < 0) {
-            LOG_WARN("TCP connect failed, retry in %ds", reconnect_delay);
-            sleep(reconnect_delay);
-            reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
+            int wrapped = next_server(count);
+            LOG_WARN("TCP connect failed, retry in %ds", wrapped ? reconnect_delay : 1);
+            wait_before_retry(wrapped ? reconnect_delay : 1);
+            if (wrapped) reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
             continue;
         }
 
         SSL* ssl = NULL;
-        if (cfg.use_tls) {
-            ssl = tls_connect(fd, cfg.host);
+        if (active.use_tls) {
+            ssl = tls_connect(fd, cur_host);
             if (!ssl) {
                 close(fd);
-                sleep(reconnect_delay);
-                reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
+                int wrapped = next_server(count);
+                wait_before_retry(wrapped ? reconnect_delay : 1);
+                if (wrapped) reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
                 continue;
             }
         }
@@ -703,16 +795,17 @@ static void* worker_fn(void* arg) {
         /* Last chance to register a will for the session about to start. */
         if (state_cb) state_cb(MQTT_STATE_PRECONNECT, state_udata);
 
-        if (!send_connect(fd, ssl) || !recv_connack(fd, ssl)) {
+        if (!send_connect(fd, ssl, &active) || !recv_connack(fd, ssl)) {
             LOG_WARN("MQTT handshake failed, retry in %ds", reconnect_delay);
             tls_close(&ssl);
             close(fd); fd = -1;
+            server_index = (server_index + 1) % count;
             sleep(reconnect_delay);
             reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
             continue;
         }
 
-        LOG("connected to %s:%d", cfg.host, cfg.port);
+        LOG("connected to %s:%d", cur_host, cur_port);
         pthread_mutex_lock(&send_lock);
         sockfd    = fd;
         ssl_conn  = ssl;
@@ -727,7 +820,7 @@ static void* worker_fn(void* arg) {
         if (state_cb) state_cb(MQTT_STATE_CONNECTED, state_udata);
 
         time_t last_ping = time(NULL);
-        int keepalive = cfg.keepalive > 0 ? cfg.keepalive : 60;
+        int keepalive = active.keepalive > 0 ? active.keepalive : 60;
         int forced_reconnect = 0;
 
         /* Receive loop */
@@ -770,11 +863,18 @@ static void* worker_fn(void* arg) {
 
             /* Read remaining length (VLE) */
             int remaining_len = 0;
+            int rl_complete = 0;
             for (int i = 0; i < 4; i++) {
                 uint8_t b;
                 if (recv_exact(fd, ssl, &b, 1, RECV_TIMEOUT_SEC) != 1) goto disconnect;
                 remaining_len += (b & 0x7F) << (7 * i);
-                if (!(b & 0x80)) break;
+                if (!(b & 0x80)) { rl_complete = 1; break; }
+            }
+            if (!rl_complete) {
+                /* A 4th byte with the continuation bit still set is malformed;
+                 * the stream is no longer trustworthy. */
+                LOG_WARN("malformed remaining length, dropping connection");
+                goto disconnect;
             }
 
             /* Read variable header + payload */
@@ -809,7 +909,7 @@ static void* worker_fn(void* arg) {
             break;
         }
 
-        LOG_WARN("disconnected from %s", cfg.host);
+        LOG_WARN("disconnected from %s", active_host);
         pthread_mutex_lock(&send_lock);
         if (sockfd == fd) {
             sockfd = -1;
@@ -899,14 +999,25 @@ void MQTT_Cleanup(void) {
 }
 
 int MQTT_Reconfigure(MQTT_Config* config) {
+    pthread_mutex_lock(&cfg_lock);
     int host_changed = strcmp(cfg.host, config->host) != 0 || cfg.port != config->port || cfg.use_tls != config->use_tls;
     int auth_changed  = strcmp(cfg.username, config->username) != 0 ||
                         strcmp(cfg.password, config->password) != 0 ||
                         strcmp(cfg.client_id, config->client_id) != 0;
-    memcpy(&cfg, config, sizeof(MQTT_Config));
+    int enable_changed = cfg.enabled != config->enabled;
+    int list_changed  = cfg.server_count != config->server_count;
+    for (int i = 0; !list_changed && i < config->server_count && i < MQTT_MAX_SERVERS; i++)
+        list_changed = strcmp(cfg.servers[i].host, config->servers[i].host) != 0 ||
+                       cfg.servers[i].port != config->servers[i].port;
 
-    if ((host_changed || auth_changed) && connected)
-        request_reconnect();
+    memcpy(&cfg, config, sizeof(MQTT_Config));
+    int restart = host_changed || auth_changed || list_changed || enable_changed;
+    if (restart) server_index = 0;   /* always come back to the primary broker */
+    pthread_mutex_unlock(&cfg_lock);
+
+    /* Wake the worker whether or not it is currently connected: while it is
+     * backing off it must pick up the corrected settings straight away. */
+    if (restart) request_reconnect();
     return 1;
 }
 
@@ -979,6 +1090,12 @@ int MQTT_Publish_Binary(const char* topic, const void* payload, int payload_len,
     if (qos > 0) buf_append_u16(&pkt, pid);
     if (payload_len) buf_append(&pkt, (const uint8_t*)payload, payload_len);
 
+    if (pkt.failed) {
+        LOG_WARN("could not build PUBLISH for '%s' (%d bytes)", topic, payload_len);
+        buf_free(&pkt);
+        pthread_mutex_unlock(&send_lock);
+        return 0;
+    }
     int ret = send_all(sockfd, ssl_conn, pkt.data, pkt.len);
     if (ret > 0 && qos > 0) inflight_add(pid, pkt.data, pkt.len);
     buf_free(&pkt);
@@ -1044,12 +1161,17 @@ int MQTT_Is_Connected(void) {
 
 cJSON* MQTT_Status(void) {
     cJSON* obj = cJSON_CreateObject();
+    pthread_mutex_lock(&cfg_lock);
     cJSON_AddBoolToObject(obj,   "enabled",   cfg.enabled);
     cJSON_AddBoolToObject(obj,   "connected", connected);
     cJSON_AddBoolToObject(obj,   "use_tls",   cfg.use_tls);
     cJSON_AddStringToObject(obj, "host",      cfg.host);
     cJSON_AddNumberToObject(obj, "port",      cfg.port);
+    cJSON_AddStringToObject(obj, "active_host", active_host);
+    cJSON_AddNumberToObject(obj, "active_port", active_port);
+    cJSON_AddNumberToObject(obj, "broker_count", cfg.server_count > 0 ? cfg.server_count : 1);
     cJSON_AddStringToObject(obj, "client_id", cfg.client_id);
+    pthread_mutex_unlock(&cfg_lock);
     cJSON_AddNumberToObject(obj, "subscriptions", sub_count);
     cJSON_AddNumberToObject(obj, "qos1_inflight", inflight_count);
     return obj;
