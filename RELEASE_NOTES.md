@@ -9,6 +9,25 @@ usual answer to a Sparkplug requirement is to place an industrial gateway betwee
 the Axis device and the Sparkplug network; with this release the device is the
 edge node itself.
 
+### Installation
+
+The `signed_*.eap` packages are signed with the Axis ACAP signing service and
+install normally on AXIS OS 12.10 and later.
+
+Upgrading from **v1.9.13 or earlier** (which were unsigned) can fail with
+"Couldn't install: app", because the vendor id in the manifest does not match the
+previously installed version. Back up your rules first (Rules → Export), then
+uninstall the old app before installing this one. Upgrading from v1.9.14 onwards
+is a normal in-place install.
+
+Each package is byte-for-byte the built artifact with an armored PGP signature
+appended, so you can check one against its build:
+
+```sh
+head -c $(( $(stat -f%z signed_Event_Engine_1_9_15_aarch64.eap) - 849 )) \
+    signed_Event_Engine_1_9_15_aarch64.eap | shasum -a 256
+```
+
 ### What is new in 1.9.15
 
 - **Sparkplug B Edge Node** settings section: group / edge node / device /
