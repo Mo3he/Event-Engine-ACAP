@@ -945,11 +945,11 @@
       Triggers, conditions, actions.<br>No server or cloud required.
     </p>
     <div class="hero-actions">
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_9_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/signed_Event_Engine_1_9_15_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download aarch64
       </a>
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_9_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/signed_Event_Engine_1_9_15_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download armv7hf
       </a>
@@ -1282,11 +1282,11 @@
       No licenses. No subscriptions. Free forever.
     </p>
     <div class="cta-buttons">
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_9_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/signed_Event_Engine_1_9_15_aarch64.eap" class="btn btn-primary eap-link" data-arch="aarch64">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download aarch64
       </a>
-      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_1_9_9_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
+      <a href="https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/signed_Event_Engine_1_9_15_armv7hf.eap" class="btn btn-primary eap-link" data-arch="armv7hf">
         <svg viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a1 1 0 011 1v7.586l2.293-2.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 10.586V3a1 1 0 011-1z"/><path d="M3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z"/></svg>
         Download armv7hf
       </a>
@@ -1444,10 +1444,14 @@ toggle.addEventListener('click', () => {
     if (badge) badge.textContent = d.name || tag;
     const badgeLink = document.getElementById('hero-badge-link');
     if (badgeLink && d.html_url) badgeLink.href = d.html_url;
-    const underscored = ver.replace(/\./g, '_');
+    /* Match the real asset names: a signed release prefixes them with
+       "signed_" and its tag carries a -Signed suffix, so building the
+       filename from the version alone points at a package that isn't there. */
     document.querySelectorAll('a.eap-link').forEach(a => {
       const arch = a.dataset.arch;
-      if (arch) a.href = `https://github.com/Mo3he/Event-Engine-ACAP/releases/latest/download/Event_Engine_${underscored}_${arch}.eap`;
+      if (!arch) return;
+      const asset = (d.assets || []).find(x => x.name.endsWith(`_${arch}.eap`));
+      if (asset && asset.browser_download_url) a.href = asset.browser_download_url;
     });
   } catch (_) { /* offline — keep hardcoded fallback */ }
 })();
