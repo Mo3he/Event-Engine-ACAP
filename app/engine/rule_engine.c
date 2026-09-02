@@ -481,10 +481,22 @@ int RuleEngine_Add(cJSON* rule_json, char* id_out_37) {
         pthread_mutex_unlock(&store_lock);
         return 0;
     }
+
+    /* An id carried in the body is preserved, but never at the cost of two rules
+     * answering to the same id: get/update/delete would then be ambiguous. */
+    const char* given_id = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "id"));
+    if (given_id && strlen(given_id) >= 8) {
+        for (int i = 0; i < rule_count; i++) {
+            if (strcmp(rules[i].id, given_id) == 0) {
+                pthread_mutex_unlock(&store_lock);
+                LOG_WARN("rule id '%s' already exists — refusing to add a duplicate", given_id);
+                return 0;
+            }
+        }
+    }
+
     Rule* r = &rules[rule_count];
     rule_from_json(r, rule_json);
-    /* Generate or preserve ID */
-    const char* given_id = cJSON_GetStringValue(cJSON_GetObjectItem(rule_json, "id"));
     if (!given_id || strlen(given_id) < 8) gen_uuid(r->id);
     if (id_out_37) snprintf(id_out_37, 37, "%s", r->id);
     rule_count++;
@@ -497,6 +509,16 @@ int RuleEngine_Add(cJSON* rule_json, char* id_out_37) {
     if (enabled) schedule_subscribe(rid, triggers_dup);
     cJSON_Delete(triggers_dup);
     return 1;
+}
+
+int RuleEngine_Exists(const char* id) {
+    if (!id || !*id) return 0;
+    pthread_mutex_lock(&store_lock);
+    int found = 0;
+    for (int i = 0; i < rule_count && !found; i++)
+        found = strcmp(rules[i].id, id) == 0;
+    pthread_mutex_unlock(&store_lock);
+    return found;
 }
 
 int RuleEngine_Update(const char* id, cJSON* rule_json) {

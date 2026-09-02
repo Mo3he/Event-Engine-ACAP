@@ -77,6 +77,9 @@ static int                   shutdown_pipe[2] = {-1, -1};
 static int                   wake_pipe[2] = {-1, -1};
 static pthread_mutex_t       send_lock = PTHREAD_MUTEX_INITIALIZER;
 static char                  subscriptions[MAX_SUBSCRIPTIONS][256];
+/* Several owners (rule triggers, Sparkplug commands) may want the same filter,
+ * so a filter stays subscribed until the last of them releases it. */
+static int                   sub_refs[MAX_SUBSCRIPTIONS];
 static int                   sub_count = 0;
 static pthread_mutex_t       sub_lock  = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t       will_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1111,18 +1114,21 @@ int MQTT_Publish(const char* topic, const char* payload, int retain, int qos) {
 int MQTT_Subscribe(const char* topic_filter) {
     if (!topic_filter) return 0;
     pthread_mutex_lock(&sub_lock);
-    /* Dedup */
     for (int i = 0; i < sub_count; i++) {
         if (strcmp(subscriptions[i], topic_filter) == 0) {
+            sub_refs[i]++;
             pthread_mutex_unlock(&sub_lock);
             return 1;
         }
     }
     if (sub_count >= MAX_SUBSCRIPTIONS) {
         pthread_mutex_unlock(&sub_lock);
+        LOG_WARN("subscription table full (%d) — cannot subscribe '%s'", MAX_SUBSCRIPTIONS, topic_filter);
         return 0;
     }
-    snprintf(subscriptions[sub_count++], 256, "%s", topic_filter);
+    snprintf(subscriptions[sub_count], 256, "%s", topic_filter);
+    sub_refs[sub_count] = 1;
+    sub_count++;
     pthread_mutex_unlock(&sub_lock);
 
     /* Subscribe immediately if connected */
@@ -1136,16 +1142,22 @@ int MQTT_Subscribe(const char* topic_filter) {
 
 void MQTT_Unsubscribe(const char* topic_filter) {
     if (!topic_filter) return;
+    int drop = 0;
     pthread_mutex_lock(&sub_lock);
     for (int i = 0; i < sub_count; i++) {
         if (strcmp(subscriptions[i], topic_filter) == 0) {
-            if (i < sub_count - 1)
+            if (--sub_refs[i] > 0) break;   /* another owner still wants it */
+            if (i < sub_count - 1) {
                 memcpy(subscriptions[i], subscriptions[sub_count - 1], 256);
+                sub_refs[i] = sub_refs[sub_count - 1];
+            }
             sub_count--;
+            drop = 1;
             break;
         }
     }
     pthread_mutex_unlock(&sub_lock);
+    if (!drop) return;
 
     /* Send UNSUBSCRIBE to broker if connected */
     pthread_mutex_lock(&send_lock);

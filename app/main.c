@@ -567,9 +567,18 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     continue;
                 }
 
-                /* Try to add the rule */
+                /* Restoring a backup over the rules it came from should update
+                 * them, not clone every id. */
+                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "id"));
                 char new_id[37] = "";
-                if (RuleEngine_Add(rule_item, new_id)) {
+                int added;
+                if (rid && RuleEngine_Exists(rid)) {
+                    added = RuleEngine_Update(rid, rule_item);
+                    snprintf(new_id, sizeof(new_id), "%s", rid);
+                } else {
+                    added = RuleEngine_Add(rule_item, new_id);
+                }
+                if (added) {
                     cJSON* imported_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(imported_obj, "index", total - 1);
                     cJSON_AddStringToObject(imported_obj, "id", new_id);
@@ -580,7 +589,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     cJSON* err_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(err_obj, "index", total - 1);
                     cJSON_AddStringToObject(err_obj, "rule_name", rname ? rname : "unknown");
-                    cJSON_AddStringToObject(err_obj, "error", "Failed to add rule");
+                    cJSON_AddStringToObject(err_obj, "error", "Failed to import rule");
                     cJSON_AddItemToArray(errors_array, err_obj);
                 }
             }
@@ -624,12 +633,21 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
             if (!result) { ACAP_HTTP_Respond_Error(resp, 404, "Rule not found"); return; }
             ACAP_HTTP_Respond_Text(resp, "OK");
         } else {
-            /* POST (no id) → create new rule */
+            /* POST (no id) → create new rule, unless the body names one that
+             * already exists, in which case this is an update. */
             if (id) free(id);
             char error[256] = "";
             if (!validate_rule_json(body, error, sizeof(error))) {
                 cJSON_Delete(body);
                 ACAP_HTTP_Respond_Error(resp, 400, error);
+                return;
+            }
+            const char* body_id = cJSON_GetStringValue(cJSON_GetObjectItem(body, "id"));
+            if (body_id && RuleEngine_Exists(body_id)) {
+                int updated = RuleEngine_Update(body_id, body);
+                cJSON_Delete(body);
+                if (!updated) { ACAP_HTTP_Respond_Error(resp, 500, "Failed to update rule"); return; }
+                ACAP_HTTP_Respond_Text(resp, "OK");
                 return;
             }
             char new_id[37] = "";

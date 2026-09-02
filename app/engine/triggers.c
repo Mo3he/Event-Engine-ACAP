@@ -237,6 +237,8 @@ void Triggers_Unsubscribe_Rule(const char* rule_id) {
         if (strcmp(subs[i].rule_id, rule_id) == 0) {
             if (subs[i].acap_subscription_id > 0)
                 ACAP_EVENTS_Unsubscribe(subs[i].acap_subscription_id);
+            if (subs[i].type == TRIG_MQTT_MESSAGE && subs[i].mqtt_topic_filter[0])
+                MQTT_Unsubscribe(subs[i].mqtt_topic_filter);
             if (subs[i].topic_filter) cJSON_Delete(subs[i].topic_filter);
             if (subs[i].cached_data)  cJSON_Delete(subs[i].cached_data);
             if (i < sub_count - 1)

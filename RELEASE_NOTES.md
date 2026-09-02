@@ -82,6 +82,14 @@ Protobuf encoding is implemented in-tree, so no new libraries are bundled.
   pointer under memory pressure.
 - Sparkplug: a failed replay of buffered samples discarded them anyway, losing
   exactly the data the buffer exists to protect.
+- **Deleting a rule left its MQTT topic subscribed.** The broker kept delivering
+  on that topic for the life of the app. Subscriptions are now released when a
+  rule is deleted, disabled or edited, and are reference counted so one rule
+  releasing a topic cannot cut off another rule or the Sparkplug command feed.
+- **Posting a rule whose body carried an existing id created a second rule with
+  the same id**, leaving get, update and delete ambiguous. Importing a backup on
+  top of the rules it came from duplicated every one of them. Such a request now
+  updates the existing rule.
 - Settings: repeated no-op settings callbacks no longer cycle ACAP event
   subscriptions.
 

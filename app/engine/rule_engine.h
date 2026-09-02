@@ -29,6 +29,7 @@ void   RuleEngine_Cleanup(void);
 cJSON* RuleEngine_List(void);                                   /* caller cJSON_Delete */
 cJSON* RuleEngine_Get(const char* id);                          /* caller cJSON_Delete */
 int    RuleEngine_Add(cJSON* rule_json, char* id_out_37);       /* id_out_37 receives the assigned UUID */
+int    RuleEngine_Exists(const char* id);
 int    RuleEngine_Update(const char* id, cJSON* rule_json);
 int    RuleEngine_Delete(const char* id);
 int    RuleEngine_IsEnabled(const char* id);
