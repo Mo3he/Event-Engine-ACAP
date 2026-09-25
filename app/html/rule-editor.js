@@ -3386,7 +3386,7 @@ async function saveRule() {
 
   for (let i = 0; i < triggerRows.length; i++) {
     const t = triggerRows[i];
-    if ((t.type === 'vapix_event' || t.type === 'io_input') && !t.topic0) {
+    if (t.type === 'vapix_event' && !t.topic0) {
       toast(`Trigger ${i + 1}: Please select a device event from the dropdown`, 'error');
       return;
     }

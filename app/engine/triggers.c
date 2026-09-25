@@ -168,6 +168,24 @@ static cJSON* build_subscription_decl(const char* rule_id, int tidx, cJSON* cfg)
     return decl;
 }
 
+static void add_topic(cJSON* obj, const char* key, const char* ns, const char* value) {
+    cJSON* t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, ns, value);
+    cJSON_AddItemToObject(obj, key, t);
+}
+
+/* The editor never sets topics for io_input, so default to the digital input
+ * port event, or the supervised one for the cut/short edges. */
+static cJSON* io_input_default_topics(cJSON* trig) {
+    const char* edge = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "edge"));
+    int supervised = edge && (strcmp(edge, "cut") == 0 || strcmp(edge, "short") == 0);
+    cJSON* topics = cJSON_CreateObject();
+    add_topic(topics, "topic0", "tns1", "Device");
+    add_topic(topics, "topic1", "tnsaxis", "IO");
+    add_topic(topics, "topic2", "tnsaxis", supervised ? "SupervisedPort" : "Port");
+    return topics;
+}
+
 /*-----------------------------------------------------
  * Check if a VAPIX event matches a subscription's topic filter
  *-----------------------------------------------------*/
@@ -269,11 +287,16 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
         if (strcmp(type, "vapix_event") == 0 || strcmp(type, "io_input") == 0) {
             s->type = (strcmp(type, "io_input") == 0) ? TRIG_IO_INPUT : TRIG_VAPIX_EVENT;
 
+            cJSON* io_topics = NULL;
+            cJSON* topic_src = trig;
+            if (s->type == TRIG_IO_INPUT && !cJSON_GetObjectItem(trig, "topic0"))
+                topic_src = io_topics = io_input_default_topics(trig);
+
             /* Store topic filter for demuxing */
             cJSON* tf = cJSON_CreateObject();
             const char* tkeys[] = {"topic0","topic1","topic2","topic3",NULL};
             for (int k = 0; tkeys[k]; k++) {
-                cJSON* t = cJSON_GetObjectItem(trig, tkeys[k]);
+                cJSON* t = cJSON_GetObjectItem(topic_src, tkeys[k]);
                 if (t) cJSON_AddItemToObject(tf, tkeys[k], cJSON_Duplicate(t, 1));
             }
             s->topic_filter = tf;
@@ -324,12 +347,13 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
 
             /* Subscribe to VAPIX events */
             if (strcmp(type, "vapix_event") == 0 || strcmp(type, "io_input") == 0) {
-                cJSON* decl = build_subscription_decl(rule_id, idx, trig);
+                cJSON* decl = build_subscription_decl(rule_id, idx, topic_src);
                 int sub_id = ACAP_EVENTS_Subscribe(decl, NULL);
                 cJSON_Delete(decl);
                 s->acap_subscription_id = sub_id;
                 if (!sub_id) LOG_WARN("VAPIX subscribe failed for rule %s trigger %d", rule_id, idx);
             }
+            cJSON_Delete(io_topics);
 
         } else if (strcmp(type, "http_webhook") == 0) {
             s->type = TRIG_HTTP_WEBHOOK;
@@ -524,7 +548,8 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
             if (s->io_port > 0) {
                 cJSON* port_j = cJSON_GetObjectItem(event, "port");
                 int event_port = port_j && cJSON_IsNumber(port_j) ? (int)port_j->valuedouble : -1;
-                if (event_port != s->io_port) continue;
+                /* Rules number ports from 1; the event's port is 0-based ("Port 1" = 0). */
+                if (event_port != s->io_port - 1) continue;
             }
 
             if (s->io_edge == 3) {

@@ -32,6 +32,9 @@ static int cond_remote_scheme(const char** host) {
     return 0;
 }
 
+/* AXIS OS 12 offers only Basic over HTTPS; never allow Basic over plain HTTP. */
+#define REMOTE_AUTH(https) ((https) ? (CURLAUTH_DIGEST | CURLAUTH_BASIC) : CURLAUTH_DIGEST)
+
 /* Read remote_host from cfg, prefixing "https://" when the per-target
  * remote_https flag is set. Returns buf if a remote host is configured, or
  * NULL for a local target. */
@@ -289,12 +292,16 @@ static int cond_counter(cJSON* cfg) {
 
 struct curl_buf { char* data; size_t size; };
 
+/* Bounds memory only: an unfiltered PullPoint reply is already ~27 KB on a camera. */
+#define COND_MAX_RESPONSE (1024 * 1024)
+
 static size_t http_check_write(void* ptr, size_t sz, size_t nmemb, void* userdata) {
     struct curl_buf* buf = (struct curl_buf*)userdata;
     size_t new_size = buf->size + sz * nmemb;
-    if (new_size > 4096) return 0; /* cap response size */
-    buf->data = realloc(buf->data, new_size + 1);
-    if (!buf->data) return 0;
+    if (new_size > COND_MAX_RESPONSE) return 0;
+    char* grown = realloc(buf->data, new_size + 1);
+    if (!grown) return 0;
+    buf->data = grown;
     memcpy(buf->data + buf->size, ptr, sz * nmemb);
     buf->size = new_size;
     buf->data[buf->size] = '\0';
@@ -314,7 +321,7 @@ static char* cond_remote_get(const char* host, const char* user, const char* pas
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buf);
     CURLcode res = curl_easy_perform(curl);
@@ -341,7 +348,7 @@ static char* cond_remote_post(const char* host, const char* user, const char* pa
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);
@@ -370,7 +377,7 @@ static char* cond_remote_soap_post(const char* host, const char* user, const cha
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, soap_body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, http_check_write);

@@ -582,6 +582,9 @@ static int remote_scheme(const char** host) {
     return 0;
 }
 
+/* AXIS OS 12 offers only Basic over HTTPS; never allow Basic over plain HTTP. */
+#define REMOTE_AUTH(https) ((https) ? (CURLAUTH_DIGEST | CURLAUTH_BASIC) : CURLAUTH_DIGEST)
+
 /* Read remote_host from cfg, prefixing "https://" when the per-target
  * remote_https flag is set. Writes into buf; returns buf if a remote host is
  * configured, or NULL for a local target. */
@@ -661,7 +664,7 @@ static char* remote_vapix_post(const char* host, const char* user, const char* p
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
@@ -690,7 +693,7 @@ static char* remote_vapix_get(const char* host, const char* user, const char* pa
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     CURLcode res = curl_easy_perform(curl);
@@ -717,7 +720,7 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
@@ -747,7 +750,7 @@ static char* remote_vapix_put_path(const char* host, const char* user, const cha
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
@@ -777,7 +780,7 @@ static char* remote_vapix_get_path(const char* host, const char* user, const cha
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     CURLcode res = curl_easy_perform(curl);
@@ -805,7 +808,7 @@ static char* remote_soap_post(const char* host, const char* user, const char* pa
     if (https) { curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L); }
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, soap_body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);

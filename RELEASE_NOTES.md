@@ -1,5 +1,43 @@
 # Release Notes
 
+## v1.9.16 - Bug fixes
+
+Fixes for five bugs, all reproduced on a real device (AXIS P3288-LV, AXIS OS 12.11)
+before being fixed and verified after.
+
+### Upgrading to 1.9.16
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade from v1.9.14 or later. Upgrading from v1.9.13 or earlier needs
+an uninstall first (export your rules before); see the v1.9.15 notes below.
+
+### Fixes in 1.9.16
+
+- **I/O Input triggers work.** Rules with an I/O Input trigger could not be
+  saved ("missing topic0"), including the built-in and use-case templates that
+  use one, and the trigger never had an event subscription of its own. It now
+  subscribes to the digital input port event (the supervised input event for the
+  cut/short edges) and matches the port number correctly: rules count ports from
+  1, while the device event counts from 0.
+- **Remote device conditions work.** A `vapix_event_state` condition on a remote
+  device always evaluated false, because the device's reply (about 27 KB on a
+  camera) exceeded a 4 KB response limit. The same limit made `http_check`
+  conditions fail on any response larger than 4 KB. The limit is now 1 MB.
+- **Remote devices over HTTPS.** Remote actions and conditions with HTTPS
+  enabled were rejected (HTTP 401) by devices that only offer Basic
+  authentication over HTTPS, as AXIS OS 12 does by default. Basic is now allowed
+  over HTTPS; plain HTTP still uses Digest only, so passwords are never sent in
+  clear.
+- **Event log order after a restart.** The event history was reloaded in
+  reverse, so the API returned the oldest events first, `?limit=N` returned the
+  oldest N, and once the log filled up the newest entries from before the
+  restart were dropped first. The log is now reloaded in time order, which also
+  repairs logs saved by earlier versions.
+- **Rule edits and event delivery.** Saving, enabling, disabling or deleting a
+  rule removed its event subscriptions from the web server thread while events
+  could be arriving on the main thread, with no lock between them. That work now
+  runs on the main thread, like adding subscriptions already did.
+
 ## v1.9.15 — Sparkplug B edge node
 
 Event Engine can now act as a **Sparkplug B edge node**, so an industrial or

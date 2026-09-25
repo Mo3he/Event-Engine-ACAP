@@ -192,16 +192,38 @@ void EventLog_Persist(void) {
     pthread_mutex_unlock(&lock);
 }
 
+typedef struct { cJSON* obj; double ts; int pos; } LoadItem;
+
+static int load_item_cmp(const void* a, const void* b) {
+    const LoadItem* x = a;
+    const LoadItem* y = b;
+    if (x->ts != y->ts) return x->ts < y->ts ? -1 : 1;
+    return x->pos - y->pos;
+}
+
 void EventLog_Load(void) {
     cJSON* arr = ACAP_FILE_Read(EVENT_LOG_PERSIST_FILE);
     if (!arr || !cJSON_IsArray(arr)) { if (arr) cJSON_Delete(arr); return; }
 
-    pthread_mutex_lock(&lock);
+    /* Sorted by time: files written by versions up to 1.9.15 may be newest-first. */
     int n = cJSON_GetArraySize(arr);
-    int start = n > EVENT_LOG_SIZE ? n - EVENT_LOG_SIZE : 0;
-    for (int i = n - 1; i >= start; i--) {
-        cJSON* obj = cJSON_GetArrayItem(arr, i);
-        if (!obj) continue;
+    LoadItem* items = n > 0 ? calloc((size_t)n, sizeof(LoadItem)) : NULL;
+    int m = 0;
+    cJSON* it;
+    cJSON_ArrayForEach(it, arr) {
+        if (!items) break;
+        cJSON* ts_j = cJSON_GetObjectItem(it, "timestamp");
+        items[m].obj = it;
+        items[m].ts  = ts_j ? ts_j->valuedouble : 0;
+        items[m].pos = m;
+        m++;
+    }
+    if (m > 1) qsort(items, (size_t)m, sizeof(LoadItem), load_item_cmp);
+
+    pthread_mutex_lock(&lock);
+    int start = m > EVENT_LOG_SIZE ? m - EVENT_LOG_SIZE : 0;
+    for (int i = start; i < m; i++) {
+        cJSON* obj = items[i].obj;
         LogEntry* e = &entries[head];
         if (e->trigger_snapshot) { cJSON_Delete(e->trigger_snapshot); e->trigger_snapshot = NULL; }
 
@@ -228,5 +250,6 @@ void EventLog_Load(void) {
     }
     persist_dirty = 0;
     pthread_mutex_unlock(&lock);
+    free(items);
     cJSON_Delete(arr);
 }

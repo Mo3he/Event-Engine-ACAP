@@ -334,6 +334,18 @@ static void schedule_subscribe(const char* rule_id, cJSON* triggers) {
     g_idle_add(do_subscribe, w);
 }
 
+/* Unsubscribing touches the unlocked trigger table, so it must run on the main loop too. */
+static gboolean do_unsubscribe(gpointer data) {
+    Triggers_Unsubscribe_Rule((const char*)data);
+    free(data);
+    return G_SOURCE_REMOVE;
+}
+
+static void schedule_unsubscribe(const char* rule_id) {
+    char* copy = strdup(rule_id);
+    if (copy) g_idle_add(do_unsubscribe, copy);
+}
+
 /*-----------------------------------------------------
  * Public API
  *-----------------------------------------------------*/
@@ -531,8 +543,9 @@ int RuleEngine_Update(const char* id, cJSON* rule_json) {
             int enabled = r->enabled;
             pthread_mutex_unlock(&store_lock);
 
-            Triggers_Unsubscribe_Rule(id);
+            /* do_subscribe drops the old subscriptions first */
             if (enabled) schedule_subscribe(id, triggers_dup);
+            else         schedule_unsubscribe(id);
             cJSON_Delete(triggers_dup);
             return 1;
         }
@@ -552,7 +565,7 @@ int RuleEngine_Delete(const char* id) {
             rule_count--;
             rules_save_locked();
             pthread_mutex_unlock(&store_lock);
-            Triggers_Unsubscribe_Rule(id);
+            schedule_unsubscribe(id);
             return 1;
         }
     }
@@ -584,8 +597,8 @@ int RuleEngine_SetEnabled(const char* id, int enabled) {
             rules_save_locked();
             pthread_mutex_unlock(&store_lock);
 
-            Triggers_Unsubscribe_Rule(id);
             if (enabled) schedule_subscribe(id, triggers_dup);
+            else         schedule_unsubscribe(id);
             cJSON_Delete(triggers_dup);
             return 1;
         }
