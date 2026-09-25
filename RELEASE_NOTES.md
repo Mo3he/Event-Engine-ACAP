@@ -2,7 +2,7 @@
 
 ## v1.9.16 - Bug fixes
 
-Fixes for five bugs, all reproduced on a real device (AXIS P3288-LV, AXIS OS 12.11)
+Fixes for six bugs, all reproduced on a real device (AXIS P3288-LV, AXIS OS 12.11)
 before being fixed and verified after.
 
 ### Upgrading to 1.9.16
@@ -28,6 +28,10 @@ an uninstall first (export your rules before); see the v1.9.15 notes below.
   authentication over HTTPS, as AXIS OS 12 does by default. Basic is now allowed
   over HTTPS; plain HTTP still uses Digest only, so passwords are never sent in
   clear.
+- **"Load" buttons honour "Use HTTPS".** The rule editor's Load buttons for a
+  remote device (PTZ presets, audio clips, sirens, events, parameters and so on)
+  always connected over plain HTTP, so they failed against devices in HTTPS-only
+  mode. They now use HTTPS when the row has it ticked.
 - **Event log order after a restart.** The event history was reloaded in
   reverse, so the API returned the oldest events first, `?limit=N` returned the
   oldest N, and once the log filled up the newest entries from before the

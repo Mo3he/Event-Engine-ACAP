@@ -1089,7 +1089,7 @@ static void HTTP_Fire(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 /*=====================================================
  * POST /local/acap_event_engine/remote-caps
  * Proxy VAPIX capability queries to a remote Axis device.
- * Body: { "host":"IP", "user":"root", "pass":"pass", "query":"<query>" }
+ * Body: { "host":"IP", "user":"root", "pass":"pass", "https":false, "query":"<query>" }
  *   query: ptz|audio|siren|privacy|guardtour|acap|param|allparams|aoa|
  *          vapix_events|paging
  * Returns the parsed capability list as a JSON array.
@@ -1107,18 +1107,32 @@ static size_t rc_write_cb(void* ptr, size_t sz, size_t n, void* ud) {
     return add;
 }
 
+/* Strips an https:// prefix; Axis devices use self-signed certs, so skip verification. */
+static int rc_scheme(CURL* curl, const char** host) {
+    if (strncmp(*host, "https://", 8) != 0) {
+        curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
+        return 0;
+    }
+    *host += 8;
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    /* AXIS OS 12 offers only Basic over HTTPS; never allow Basic over plain HTTP. */
+    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST | CURLAUTH_BASIC);
+    return 1;
+}
+
 static char* rc_get(const char* host, const char* user, const char* pass, const char* path) {
-    char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
-    char userpwd[512];
-    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
+    int https = rc_scheme(curl, &host);
+    char url[512];
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
     char* resp = NULL;
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rc_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp);
     CURLcode res = curl_easy_perform(curl);
@@ -1130,18 +1144,18 @@ static char* rc_get(const char* host, const char* user, const char* pass, const 
 
 static char* rc_post(const char* host, const char* user, const char* pass,
                      const char* path, const char* body) {
-    char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
-    char userpwd[512];
-    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
+    int https = rc_scheme(curl, &host);
+    char url[512];
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
     char* resp = NULL;
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rc_write_cb);
@@ -1156,18 +1170,18 @@ static char* rc_post(const char* host, const char* user, const char* pass,
 
 static char* rc_post_soap(const char* host, const char* user, const char* pass,
                           const char* path, const char* body) {
-    char url[512];
-    snprintf(url, sizeof(url), "http://%s%s", host, path);
-    char userpwd[512];
-    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
     CURL* curl = curl_easy_init();
     if (!curl) return NULL;
+    int https = rc_scheme(curl, &host);
+    char url[512];
+    snprintf(url, sizeof(url), https ? "https://%s%s" : "http://%s%s", host, path);
+    char userpwd[512];
+    snprintf(userpwd, sizeof(userpwd), "%s:%s", user, pass);
     char* resp = NULL;
     struct curl_slist* hdrs = curl_slist_append(NULL, "Content-Type: application/soap+xml; charset=utf-8");
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_USERPWD, userpwd);
-    curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, rc_write_cb);
@@ -1200,6 +1214,12 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
     }
     if (!user) user = "";
     if (!pass) pass = "";
+
+    char https_host[192];
+    if (cJSON_IsTrue(cJSON_GetObjectItem(body, "https")) && strncmp(host, "https://", 8) != 0) {
+        snprintf(https_host, sizeof(https_host), "https://%s", host);
+        host = https_host;
+    }
 
     cJSON* result = cJSON_CreateArray();
 

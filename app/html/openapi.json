@@ -1864,6 +1864,7 @@
                   "host":  { "type": "string", "description": "IP address or hostname of the remote Axis device", "example": "192.168.1.100" },
                   "user":  { "type": "string", "description": "Username on the remote device", "default": "root" },
                   "pass":  { "type": "string", "description": "Password on the remote device" },
+                  "https": { "type": "boolean", "description": "Connect over HTTPS (certificate not verified)", "default": false },
                   "query": {
                     "type": "string",
                     "enum": ["ptz", "audio", "siren", "privacy", "guardtour", "acap"],

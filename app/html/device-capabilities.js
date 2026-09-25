@@ -3,15 +3,20 @@
 /* key = "host:::query", value = array */
 const remoteCapCache = {};
 
+function rowHttps(row) {
+  const el = row.querySelector('[data-k="remote_https"]');
+  return !!(el && el.checked);
+}
+
 /* Queries a remote Axis device via the /remote-caps proxy; returns the result array, or null on failure. */
-async function fetchRemoteCaps(query, host, user, pass) {
+async function fetchRemoteCaps(query, host, user, pass, https) {
   const key = `${host}:::${query}`;
   if (remoteCapCache[key]) return remoteCapCache[key];
   try {
     const resp = await fetch('/local/acap_event_engine/remote-caps', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host, user: user || 'root', pass: pass || '', query })
+      body: JSON.stringify({ host, user: user || 'root', pass: pass || '', https: !!https, query })
     });
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -34,7 +39,7 @@ async function loadRemoteCap(rowIndexStr, query) {
   const result = await fetchRemoteCaps(
     query, hostEl.value.trim(),
     userEl ? userEl.value.trim() : 'root',
-    passEl ? passEl.value : '');
+    passEl ? passEl.value : '', rowHttps(row));
   if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
   if (!result) { toast('Could not fetch capabilities from remote device', 'error'); return; }
   const data = { type: actionRows[rowIndex].type };
@@ -59,7 +64,7 @@ async function loadRemoteCondCap(rowIndexStr, query) {
   const result = await fetchRemoteCaps(
     query, host,
     userEl ? userEl.value.trim() : 'root',
-    passEl ? passEl.value : '');
+    passEl ? passEl.value : '', rowHttps(row));
   if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
   if (!result) { toast('Could not fetch options from remote device', 'error'); return; }
 
@@ -92,7 +97,7 @@ async function loadRemotePagingCap(rowIndexStr) {
   const result = await fetchRemoteCaps(
     'paging', host,
     userEl ? userEl.value.trim() : 'root',
-    passEl ? passEl.value : '');
+    passEl ? passEl.value : '', rowHttps(row));
   if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
   if (!result || !result[0]) { toast('Could not fetch paging data from remote device', 'error'); return; }
   const paging = result[0];
@@ -130,6 +135,7 @@ async function loadRemoteActionVapixEvents(rowIndexStr) {
           host,
           user: (userEl ? userEl.value.trim() : '') || 'root',
           pass: passEl ? passEl.value : '',
+          https: rowHttps(row),
           query: 'vapix_events'
         })
       });
@@ -411,6 +417,7 @@ async function fetchParamValues(paramInput) {
           host: hostEl.value.trim(),
           user: userEl ? userEl.value.trim() : 'root',
           pass: passEl ? passEl.value : '',
+          https: rowHttps(row),
           query: 'param',
           param_name: param
         })
