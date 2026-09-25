@@ -205,7 +205,7 @@ static int decode_remaining_length(const uint8_t* buf, int buf_len, int* out_len
 /* =====================================================
  * TCP helpers
  * ===================================================== */
-static int recv_exact(int fd, SSL* ssl, uint8_t* buf, int n, int timeout_sec);  /* forward decl */
+static int recv_exact(int fd, SSL* ssl, uint8_t* buf, int n, int timeout_sec);
 
 static void log_tls_error(const char* context) {
     unsigned long err = ERR_get_error();
@@ -642,10 +642,8 @@ static gboolean dispatch_message(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-/* Parse and dispatch a PUBLISH packet.
- * buf holds the variable header + payload (remaining_len bytes).
- * qos is extracted from the fixed header flags.
- * For QoS 1 we send a PUBACK back on fd. */
+/* Parse and dispatch a PUBLISH packet. buf holds the variable header + payload
+ * (remaining_len bytes); for QoS 1 a PUBACK is sent back on fd. */
 static void handle_publish(const uint8_t* buf, int remaining_len, uint8_t qos, int fd, SSL* ssl) {
     if (remaining_len < 2) return;
     int pos = 0;
@@ -726,7 +724,6 @@ static void* worker_fn(void* arg) {
     uint8_t recv_buf[MQTT_BUF_SIZE];
 
     while (1) {
-        /* Check shutdown */
         fd_set check; FD_ZERO(&check); FD_SET(shutdown_pipe[0], &check);
         struct timeval tv_zero = {0, 0};
         if (select(shutdown_pipe[0] + 1, &check, NULL, NULL, &tv_zero) > 0) break;
@@ -828,14 +825,13 @@ static void* worker_fn(void* arg) {
 
         /* Receive loop */
         while (1) {
-            /* Check shutdown pipe */
             fd_set rfds; FD_ZERO(&rfds);
             FD_SET(fd, &rfds);
             FD_SET(shutdown_pipe[0], &rfds);
             if (wake_pipe[0] >= 0) FD_SET(wake_pipe[0], &rfds);
             int maxfd = fd > shutdown_pipe[0] ? fd : shutdown_pipe[0];
             if (wake_pipe[0] > maxfd) maxfd = wake_pipe[0];
-            struct timeval tv = { 1, 0 }; /* 1s tick */
+            struct timeval tv = { 1, 0 };
             int r = select(maxfd + 1, &rfds, NULL, NULL, &tv);
 
             if (FD_ISSET(shutdown_pipe[0], &rfds)) goto cleanup;
@@ -860,7 +856,6 @@ static void* worker_fn(void* arg) {
 
             if (r <= 0 || !FD_ISSET(fd, &rfds)) continue;
 
-            /* Read fixed header byte */
             uint8_t fhdr;
             if (recv_exact(fd, ssl, &fhdr, 1, RECV_TIMEOUT_SEC) != 1) break;
 
@@ -984,7 +979,6 @@ int MQTT_Init(MQTT_Config* config, MQTT_Message_Callback cb, void* user_data) {
 
 void MQTT_Cleanup(void) {
     if (!thread_running) return;
-    /* Signal shutdown */
     uint8_t sig = 1;
     ssize_t ignored = write(shutdown_pipe[1], &sig, 1);
     (void)ignored;
@@ -1131,7 +1125,6 @@ int MQTT_Subscribe(const char* topic_filter) {
     sub_count++;
     pthread_mutex_unlock(&sub_lock);
 
-    /* Subscribe immediately if connected */
     pthread_mutex_lock(&send_lock);
     int fd = sockfd;
     SSL* ssl = ssl_conn;
@@ -1159,7 +1152,6 @@ void MQTT_Unsubscribe(const char* topic_filter) {
     pthread_mutex_unlock(&sub_lock);
     if (!drop) return;
 
-    /* Send UNSUBSCRIBE to broker if connected */
     pthread_mutex_lock(&send_lock);
     int fd = sockfd;
     SSL* ssl = ssl_conn;

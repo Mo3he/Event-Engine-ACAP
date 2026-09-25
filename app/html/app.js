@@ -132,7 +132,6 @@ document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
     if (btn.dataset.tab === 'log')       loadEvents();
     if (btn.dataset.tab === 'variables') loadVariables();
     if (btn.dataset.tab === 'settings')  { loadStatus(); loadAllSettings(); }
-    /* Stop live tail when leaving the log tab */
     if (btn.dataset.tab !== 'log') {
       toggleLiveTail(false);
       const cb = document.getElementById('log-live-tail');
@@ -192,7 +191,7 @@ function escHtml(s) {
 }
 
 /* ===================================================
- * VAPIX Event Catalog — fetched from the camera at startup
+ * Rule Templates
  * =================================================== */
 const RULE_TEMPLATES = [
   {
@@ -889,7 +888,6 @@ function openTemplateModal() {
   panel.innerHTML = header + `<div id="_tmpl_list" style="max-height:380px;overflow-y:auto;">${items}</div>`;
   document.body.appendChild(panel);
 
-  /* Position below whichever template button triggered it */
   const btn = document.getElementById('btn-template') || document.getElementById('btn-template-empty');
   if (btn) {
     const rect = btn.getBoundingClientRect();
@@ -1025,7 +1023,6 @@ async function loadRules() {
     renderRules();
     updateLogFilter();
     refreshTagFilter();
-    /* Fetch recent events for error indicator */
     API.getEvents(200, '').then(ev => { buildRuleErrorMap(ev); renderRules(); }).catch(() => {});
   } catch(e) {
     toast('Failed to load rules', 'error');
@@ -1268,10 +1265,6 @@ async function exportRule(id) {
 }
 
 /* ===================================================
- * Rule Editor Modal
- * =================================================== */
-
-/* ===================================================
  * Event Log Tab
  * =================================================== */
 async function loadEvents() {
@@ -1343,7 +1336,6 @@ function renderEventLog(events) {
     if (tr.style.display !== 'none') openIds.add(tr.id);
   });
 
-  /* Sort by timestamp descending (newest first) to ensure chronological order */
   events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   tbody.innerHTML = events.map((e) => {
     const d = new Date(e.timestamp * 1000);
@@ -1359,11 +1351,9 @@ function renderEventLog(events) {
     const stableKey = `${e.timestamp}-${(e.rule_id || '').replace(/[^a-z0-9]/gi, '')}`;
     const expandId = `log-detail-${stableKey}`;
     const hasDetail = !!(detailStr || hasError);
-    // Short summary shown inline
     let shortDetail = '';
     if (hasError) shortDetail = e.action_error;
     else if (detailStr) shortDetail = JSON.stringify(detailObj).slice(0, 80) + (JSON.stringify(detailObj).length > 80 ? '…' : '');
-    // Expanded content
     let expandedHtml = '';
     if (hasError) expandedHtml += `<div style="color:var(--error,#f87171);margin-bottom:${detailStr ? '8px' : '0'};font-size:12px;"><svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor" style="vertical-align:middle;margin-right:4px"><path d="M40-120l440-760 440 760H40Zm138-80h604L480-720 178-200Zm302-40q17 0 28.5-11.5T520-280q0-17-11.5-28.5T480-320q-17 0-28.5 11.5T440-280q0 17 11.5 28.5T480-240Zm-40-120h80v-200h-80v200Z"/></svg> ${escHtml(e.action_error)}</div>`;
     if (detailStr) expandedHtml += `<pre style="font-size:11px;color:var(--text-muted);margin:0;white-space:pre-wrap;word-break:break-all;">${escHtml(detailStr)}</pre>`;
@@ -1380,7 +1370,6 @@ function renderEventLog(events) {
     </tr>` : ''}`;
   }).join('');
 
-  /* Re-open any rows that were expanded before the refresh */
   openIds.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = '';
@@ -1453,7 +1442,7 @@ async function loadAcapEvents() {
 }
 
 /* ===================================================
- * Status Tab
+ * Import / Export
  * =================================================== */
 function downloadJSON(filename, data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1466,7 +1455,6 @@ function downloadJSON(filename, data) {
 async function exportRules() {
   try {
     const full = await API.exportRules();
-    /* Inject tags and sort order into exported data */
     const rules = Array.isArray(full) ? full : [full];
     for (const r of rules) {
       const tag = getRuleTag(r.id);
@@ -1490,7 +1478,6 @@ async function importRules(input) {
     /* Support both new format { rules, rule_order } and legacy array format */
     const rawRules = Array.isArray(parsed) ? parsed : (parsed.rules || [parsed]);
     const importedOrder = Array.isArray(parsed.rule_order) ? parsed.rule_order : [];
-    /* Extract tags before stripping IDs */
     const tagMap = {};
     for (const r of rawRules) {
       if (r.tag && r.id) tagMap[r.id] = r.tag;
@@ -1501,17 +1488,14 @@ async function importRules(input) {
     /* If tags or order were present, remap old IDs → new IDs by matching rule name */
     if (Object.keys(tagMap).length || importedOrder.length) {
       const newRules = await API.getRules();
-      /* Build old-id → new-id map via name matching */
       const idMap = {};
       for (const nr of newRules) {
         const orig = rawRules.find(r => r.name === nr.name && r.id && !idMap[r.id]);
         if (orig) idMap[orig.id] = nr.id;
       }
-      /* Restore tags */
       for (const [oldId, tag] of Object.entries(tagMap)) {
         if (idMap[oldId]) setRuleTag(idMap[oldId], tag);
       }
-      /* Restore sort order */
       if (importedOrder.length) {
         const newOrder = importedOrder.map(oldId => idMap[oldId]).filter(Boolean);
         if (newOrder.length) setRuleSortOrder(newOrder);
@@ -1592,9 +1576,6 @@ function startPoll() {
 }
 
 /* ===================================================
- * Init
- * =================================================== */
-/* ===================================================
  * Theme
  * =================================================== */
 function updateThemeButton(theme) {
@@ -1614,7 +1595,6 @@ function toggleTheme() {
   if (appIcon) appIcon.src = next === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
 }
 
-/* Close modal on ESC key */
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     const overlay = document.getElementById('modal-overlay');
@@ -1638,7 +1618,6 @@ window.addEventListener('DOMContentLoaded', () => {
     loadVapixEventCatalog();
     loadAcapEvents();
 
-    /* Check for newer release on GitHub */
     API.getStatus().then(s => {
       if (s && s.engine_version) checkForUpdate(s.engine_version);
     }).catch(() => {});

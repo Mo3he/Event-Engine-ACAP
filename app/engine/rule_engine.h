@@ -8,18 +8,12 @@ extern "C" {
 #endif
 
 /*
- * Rule Engine — core coordinator.
+ * Rule Engine: owns the rule store and wires triggers -> conditions -> actions.
  *
- * Owns the rule store, wires triggers → conditions → actions.
- *
- * Thread safety:
- *   CRUD operations (Add/Update/Delete) may be called from the FastCGI
- *   thread. Event dispatch and Tick are called from the GMainLoop thread.
- *   An internal mutex protects the rule store.
- *
- *   VAPIX event subscriptions are scheduled back onto the main loop via
- *   g_idle_add() from the HTTP handlers — do NOT call
- *   Triggers_Subscribe_Rule directly from a FastCGI callback.
+ * CRUD may be called from the FastCGI thread (store is mutex protected);
+ * dispatch and Tick run on the GMainLoop thread. VAPIX subscriptions are
+ * deferred to the main loop with g_idle_add(), so never call
+ * Triggers_Subscribe_Rule directly from a FastCGI callback.
  */
 
 int    RuleEngine_Init(void);

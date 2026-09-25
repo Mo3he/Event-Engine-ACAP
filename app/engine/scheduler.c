@@ -50,7 +50,7 @@ typedef struct {
     /* astronomical fields */
     double    astro_lat;        /* latitude in degrees */
     double    astro_lon;        /* longitude in degrees */
-    int       astro_event;      /* ASTRO_SUNRISE/SUNSET/DAWN/DUSK */
+    int       astro_event;      /* ASTRO_* event type */
     int       astro_offset_sec; /* offset in seconds (positive = later) */
     int       astro_sod;        /* computed seconds-of-day for today's event (-1 = not yet computed) */
     int       astro_yday;       /* tm_yday when astro_sod was last computed */
@@ -69,14 +69,13 @@ static int parse_cron_field(const char* field, int min_val, int max_val,
     *mask_out = 0;
     if (!field) return 0;
 
-    /* Handle "*" */
     if (strcmp(field, "*") == 0) {
         for (int i = min_val; i <= max_val; i++)
             *mask_out |= (1LL << i);
         return 1;
     }
 
-    /* Handle comma-separated list */
+    /* Comma-separated list of values, ranges (A-B) and steps (/S) */
     char buf[128];
     snprintf(buf, sizeof(buf), "%s", field);
     char* tok;
@@ -164,12 +163,11 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
 
     double lat_r = lat * M_PI / 180.0;
 
-    /* Solar declination (degrees) — Spencer formula approximation */
+    /* Solar declination in radians (Spencer formula) */
     double B = 2.0 * M_PI * (doy - 1) / 365.0;
     double decl = 0.006918 - 0.399912 * cos(B) + 0.070257 * sin(B)
                 - 0.006758 * cos(2.0*B) + 0.000907 * sin(2.0*B)
                 - 0.002697 * cos(3.0*B) + 0.00148  * sin(3.0*B);
-    /* decl is in radians */
 
     /* Equation of time (minutes) */
     double eot = 229.18 * (0.000075 + 0.001868*cos(B) - 0.032077*sin(B)
@@ -207,7 +205,6 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
     long tz_offset_sec = local_tm->tm_gmtoff;
 
     double event_local_sec = event_utc_min * 60.0 + (double)tz_offset_sec;
-    /* Normalize to 0..86400 */
     while (event_local_sec < 0)      event_local_sec += 86400.0;
     while (event_local_sec >= 86400) event_local_sec -= 86400.0;
 

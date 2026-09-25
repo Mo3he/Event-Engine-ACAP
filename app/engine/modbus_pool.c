@@ -1,19 +1,9 @@
 /*
- * modbus_pool.c — self-contained Modbus TCP/RTU connection pool.
+ * modbus_pool.c: self-contained Modbus TCP/RTU connection pool (no libmodbus).
  *
- * No external libmodbus dependency. Uses POSIX sockets (TCP) and
- * termios (RTU/RS-485) to implement the Modbus application protocol.
- *
- * serial_gateway: connects via TCP but speaks RTU framing (CRC, no MBAP).
- * Use with Axis PortManager GenericTCPServer to expose a local RS-485 port.
- *
- * Supported function codes:
- *   0x01  Read Coils
- *   0x02  Read Discrete Inputs
- *   0x03  Read Holding Registers
- *   0x04  Read Input Registers
- *   0x05  Write Single Coil
- *   0x06  Write Single Register
+ * serial_gateway connects via TCP but speaks RTU framing (CRC, no MBAP), for
+ * use with an Axis PortManager GenericTCPServer exposing a local RS-485 port.
+ * Supports FC 0x01-0x04 (reads) and 0x05-0x06 (single writes).
  */
 
 #include <stdio.h>
@@ -31,14 +21,9 @@
 #include <netdb.h>
 #include <termios.h>
 
-/* --- glibc backward-compat shim (OS 13 SDK -> older AXIS OS) ---
- * glibc 2.42 (shipped in the OS 13 SDK / Ubuntu 24.04) introduced new symbol
- * versions for cfsetispeed()/cfsetospeed(). Left alone, the binary would
- * require GLIBC_2.42 and fail to load on older firmware (e.g. AXIS OS 11.x):
- *   libc.so.6: version `GLIBC_2.42' not found
- * These are the ONLY two symbols pulling in GLIBC_2.42, and their behaviour is
- * unchanged for the standard baud rates we use, so pin the references to each
- * architecture's glibc baseline to keep the app loadable on older AXIS OS. */
+/* The OS 13 SDK's glibc 2.42 gave cfsetispeed()/cfsetospeed() new symbol
+ * versions, the only GLIBC_2.42 references, which break loading on older AXIS
+ * OS. Behaviour is unchanged for standard baud rates, so pin the old versions. */
 #if defined(__aarch64__)
 __asm__(".symver cfsetispeed,cfsetispeed@GLIBC_2.17");
 __asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.17");
@@ -136,7 +121,6 @@ static int tcp_connect(struct mb_ctx* c) {
 static int rtu_connect(struct mb_ctx* c) {
     int fd = open(c->device, O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) return -1;
-    /* switch to blocking mode */
     int flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
     struct termios tio;
@@ -389,7 +373,6 @@ mb_ctx_t* modbus_pool_get(cJSON* cfg) {
 
     pthread_mutex_lock(&pool_mutex);
 
-    /* search for existing entry */
     for (int i = 0; i < POOL_MAX; i++) {
         if (pool_used[i] && strcmp(pool[i].key, key) == 0) {
             struct mb_ctx* c = &pool[i];
@@ -398,7 +381,6 @@ mb_ctx_t* modbus_pool_get(cJSON* cfg) {
         }
     }
 
-    /* find a free slot */
     int slot = -1;
     for (int i = 0; i < POOL_MAX; i++) {
         if (!pool_used[i]) { slot = i; break; }

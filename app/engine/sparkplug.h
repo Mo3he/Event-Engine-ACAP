@@ -8,19 +8,14 @@ extern "C" {
 #endif
 
 /*
- * Sparkplug B edge node.
+ * Sparkplug B edge node on top of the shared MQTT connection, so no external
+ * IIoT gateway is needed to reach a Sparkplug host (Ignition, Honeywell EBI, ...).
  *
- * Turns the device into a Sparkplug edge node on top of the shared MQTT broker
- * connection configured in Settings, so no external IIoT gateway is needed to
- * expose device data to a Sparkplug host (Ignition, Honeywell EBI, ...).
- *
- * Owns the whole session state machine: bdSeq, the 0-255 sequence number,
- * NBIRTH before any NDATA, NDEATH registered as the MQTT will, and rebirth on
- * request. Sequence numbers are allocated here and nowhere else.
- *
+ * Owns the session state machine: bdSeq, the 0-255 seq (allocated here and
+ * nowhere else), NBIRTH before any NDATA, NDEATH as the MQTT will, and rebirth.
  * Metrics are declared centrally (Settings -> Sparkplug) so the birth
- * certificate is stable. A metric is published either by a rule action or,
- * when bound to a device event, automatically whenever its value changes.
+ * certificate is stable; each is published by a rule action or, when bound to
+ * a device event, automatically on change.
  */
 
 #define SPB_SPEC_2_2 0

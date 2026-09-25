@@ -9,12 +9,11 @@ extern "C" {
 #endif
 
 /*
- * Modbus connection pool — no external library dependency.
- * Implements Modbus TCP and Modbus RTU (RS-485) using raw
- * POSIX sockets and termios respectively.
+ * Modbus connection pool: Modbus TCP and RTU (RS-485) over raw POSIX sockets
+ * and termios, no external library.
  *
  * cfg JSON fields:
- *   connection_type  "tcp" | "rtu"
+ *   connection_type  "tcp" | "rtu" | "serial_gateway" (RTU framing over TCP)
  *   host             TCP hostname or IP
  *   port             TCP port (default 502)
  *   device           RTU device path (e.g. "/dev/ttyS1")
@@ -33,18 +32,10 @@ void modbus_pool_invalidate(mb_ctx_t* ctx);
 /* Close and free all pooled connections. Call at shutdown. */
 void modbus_pool_release_all(void);
 
-/*
- * Read one 16-bit register.
- *   fc: 0x03 = holding register, 0x04 = input register
- * Returns 0 on success, -1 on error.
- */
+/* Read one 16-bit register (fc 0x03 holding, 0x04 input). Returns 0 on success, -1 on error. */
 int mb_read_register(mb_ctx_t* ctx, int slave_id, int fc, int address, uint16_t* out);
 
-/*
- * Read one coil or discrete input bit.
- *   fc: 0x01 = coil, 0x02 = discrete input
- * Returns 0 on success, -1 on error.
- */
+/* Read one coil or discrete input (fc 0x01 coil, 0x02 input). Returns 0 on success, -1 on error. */
 int mb_read_bit(mb_ctx_t* ctx, int slave_id, int fc, int address, uint8_t* out);
 
 /* Write one 16-bit holding register (FC06). Returns 0 on success, -1 on error. */

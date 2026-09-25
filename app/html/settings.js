@@ -48,7 +48,6 @@ function renderDeviceCapabilities() {
   const rows = [];
   const yesNo = (v, yes) => v ? `<span style="color:var(--accent-success);">${yes}</span>` : `<span style="color:var(--text-dim);">No</span>`;
 
-  /* PTZ */
   if (ptzPresets === null) {
     rows.push(['PTZ', '<span style="color:var(--text-dim);">Loading…</span>']);
   } else if (!ptzPresets.length) {
@@ -58,7 +57,6 @@ function renderDeviceCapabilities() {
     rows.push(['PTZ', `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${total} preset${total !== 1 ? 's' : ''} on ${ptzPresets.length} channel${ptzPresets.length !== 1 ? 's' : ''})</span>`]);
   }
 
-  /* Audio Clips */
   if (audioClips === null) {
     rows.push(['Audio Clips', '<span style="color:var(--text-dim);">Loading…</span>']);
   } else {
@@ -67,7 +65,6 @@ function renderDeviceCapabilities() {
       : yesNo(false)]);
   }
 
-  /* Siren & Light */
   if (sirenProfiles === null) {
     rows.push(['Siren & Light', '<span style="color:var(--text-dim);">Loading…</span>']);
   } else {
@@ -76,17 +73,14 @@ function renderDeviceCapabilities() {
       : yesNo(false)]);
   }
 
-  /* Privacy Masks */
   if (privacyMasks !== null && privacyMasks.length) {
     rows.push(['Privacy Masks', `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${privacyMasks.length})</span>`]);
   }
 
-  /* Guard Tours */
   if (guardTours !== null && guardTours.length) {
     rows.push(['Guard Tours', `<span style="color:var(--accent-success);">Yes</span> <span style="color:var(--text-dim);">(${guardTours.length})</span>`]);
   }
 
-  /* Object Analytics */
   if (aoaScenarios === null) {
     rows.push(['Object Analytics', '<span style="color:var(--text-dim);">Loading…</span>']);
   } else {
@@ -95,7 +89,6 @@ function renderDeviceCapabilities() {
       : yesNo(false)]);
   }
 
-  /* Installed ACAPs */
   if (acapApps !== null && acapApps.length) {
     const apps = acapApps.map(a => escHtml(a.niceName)).join(', ');
     rows.push(['Installed ACAPs', `<span style="font-size:11px;color:var(--text-muted);">${apps}</span>`]);
@@ -115,7 +108,7 @@ function renderDeviceCapabilities() {
 
 
 /* ===================================================
- * MQTT tab
+ * Settings tab
  * =================================================== */
 function updateMqttStatusBadge(mq) {
   const dot  = document.getElementById('mqtt-dot');
@@ -147,16 +140,12 @@ function updateStreamStatusBadge(status) {
     dot.style.background = 'var(--text-dim, #555)';
     text.textContent = 'No clients';
   }
-  /* Fill in the actual camera IP in the URL display */
   if (urlEl && status.device && status.device.ip) {
     urlEl.textContent = `http://${status.device.ip}/local/acap_event_engine/alertStream`;
   }
 }
 
-/*------------------------------------------------------------
- * Solar event calculator (mirrors scheduler.c algorithm)
- * Returns "HH:MM" local time string, or null (polar day/night).
- *------------------------------------------------------------*/
+/* Mirrors engine/scheduler.c. Returns local "HH:MM", or null during polar day/night. */
 function calcSolarEvent(lat, lon, eventType, offsetMin) {
   const now = new Date();
   const start = new Date(now.getFullYear(), 0, 0);
@@ -344,7 +333,6 @@ async function loadMqttSettings(settings) {
     form.querySelector('[name="servers"]').value = (mq.servers || []).join('\n');
     /* Don't pre-fill password — leave placeholder "(unchanged)" */
 
-    /* Also refresh the status badge */
     const status = await API.getStatus();
     updateMqttStatusBadge((status && status.mqtt) || {});
   } catch(e) {
@@ -407,10 +395,8 @@ function updateSparkplugStatusBadge(sp) {
   }
 }
 
-/* The SOAP catalog only carries a namespace prefix on the levels where the XML
- * document declares one ("tnsaxis:CameraApplicationPlatform" but a bare
- * "acap_event_engine" below it), while saved config qualifies every level.
- * Compare local names only — which is also what the event system matches on. */
+/* The SOAP catalog only prefixes levels where the XML declares a namespace, while saved
+ * config qualifies every level, so compare local names (as the event system does). */
 function normalizeTopicPath(path) {
   return String(path || '')
     .split('/')
@@ -451,9 +437,8 @@ function sourceFromTopicPath(path) {
   return source;
 }
 
-/* A binding may reference an event the SOAP catalog does not list (it omits
- * CameraApplicationPlatform topics entirely), so offer both a "keep" option and
- * a way to type a topic path directly. */
+/* The SOAP catalog omits CameraApplicationPlatform topics, so offer "keep" for
+ * unlisted bindings and a way to type a topic path directly. */
 function sparkplugEventOptions(m) {
   const bound  = !!m.source;
   const catIdx = sparkplugCatalogIndex(m);
@@ -812,7 +797,6 @@ async function checkSerialPort() {
       dot.style.background = '#f59e0b';
       text.textContent = isRS485 ? 'RS-485 set, TCP listener not enabled' : 'Not configured';
     }
-    /* Pre-fill baud if already set */
     const m = serRes.match(/BaudRate=(\d+)/);
     if (m) {
       const sel = document.getElementById('serial-baud');

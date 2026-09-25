@@ -21,7 +21,7 @@
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
 #define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "actions: " fmt, ## args)
 
-/* LOG_ERR: logs to syslog, writes to event log for the current rule, and
+/* LOG_ACTION_ERR: logs to syslog, writes to event log for the current rule, and
  * captures into g_action_error so the test endpoint can return it to the UI. */
 static char        g_action_error[512]   = "";
 static const char* g_current_rule_id     = NULL;
@@ -50,7 +50,6 @@ void Actions_Set_Proxy(const char* proxy) {
     snprintf(g_socks5_proxy, sizeof(g_socks5_proxy), "%s", proxy ? proxy : "");
 }
 
-/* Forward declaration — rule_engine.c provides this */
 extern void RuleEngine_Dispatch_RuleFired(const char* rule_id);
 
 /* Forward declarations needed by while_active_undo (defined later in this file) */
@@ -137,7 +136,7 @@ typedef struct {
     int  overlay_channel;
     int  io_port;
     char io_restore[16];   /* opposite state to restore: "open" or "closed" */
-    char recording_id[64]; /* recording ID returned by record/record.cgi */
+    char recording_id[64]; /* legacy recording ID or continuous-recording profile number */
     char clip_name[128];   /* audio clip name for audio_clip while_active stop */
     char remote_host[128]; /* empty = local device */
     char remote_user[64];
@@ -146,7 +145,7 @@ typedef struct {
 static WhileActiveEntry while_active_entries[MAX_WHILE_ACTIVE];
 static int while_active_count = 0;
 
-/* Register a new while_active entry, replacing any existing one for the same rule */
+/* Register a while_active entry, replacing any existing one for the same rule and action type */
 static void while_active_register(WhileActiveEntry* e) {
     for (int i = 0; i < while_active_count; i++) {
         if (strcmp(while_active_entries[i].rule_id, e->rule_id) == 0 &&
@@ -176,10 +175,7 @@ static void while_active_undo(WhileActiveEntry* e) {
         free(body); if (resp) free(resp);
         LOG("while_active: stopped siren '%s' for rule %s", e->siren_profile, e->rule_id);
     } else if (strcmp(e->atype, "recording") == 0) {
-        /* Use the stored recording handle for a precise stop of exactly our
-         * recording. On OS 13 this is a continuous-recording profile number;
-         * on older firmware a legacy recording ID. recording_stop_id() picks
-         * the correct CGI based on the product's capability. */
+        /* Stop exactly our recording via its stored handle (see recording_stop_id). */
         if (e->recording_id[0]) {
             recording_stop_id(is_remote ? e->remote_host : NULL,
                               e->remote_user, e->remote_pass, e->recording_id);
@@ -234,8 +230,7 @@ static void while_active_undo(WhileActiveEntry* e) {
 
 void Actions_Stop_Active_Siren(const char* rule_id) {
     if (!rule_id) return;
-    /* Stop ALL while_active actions for this rule (siren, speaker_display, recording,
-     * overlay, io_output) — called when the backing trigger goes inactive. */
+    /* Undo every while_active action for this rule; called when the backing trigger goes inactive. */
     for (int i = 0; i < while_active_count; ) {
         if (strcmp(while_active_entries[i].rule_id, rule_id) == 0) {
             while_active_undo(&while_active_entries[i]);
@@ -277,14 +272,10 @@ void Actions_Init(void) {
  *   {{var.NAME}}         variable value
  *   {{counter.NAME}}     counter value
  *-----------------------------------------------------*/
-#define MAX_TEMPLATE_OUTPUT (256 * 1024) /* 256 KB cap on expanded template */
+#define MAX_TEMPLATE_OUTPUT (256 * 1024)
 
-/*
- * Internal template expander.  When url_encode_values is non-zero every
- * substituted value is percent-encoded via curl_easy_escape so that
- * characters like '+' (timezone offset) are not misread as spaces by
- * servers that apply application/x-www-form-urlencoded decoding.
- */
+/* url_encode_values percent-encodes each substituted value so a '+' (timezone
+ * offset) is not decoded as a space by form-urlencoded servers. */
 static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url_encode_values) {
     if (!tmpl) return strdup("");
 
@@ -368,23 +359,18 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
                 replacement = tmp;
             }
 
-            /* Apply |N decimal formatting if requested and value is numeric */
             if (has_fmt && replacement && replacement[0]) {
                 char* endp;
                 double numval = strtod(replacement, &endp);
                 if (endp != replacement && *endp == '\0') {
                     snprintf(tmp, sizeof(tmp), "%.*f", dp, numval);
-                    /* If replacement was a dyn_replacement, we can still
-                     * safely switch to tmp since we copy below */
+                    /* Safe even if dyn_replacement is set: it is freed after the copy below */
                     replacement = tmp;
                 }
             }
 
             if (!replacement) replacement = "";
 
-            /* Percent-encode the substituted value when building a URL so
-             * that characters such as '+' in a timezone offset are not
-             * decoded as a space by the receiving server. */
             char* escaped = NULL;
             if (url_encode_values && replacement[0]) {
                 escaped = curl_easy_escape(NULL, replacement, 0);
@@ -433,7 +419,6 @@ static char* expand_url_template(const char* tmpl, cJSON* trigger_data) {
  * Individual action implementations
  *-----------------------------------------------------*/
 
-/* Forward declaration — execute_from is defined later in this file, but called by action_http_request */
 static void execute_from(const char* rule_id, cJSON* actions_array,
                          int start_index, cJSON* trigger_data);
 
@@ -484,16 +469,13 @@ static char* base64_wrap_lines(const char* b64, size_t line_len) {
     return out;
 }
 
-/* Some cameras can return a black first JPEG when the imaging pipeline is idle.
- * Warm up by grabbing one frame, then return the next frame for use in actions. */
+/* Some models (e.g. door stations) return black/low-detail JPEGs while the
+ * imaging pipeline warms up, so grab 6 frames 200 ms apart and keep the largest. */
 static char* capture_snapshot_jpeg_warm_channel(int channel, size_t* out_len) {
     if (out_len) *out_len = 0;
 
-    /* Some models (including door stations) may return low-detail/black frames
-     * during warm-up. Capture a short burst and keep the most data-rich frame
-     * (largest JPEG payload) instead of the last frame. */
     const int attempts = 6;
-    const int delay_us = 200000; /* 200 ms */
+    const int delay_us = 200000;
     char* best = NULL;
     size_t best_len = 0;
 
@@ -748,7 +730,7 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
     return response;
 }
 
-/* PUT to an arbitrary path on a remote (or local via 127.0.0.1) Axis device */
+/* PUT to an arbitrary path on a remote Axis device */
 static char* remote_vapix_put_path(const char* host, const char* user, const char* pass,
                                     const char* path, const char* body) {
     int https = remote_scheme(&host);
@@ -836,7 +818,7 @@ static char* remote_soap_post(const char* host, const char* user, const char* pa
     return response;
 }
 
-/* Extract a text value between > and < following an attribute marker in XML.
+/* Copy the quoted value of attr="..." found within [xml, end) into out.
  * Returns length written, or 0 on failure. */
 static size_t xml_extract_attr(const char* xml, const char* end,
                                 const char* attr, char* out, size_t out_sz) {
@@ -874,7 +856,6 @@ static cJSON* remote_pullpoint_query(const char* host, const char* user,
     char* resp = remote_soap_post(host, user, pass, "/vapix/services", create_soap);
     if (!resp) return NULL;
 
-    /* Extract SubscriptionId from response */
     char* sid_tag = strstr(resp, "SubscriptionId");
     if (!sid_tag || strstr(resp, "Fault")) { free(resp); return NULL; }
     char* sid_gt = strchr(sid_tag, '>');
@@ -888,13 +869,12 @@ static cJSON* remote_pullpoint_query(const char* host, const char* user,
     memcpy(sub_id, sid_gt, sid_len);
     sub_id[sid_len] = '\0';
     free(resp);
-    /* Validate sub_id contains only safe characters (digits) */
+    /* sub_id is spliced into the next SOAP bodies, so allow digits only */
     if (strspn(sub_id, "0123456789") != sid_len) return NULL;
 
-    /* Step 2: PullMessages — fast-drain initial property state, then
-     * switch to longer polls to catch periodic/transient events.
-     * Phase 1 (drain): PT1S pulls until empty or 50 attempts.
-     * Phase 2 (wait):  PT5S polls for up to 3 attempts. */
+    /* Step 2: PullMessages. Drain the initial property state with PT1S pulls
+     * until one returns empty, then poll with PT5S until the next empty pull
+     * (53 pulls max) to catch periodic/transient events. */
     cJSON* result = NULL;
     int drained = 0;
     for (int attempt = 0; attempt < 53 && !result; attempt++) {
@@ -923,12 +903,10 @@ static cJSON* remote_pullpoint_query(const char* host, const char* user,
         /* Scan for NotificationMessage blocks with matching topic */
         const char* pos = resp;
         while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
-            /* Find end of this NotificationMessage */
             const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
             if (!msg_end) break;
             msg_end += strlen("</wsnt:NotificationMessage>");
 
-            /* Extract Topic text */
             const char* t_start = strstr(pos, "<wsnt:Topic");
             if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
             t_start = strchr(t_start, '>');
@@ -1043,10 +1021,10 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
     if (!url_tmpl || !url_tmpl[0]) { LOG_ACTION_ERR("http_request: no url"); return; }
 
-    /* Optional snapshot attachment: fetch JPEG and inject as {{snapshot_base64}} */
+    /* Optional snapshot attachment, exposed as {{trigger.snapshot_base64}} */
     cJSON* snap_j = cJSON_GetObjectItem(cfg, "attach_snapshot");
     char* snap_b64 = NULL;
-    cJSON* td_with_snap = NULL; /* extended trigger_data that includes snapshot_base64 */
+    cJSON* td_with_snap = NULL;
     if (snap_j && cJSON_IsTrue(snap_j)) {
         size_t snap_len = 0;
         char* snap_raw = capture_snapshot_jpeg_warm(&snap_len);
@@ -1055,7 +1033,6 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
             free(snap_raw);
         }
         if (snap_b64) {
-            /* Add snapshot_base64 to a copy of trigger_data so {{trigger.snapshot_base64}} expands */
             td_with_snap = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
             if (td_with_snap)
                 cJSON_AddStringToObject(td_with_snap, "snapshot_base64", snap_b64);
@@ -1104,7 +1081,6 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
         char* saveptr;
         line = strtok_r(hcopy, "\n", &saveptr);
         while (line) {
-            /* strip leading/trailing whitespace */
             while (*line == ' ' || *line == '\r') line++;
             char* end = line + strlen(line) - 1;
             while (end > line && (*end == ' ' || *end == '\r' || *end == '\n')) *end-- = '\0';
@@ -1290,7 +1266,6 @@ static int stop_active_recordings_from_xml(const char* xml,
         /* Backtrack to the '<' that starts this element */
         const char* elem = p;
         while (elem > xml && *elem != '<') elem--;
-        /* Extract the recordingid attribute from within this element */
         char rid[64] = {0};
         extract_xml_attr(elem, "recordingid", rid, sizeof(rid));
         if (rid[0]) {
@@ -1333,10 +1308,8 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
         char req[512];
         const char* profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
         const char* opts    = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "options"));
-        /* Build the raw stream-options string. Precedence: an explicit `options`
-         * field (e.g. "resolution=1920x1080&fps=15"), then a named stream
-         * `profile` (streamprofile=NAME), then nothing. The value is percent-
-         * encoded before being placed in the options= query parameter. */
+        /* Precedence: explicit `options` (e.g. "resolution=1920x1080&fps=15"),
+         * then `profile` (streamprofile=NAME); percent-encoded into options=. */
         char opt_raw[256] = "";
         int have_opt = 0;
         if (opts && opts[0])            { snprintf(opt_raw, sizeof(opt_raw), "%s", opts); have_opt = 1; }
@@ -1446,9 +1419,7 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
             if (stopped == 0)
                 LOG_WARN("recording: no active recordings found on disk %s host %s",
                          diskid, host ? host : "local");
-            /* Clean up our tracking table entry for this disk */
             active_recording_remove(host ? host : "", diskid);
-            /* Clean up any while_active entry for this rule */
             for (int i = 0; i < while_active_count; i++) {
                 if (strcmp(while_active_entries[i].atype, "recording") == 0 &&
                     strcmp(while_active_entries[i].rule_id, rule_id ? rule_id : "") == 0) {
@@ -1461,10 +1432,8 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
 }
 
 /* overlay_text
- * Uses the VAPIX Dynamic Overlay API: POST dynamicoverlay/dynamicoverlay.cgi
- * We track one identity per channel (1-8) in memory so we reuse the same
- * overlay slot on repeated firings.  After reboot the identity is -1 and
- * a new overlay is created automatically.
+ * VAPIX Dynamic Overlay API. One identity per channel (1-8) is kept in memory
+ * so repeated firings reuse the same slot; after reboot a new one is created.
  */
 static void overlay_remove(int identity) {
     char body[64];
@@ -1495,7 +1464,6 @@ static gboolean overlay_remove_cb(gpointer user_data) {
     overlay_remove_remote(ctx->identity,
                           ctx->remote_host[0] ? ctx->remote_host : NULL,
                           ctx->remote_user, ctx->remote_pass);
-    /* Also clear from our tracking array if it matches */
     for (int i = 0; i < MAX_OVERLAY_CHANNELS; i++) {
         if (overlay_identity[i] == ctx->identity) overlay_identity[i] = -1;
     }
@@ -1592,7 +1560,6 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
         }
     }
 
-    /* If duration > 0, schedule removal after that many seconds */
     if (duration > 0 && overlay_identity[channel - 1] >= 0) {
         OverlayRemoveCtx* ctx = calloc(1, sizeof(*ctx));
         if (ctx) {
@@ -1646,18 +1613,9 @@ static void action_ptz_preset(cJSON* cfg) {
     }
 }
 
-/* io_output — drive an I/O output port using io/portmanagement.cgi.
- *
- * Port numbering: UI uses 1-based integers; portmanagement expects 0-based
- * string IDs ("0" = physical port 1, "1" = physical port 2, …).
- *
- * State mapping:  UI "active"   → portmanagement "closed"  (circuit closed)
- *                 UI "inactive" → portmanagement "open"    (circuit open)
- *
- * For timed pulses (duration > 0) we use setStateSequence which auto-restores.
- * For permanent state we use setPorts and optionally track for while_active undo.
- * The while_active io_restore field stores "open" or "closed" for direct undo use.
- */
+/* io_output via io/portmanagement.cgi. Ports are 1-based in the UI and 0-based
+ * strings in the API; UI "active" = "closed", "inactive" = "open".
+ * Timed pulses use setStateSequence (auto-restores); otherwise setPorts. */
 static void action_io_output(const char* rule_id, cJSON* cfg) {
     cJSON* port_j = cJSON_GetObjectItem(cfg, "port");
     if (!port_j) return;
@@ -1665,18 +1623,15 @@ static void action_io_output(const char* rule_id, cJSON* cfg) {
     const char* state_ui = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
     if (!state_ui) state_ui = "active";
 
-    /* Convert UI state to portmanagement state */
     const char* io_state   = (strcmp(state_ui, "active") == 0) ? "closed" : "open";
     const char* io_restore = (strcmp(io_state, "closed")  == 0) ? "open"   : "closed";
 
-    /* Convert 1-based port number to 0-based string ID */
     char port_str[8];
     snprintf(port_str, sizeof(port_str), "%d", port - 1);
 
     cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
     char body[512];
     if (dur && dur->valuedouble > 0) {
-        /* Timed pulse: drive to io_state for <duration> seconds then restore */
         int ms = (int)(dur->valuedouble * 1000);
         snprintf(body, sizeof(body),
             "{\"apiVersion\":\"1.0\",\"method\":\"setStateSequence\","
@@ -1685,7 +1640,6 @@ static void action_io_output(const char* rule_id, cJSON* cfg) {
             "{\"state\":\"%s\",\"time\":0}]}}",
             port_str, io_state, ms, io_restore);
     } else {
-        /* Permanent state change */
         snprintf(body, sizeof(body),
             "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\","
             "\"params\":{\"ports\":[{\"port\":\"%s\",\"state\":\"%s\"}]}}",
@@ -1712,10 +1666,8 @@ static void action_io_output(const char* rule_id, cJSON* cfg) {
 
 /* audio_clip */
 
-/* Resolve a clip name to its numeric MediaClip ID using param.cgi.
- * Newer firmware (12.x+) requires clip=<int> instead of clip=<name>.
- * Returns the numeric ID on success, -1 if not found or on error.
- * Falls back to -1 so callers can try by name as a last resort. */
+/* Resolve a clip name to its numeric MediaClip ID (firmware 12.x+ requires
+ * clip=<int>). Returns -1 if not found so callers can fall back to the name. */
 static int resolve_clip_id(const char* clip_name) {
     char* resp = ACAP_VAPIX_Get("param.cgi?action=list&group=MediaClip");
     if (!resp) return -1;
@@ -1724,10 +1676,8 @@ static int resolve_clip_id(const char* clip_name) {
     char* line = strtok(resp, "\n");
     int candidate_id = -1;
     while (line) {
-        /* trim trailing \r */
         char* cr = strchr(line, '\r');
         if (cr) *cr = '\0';
-        /* look for .M<id>.Name=<clip_name> */
         const char* prefix = "root.MediaClip.M";
         if (strncmp(line, prefix, strlen(prefix)) == 0) {
             const char* after_prefix = line + strlen(prefix);
@@ -1765,8 +1715,6 @@ static void action_audio_clip(const char* rule_id, cJSON* cfg) {
     cJSON* wa_j      = cJSON_GetObjectItem(cfg, "while_active");
     int loop_count   = (loop_j && cJSON_IsNumber(loop_j)) ? (int)loop_j->valuedouble : 1;
 
-    /* Resolve clip name to numeric ID (required by firmware 12.x+).
-     * Fall back to using the name string if resolution fails. */
     int clip_id = resolve_clip_id(clip);
 
     char req[512];
@@ -1813,14 +1761,14 @@ static void action_send_syslog(cJSON* cfg, cJSON* trigger_data) {
 }
 
 /* paging_console_execute — POST /config/rest/paging-console-actions/v1/actions/{id}/execute
- * Fields: action_id (UUID), remote_host (default 127.0.0.1), remote_user, remote_pass
+ * Fields: action_id (UUID), remote_host (optional, local device if empty), remote_user, remote_pass
  */
 static void action_paging_console_execute(cJSON* cfg) {
     const char* action_id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "action_id"));
     if (!action_id || !action_id[0]) {
         LOG_ACTION_ERR("paging_console_execute: no action_id"); return;
     }
-    /* Validate: UUID characters only (hex digits and hyphens) */
+    /* Alphanumerics and hyphens only: the id is spliced into the URL path */
     for (const char* p = action_id; *p; p++) {
         if (!isalnum((unsigned char)*p) && *p != '-') {
             LOG_ACTION_ERR("paging_console_execute: invalid action_id"); return;
@@ -1850,7 +1798,7 @@ static void action_paging_console_button(cJSON* cfg) {
     int slot = (int)slot_j->valuedouble;
     if (slot < 1 || slot > 32)    { LOG_ACTION_ERR("paging_console_button: slot %d out of range", slot); return; }
 
-    /* Validate UUIDs (hex digits and hyphens only) */
+    /* Alphanumerics and hyphens only (page_id is spliced into the URL path) */
     for (const char* p = page_id; *p; p++) {
         if (!isalnum((unsigned char)*p) && *p != '-') {
             LOG_ACTION_ERR("paging_console_button: invalid page_id"); return;
@@ -2078,7 +2026,6 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     char* title = title_tmpl ? Actions_Expand_Template(title_tmpl, effective_td) : NULL;
     char* msg   = Actions_Expand_Template(msg_tmpl, effective_td);
 
-    /* Build Adaptive Card body array */
     cJSON* card_body = cJSON_CreateArray();
     if (title && title[0]) {
         cJSON* tb = cJSON_CreateObject();
@@ -2169,7 +2116,6 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
     free(fields);
     free(tags);
 
-    /* Build write URL */
     char write_url[1024];
     if (is_v1) {
         const char* db = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "database"));
@@ -2236,11 +2182,9 @@ static size_t curl_read_buf(char* ptr, size_t sz, size_t n, void* ud) {
     return copy;
 }
 
-/* email — SMTP via libcurl.  Server/credentials come from global SMTP
- * settings (settings.json "smtp" section); per-action config only has
- * to, subject, and body. */
+/* email via SMTP. Server/credentials come from the global "smtp" settings;
+ * the action only carries to, subject, body and attach_snapshot. */
 static void action_email(cJSON* cfg, cJSON* trigger_data) {
-    /* Read SMTP config from global settings — smtp lives under app["settings"]["smtp"] */
     cJSON* _sett    = ACAP_Get_Config("settings");
     cJSON* smtp_cfg = _sett ? cJSON_GetObjectItem(_sett, "smtp") : NULL;
     const char* smtp_server = smtp_cfg ? cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "server")) : NULL;
@@ -2346,7 +2290,6 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     free(body);
     free(snap_b64_wrapped);
 
-    /* libcurl SMTP upload via CURLOPT_READFUNCTION on a buffer */
     UploadBuf upload = { msg, 0, strlen(msg) };
 
     CURL* curl = curl_easy_init();
@@ -2355,7 +2298,7 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     curl_easy_setopt(curl, CURLOPT_URL, smtp_url);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, from);
 
-    /* Parse comma-separated "to" into recipients */
+    /* Recipients are comma- or semicolon-separated */
     struct curl_slist* recipients = NULL;
     char to_copy[1024];
     snprintf(to_copy, sizeof(to_copy), "%s", to);
@@ -2368,7 +2311,6 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
     }
     curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
 
-    /* Read callback for SMTP upload */
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
     curl_easy_setopt(curl, CURLOPT_READFUNCTION, curl_read_buf);
     curl_easy_setopt(curl, CURLOPT_READDATA, &upload);
@@ -2512,7 +2454,6 @@ static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
 
     char* url = Actions_Expand_Template(url_tmpl, trigger_data);
 
-    /* Fetch JPEG snapshot */
     size_t snap_len = 0;
     char* snap = capture_snapshot_jpeg_warm(&snap_len);
     if (!snap || snap_len == 0) {
@@ -2627,7 +2568,6 @@ static void action_vapix_query(cJSON* cfg, cJSON* trigger_data) {
                      topic_path, host);
             return;
         }
-        /* Inject all fields into trigger_data */
         cJSON* field;
         cJSON_ArrayForEach(field, fields) {
             if (!field->string) continue;
@@ -2661,7 +2601,7 @@ static void action_guard_tour(cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     int starting = (!op || strcmp(op, "stop") != 0);
 
-    /* Parse channel field if present (unused; documented as VAPIX limitation) */
+    /* channel is accepted but ignored: guard tours are global in VAPIX */
     cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
     if (ch_j) LOG_WARN("guard_tour: 'channel' field is stored but not implemented (all tours are global)");
 
@@ -2683,7 +2623,6 @@ static void action_guard_tour(cJSON* cfg) {
         return;
     }
 
-    /* Find the tour index by name */
     for (int n = 0; n < 32; n++) {
         char name_req[128];
         snprintf(name_req, sizeof(name_req),
@@ -2697,7 +2636,6 @@ static void action_guard_tour(cJSON* cfg) {
             char* nl = strchr(eq + 1, '\n');
             if (nl) *nl = '\0';
             char* name_val = eq + 1;
-            /* strip trailing \r if present */
             size_t l = strlen(name_val);
             if (l > 0 && name_val[l-1] == '\r') name_val[l-1] = '\0';
 
@@ -2724,7 +2662,6 @@ static void action_set_device_param(cJSON* cfg) {
     const char* value = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
     if (!param || !param[0] || !value) { LOG_WARN("set_device_param: missing parameter or value"); return; }
 
-    /* Accept "root.X" or just "X" — normalise to always include "root." */
     char full_param[256];
     if (strncmp(param, "root.", 5) == 0)
         snprintf(full_param, sizeof(full_param), "%s", param);
@@ -2901,7 +2838,6 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
         return;
     }
 
-    /* Build the data object */
     cJSON* data = cJSON_CreateObject();
 
     const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
@@ -3019,7 +2955,6 @@ static gboolean light_strobe_cb(gpointer user_data) {
     if (ctx->phase_off) {
         /* Light just turned off. Done if no more pulses remain. */
         if (ctx->pulses_left <= 0) { free(ctx); return G_SOURCE_REMOVE; }
-        /* Otherwise wait gap_ms, then turn back on. */
         ctx->phase_off = 0;
         g_timeout_add((guint)ctx->gap_ms, light_strobe_cb, ctx);
     } else {
@@ -3057,7 +2992,6 @@ static void action_light_control(cJSON* cfg) {
             char* body = cJSON_PrintUnformatted(req);
             char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
             free(body); if (resp) free(resp);
-            /* Now activate */
             cJSON_SetValuestring(cJSON_GetObjectItem(req, "method"), "activateLight");
             cJSON_DeleteItemFromObject(p, "intensity");
         } else {
@@ -3069,10 +3003,9 @@ static void action_light_control(cJSON* cfg) {
     char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
     free(body); if (resp) free(resp);
 
-    /* Sub-second strobe: the synchronous call above emitted the first ON pulse.
-     * Schedule its OFF after duration_ms, and repeat for (count-1) more pulses
-     * with gap_ms off-time between them. Drives the LED directly, bypassing the
-     * firmware light-schedule 1s minimum. */
+    /* The call above emitted the first ON pulse; the strobe timer handles its
+     * OFF edge and the remaining (count-1) pulses. Driving the LED directly
+     * bypasses the firmware light schedule's 1 s minimum. */
     if (strcmp(op, "flash") == 0) {
         cJSON* dur_j = cJSON_GetObjectItem(cfg, "duration_ms");
         int on_ms = dur_j ? (int)dur_j->valuedouble : 300;
@@ -3108,8 +3041,8 @@ static void action_light_control(cJSON* cfg) {
     }
 }
 
-/* aoa_get_counts — fetch accumulated crossline counts from an AOA scenario and inject
- * them into trigger_data so subsequent actions can use {{aoa_total}}, {{aoa_human}}, etc. */
+/* aoa_get_counts: inject accumulated crossline counts into trigger_data so later
+ * actions can use {{trigger.aoa_total}}, {{trigger.aoa_human}}, etc. */
 static void action_aoa_get_counts(cJSON* cfg, cJSON* trigger_data) {
     cJSON* sid_j = cJSON_GetObjectItem(cfg, "scenario_id");
     if (!sid_j) { LOG_WARN("aoa_get_counts: no scenario_id"); return; }
@@ -3129,9 +3062,6 @@ static void action_aoa_get_counts(cJSON* cfg, cJSON* trigger_data) {
 
     cJSON* data = cJSON_GetObjectItem(root, "data");
     if (data) {
-        /* getAccumulatedCounts returns: total, totalHuman, totalCar, totalTruck,
-         * totalBus, totalBike, totalOtherVehicle.
-         * Map each to aoa_total, aoa_human, ... for template use. */
         static const struct { const char* api; const char* token; } map[] = {
             {"total",             "aoa_total"},
             {"totalHuman",        "aoa_human"},
@@ -3209,7 +3139,7 @@ static gboolean delay_resume(gpointer user_data) {
 
 typedef struct {
     char   rule_id[37];
-    char   deliver_via[16]; /* "slack", "teams", "email", "mqtt" */
+    char   deliver_via[16]; /* "slack", "teams", "email", "mqtt", "telegram" */
     cJSON* config;          /* retained delivery config (webhook_url, etc.) */
     char*  lines[MAX_DIGEST_LINES];
     int    line_count;
@@ -3241,7 +3171,6 @@ static DigestBuf* digest_find_or_create(const char* rule_id, cJSON* cfg) {
 static void digest_flush(DigestBuf* d) {
     if (d->line_count == 0) return;
 
-    /* Build combined message */
     size_t total_len = 0;
     for (int i = 0; i < d->line_count; i++)
         total_len += strlen(d->lines[i]) + 1;
@@ -3262,22 +3191,18 @@ static void digest_flush(DigestBuf* d) {
     d->line_count = 0;
     d->last_flush = time(NULL);
 
-    /* Deliver via configured method */
     cJSON* payload = cJSON_Duplicate(d->config, 1);
     cJSON_DeleteItemFromObject(payload, "type");
     cJSON_AddStringToObject(payload, "type", d->deliver_via);
 
-    /* Inject the combined message */
+    /* Fill every text field a handler may read: message (chat), body (email), payload (MQTT) */
     cJSON_DeleteItemFromObject(payload, "message");
     cJSON_AddStringToObject(payload, "message", combined);
-    /* For email: inject into body instead */
     cJSON_DeleteItemFromObject(payload, "body");
     cJSON_AddStringToObject(payload, "body", combined);
-    /* For MQTT: inject into payload */
     cJSON_DeleteItemFromObject(payload, "payload");
     cJSON_AddStringToObject(payload, "payload", combined);
 
-    /* Dispatch via the appropriate action handler */
     cJSON* empty_td = cJSON_CreateObject();
     if (strcmp(d->deliver_via, "slack") == 0)
         action_slack_webhook(payload, empty_td);
@@ -3308,7 +3233,7 @@ static void action_digest(const char* rule_id, cJSON* cfg, cJSON* trigger_data) 
         free(line); /* buffer full, drop */
 }
 
-/* Called from Actions_Tick (via main loop 1s timer) */
+/* Called from the 1 s Engine_Tick timer in main.c */
 void Actions_Digest_Tick(void) {
     time_t now = time(NULL);
     for (int i = 0; i < digest_buf_count; i++) {
@@ -3366,7 +3291,6 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
             int seconds = sec_j ? (int)sec_j->valuedouble : 1;
             if (seconds < 1) seconds = 1;
 
-            /* Build remaining slice */
             cJSON* remaining = cJSON_CreateArray();
             for (int j = i + 1; j < total; j++)
                 cJSON_AddItemToArray(remaining, cJSON_Duplicate(cJSON_GetArrayItem(actions_array, j), 1));
@@ -3428,14 +3352,13 @@ void Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_d
 int Actions_Test(const char* type, cJSON* config) {
     if (!type || !config) return -1;
 
-    /* Build a single-item actions array with type injected */
     cJSON* action = cJSON_Duplicate(config, 1);
     cJSON_DeleteItemFromObject(action, "type");
     cJSON_AddStringToObject(action, "type", type);
     cJSON* arr = cJSON_CreateArray();
     cJSON_AddItemToArray(arr, action);
 
-    /* Execute with empty trigger data; capture any errors via LOG_ACTION_ERR */
+    /* Failures reported via LOG_ACTION_ERR land in g_action_error */
     g_action_error[0] = '\0';
     cJSON* td = cJSON_CreateObject();
     cJSON_AddStringToObject(td, "type", "test");

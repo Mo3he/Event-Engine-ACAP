@@ -40,7 +40,7 @@ static pthread_t       accept_thread;
 static int             accept_running = 0;
 
 /*-----------------------------------------------------
- * Build a multipart chunk for one event
+ * JSON body for one rule-fire event
  *-----------------------------------------------------*/
 static char* build_event_json(const char* rule_id, const char* rule_name,
                               cJSON* trigger_data) {
@@ -53,7 +53,6 @@ static char* build_event_json(const char* rule_id, const char* rule_name,
     const char* serial = ACAP_DEVICE_Prop("serial");
     if (serial) cJSON_AddStringToObject(obj, "macAddress", serial);
 
-    /* ISO 8601 timestamp */
     time_t now = time(NULL);
     struct tm tm_buf;
     gmtime_r(&now, &tm_buf);
@@ -78,8 +77,6 @@ static char* build_event_json(const char* rule_id, const char* rule_name,
 
 /*-----------------------------------------------------
  * Per-client stream thread
- *
- * Writes multipart header, then loops waiting for events.
  *-----------------------------------------------------*/
 static void* client_thread_fn(void* arg) {
     StreamClient* c = (StreamClient*)arg;
@@ -109,7 +106,6 @@ static void* client_thread_fn(void* arg) {
     while (1) {
         pthread_mutex_lock(&clients_lock);
 
-        /* Wait for a broadcast signal */
         while (c->active && !c->has_pending)
             pthread_cond_wait(&broadcast_cond, &clients_lock);
 
@@ -118,7 +114,6 @@ static void* client_thread_fn(void* arg) {
             break;
         }
 
-        /* Take ownership of the pending JSON */
         char* json = c->pending_json;
         c->pending_json = NULL;
         c->has_pending = 0;
@@ -126,7 +121,6 @@ static void* client_thread_fn(void* arg) {
 
         if (!json) continue;
 
-        /* Write multipart chunk */
         int len = (int)strlen(json);
         char chunk_hdr[256];
         int hdr_len = snprintf(chunk_hdr, sizeof(chunk_hdr),
@@ -190,7 +184,6 @@ static void* accept_thread_fn(void* arg) {
             if (strstr(buf, "\r\n\r\n")) break;
         }
 
-        /* Find a free client slot */
         pthread_mutex_lock(&clients_lock);
         int slot = -1;
         for (int i = 0; i < MAX_STREAM_CLIENTS; i++) {
@@ -286,7 +279,6 @@ int AlertStream_Init(void) {
 }
 
 void AlertStream_Cleanup(void) {
-    /* Stop accept loop and close server socket */
     accept_running = 0;
     if (server_sock >= 0) {
         close(server_sock);
@@ -295,7 +287,6 @@ void AlertStream_Cleanup(void) {
     pthread_cancel(accept_thread);
     pthread_join(accept_thread, NULL);
 
-    /* Signal all active clients to exit and close their sockets */
     pthread_mutex_lock(&clients_lock);
     for (int i = 0; i < MAX_STREAM_CLIENTS; i++) {
         clients[i].active = 0;
@@ -318,7 +309,7 @@ void AlertStream_Broadcast(const char* rule_id, const char* rule_name,
                            cJSON* trigger_data) {
     pthread_mutex_lock(&clients_lock);
 
-    /* Count active clients — skip work if nobody is listening */
+    /* Skip the work if nobody is listening */
     int active = 0;
     for (int i = 0; i < MAX_STREAM_CLIENTS; i++)
         if (clients[i].active) active++;

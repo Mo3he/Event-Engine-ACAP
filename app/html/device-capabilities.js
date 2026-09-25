@@ -1,13 +1,9 @@
 'use strict';
 
-/* ------------------------------------------------------------
- * Remote capability cache: key = "host:::query", value = array
- * ------------------------------------------------------------ */
+/* key = "host:::query", value = array */
 const remoteCapCache = {};
 
-/* Fetch capabilities from a remote Axis device via the /remote-caps proxy endpoint.
- * query: "ptz" | "audio" | "siren" | "privacy" | "guardtour" | "acap"
- * Returns an array of {value, label} objects, or null on failure. */
+/* Queries a remote Axis device via the /remote-caps proxy; returns the result array, or null on failure. */
 async function fetchRemoteCaps(query, host, user, pass) {
   const key = `${host}:::${query}`;
   if (remoteCapCache[key]) return remoteCapCache[key];
@@ -25,8 +21,6 @@ async function fetchRemoteCaps(query, host, user, pass) {
   } catch(e) { return null; }
 }
 
-/* Called by "Load from device" buttons in action rows.
- * Fetches capabilities, caches them, and re-renders the action list. */
 async function loadRemoteCap(rowIndexStr, query) {
   const rowIndex = parseInt(rowIndexStr);
   const row = document.getElementById('arow-' + rowIndex);
@@ -43,7 +37,6 @@ async function loadRemoteCap(rowIndexStr, query) {
     passEl ? passEl.value : '');
   if (btn) { btn.disabled = false; btn.textContent = 'Load'; }
   if (!result) { toast('Could not fetch capabilities from remote device', 'error'); return; }
-  /* Preserve current form values then re-render */
   const data = { type: actionRows[rowIndex].type };
   row.querySelectorAll('[data-k]').forEach(inp => {
     data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
@@ -52,8 +45,6 @@ async function loadRemoteCap(rowIndexStr, query) {
   renderActionList();
 }
 
-/* Called by "Load" buttons in condition rows (aoa_occupancy and vapix_event_state).
- * Works identically to loadRemoteCap but targets crow-{rowIndex} and conditionRows. */
 async function loadRemoteCondCap(rowIndexStr, query) {
   const rowIndex = parseInt(rowIndexStr);
   const row = document.getElementById('crow-' + rowIndex);
@@ -87,9 +78,6 @@ async function loadRemoteCondCap(rowIndexStr, query) {
   renderConditionList();
 }
 
-/* Called by "Load" buttons on remote paging_console_* action rows.
- * Fetches actions+pages from the remote device's paging-console REST API
- * and stores them in remoteCapCache so the field builder can render dropdowns. */
 async function loadRemotePagingCap(rowIndexStr) {
   const rowIndex = parseInt(rowIndexStr);
   const row = document.getElementById('arow-' + rowIndex);
@@ -110,7 +98,6 @@ async function loadRemotePagingCap(rowIndexStr) {
   const paging = result[0];
   remoteCapCache[`${host}:::paging_actions`] = paging.actions || [];
   remoteCapCache[`${host}:::paging_pages`]   = paging.pages   || [];
-  /* Preserve current form values then re-render */
   const data = { type: actionRows[rowIndex].type };
   row.querySelectorAll('[data-k]').forEach(inp => {
     data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
@@ -119,10 +106,7 @@ async function loadRemotePagingCap(rowIndexStr) {
   renderActionList();
 }
 
-/* Called by "Load Events" button in a remote vapix_query action row.
- * Reuses the full catalog cached by the condition loader when available;
- * otherwise fetches directly (not via fetchRemoteCaps, whose cache key
- * gets overwritten by loadRemoteCondCap with condition-formatted data). */
+/* Fetches directly, not via fetchRemoteCaps: loadRemoteCondCap overwrites that cache key with condition-formatted data. */
 async function loadRemoteActionVapixEvents(rowIndexStr) {
   const rowIndex = parseInt(rowIndexStr);
   const row = document.getElementById('arow-' + rowIndex);
@@ -134,7 +118,6 @@ async function loadRemoteActionVapixEvents(rowIndexStr) {
   const host = hostEl.value.trim();
   const cacheKey = `${host}:::vapix_events_catalog`;
 
-  /* If already cached (e.g. condition side loaded it), skip the fetch */
   let parsed = remoteCapCache[cacheKey];
   if (!parsed) {
     const btn = row.querySelector('.btn-ghost[onclick*="loadRemoteActionVapixEvents"]');
@@ -164,7 +147,6 @@ async function loadRemoteActionVapixEvents(rowIndexStr) {
     }
   }
   if (!parsed.length) { toast('No events found on remote device', 'warning'); return; }
-  /* Preserve current form values then re-render */
   const data = { type: actionRows[rowIndex].type };
   row.querySelectorAll('[data-k]').forEach(inp => {
     data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
@@ -173,8 +155,6 @@ async function loadRemoteActionVapixEvents(rowIndexStr) {
   renderActionList();
 }
 
-/* Called from the remote vapix_query action dropdown — updates the hidden topic inputs
- * using the remote event catalog instead of the local vapixEventCatalog. */
 function applyRemoteVapixEventAction(sel, host) {
   const idx = parseInt(sel.value);
   const cacheKey = `${host}:::vapix_events_catalog`;
@@ -358,7 +338,6 @@ async function loadAoaScenarios() {
 
 async function loadPagingConsoleData() {
   try {
-    /* Actions — GET /config/rest/paging-console-actions/v1/actions */
     const ar = await fetch('/config/rest/paging-console-actions/v1/actions');
     if (!ar.ok) { pagingActions = []; pagingPages = []; return; }
     const aData = await ar.json();
@@ -366,7 +345,6 @@ async function loadPagingConsoleData() {
                   : Array.isArray(aData.data) ? aData.data
                   : (aData.actions || []);
     pagingActions = actions.map(a => {
-      /* Prefer the saved description as the human label, then type-specific details */
       let label = a.description || a.label || '';
       if (!label) {
         const p = a.params || {};
@@ -387,7 +365,6 @@ async function loadPagingConsoleData() {
   } catch(e) { pagingActions = []; }
 
   try {
-    /* Pages — GET /config/rest/paging-console-button-layout/v1/pages */
     const pr = await fetch('/config/rest/paging-console-button-layout/v1/pages');
     if (!pr.ok) { pagingPages = []; return; }
     const pData = await pr.json();
@@ -402,9 +379,7 @@ async function loadPagingConsoleData() {
     renderActionList();
 }
 
-/* Fetch current value + allowed values for a device parameter.
- * Called onblur from the parameter input in the set_device_param action row.
- * In remote mode, proxies through /remote-caps with query=param. */
+/* Called onblur from the set_device_param parameter input. */
 async function fetchParamValues(paramInput) {
   const row = paramInput.closest('.tca-row');
   if (!row) return;
@@ -417,7 +392,6 @@ async function fetchParamValues(paramInput) {
   const hintEl      = row.querySelector('.param-val-hint');
   if (!valueInput || !hintEl) return;
 
-  /* Detect remote mode */
   const hostEl    = row.querySelector('[data-k="remote_host"]');
   const userEl    = row.querySelector('[data-k="remote_user"]');
   const passEl    = row.querySelector('[data-k="remote_pass"]');
@@ -429,7 +403,6 @@ async function fetchParamValues(paramInput) {
   let currentVal = '', allowedValues = [], allowedLabels = [], paramType = '', defVal = '', minVal = '', maxVal = '';
 
   if (isRemote) {
-    /* Proxy through /remote-caps */
     try {
       const resp = await fetch('/local/acap_event_engine/remote-caps', {
         method: 'POST',
@@ -457,7 +430,6 @@ async function fetchParamValues(paramInput) {
       }
     } catch(e) {}
   } else {
-    /* Local device */
     try {
       const r = await fetch(`/axis-cgi/param.cgi?action=list&group=${encodeURIComponent(param)}`);
       if (r.ok) {
@@ -486,12 +458,10 @@ async function fetchParamValues(paramInput) {
     } catch(e) {}
   }
 
-  /* Update the value input's datalist */
   if (valListEl && allowedValues.length) {
     valListEl.innerHTML = allowedValues.map(v => `<option value="${escHtml(v)}">`).join('');
   }
 
-  /* Build hint line */
   const parts = [];
   if (currentVal) parts.push(`Current: <strong>${escHtml(currentVal)}</strong>`);
   if (paramType)  parts.push(`Type: ${escHtml(paramType)}`);
@@ -501,7 +471,6 @@ async function fetchParamValues(paramInput) {
 
   hintEl.innerHTML = parts.length ? parts.join(' &nbsp;·&nbsp; ') : 'No definition found.';
 
-  /* Swap the value text input → <select> when enum values are known */
   if (allowedValues.length) {
     const curVal = valueInput.value || currentVal;
     const sel = document.createElement('select');
@@ -575,9 +544,7 @@ function parseVapixEventCatalog(xmlText) {
 function findCatalogMatch(t) {
   if (!vapixEventCatalog || !vapixEventCatalog.length) return -1;
   const keys = ['topic0','topic1','topic2','topic3'];
-  /* Topics may be stored as {topicN: {ns: val}} (object form from saved JSON /
-   * applyVapixEvent) or as {topicN_ns, topicN_val} flat keys (after
-   * collectTriggerRow re-reads form inputs).  Normalise to object form. */
+  /* Saved rules use {topicN: {ns: val}}; collectTriggerRow yields flat topicN_ns/topicN_val. */
   const getTopic = k => {
     if (t[k]) return t[k];
     if (t[`${k}_val`]) return { [t[`${k}_ns`] || '']: t[`${k}_val`] };
@@ -589,7 +556,6 @@ function findCatalogMatch(t) {
     const ak = Object.keys(a)[0], bk = Object.keys(b)[0];
     return ak === bk && a[ak] === b[bk];
   };
-  /* Exact match first */
   let idx = vapixEventCatalog.findIndex(ev => keys.every(k => cmp(ev.topics[k], getTopic(k))));
   if (idx >= 0) return idx;
   /* Prefix match: trigger has fewer topic levels than catalog entry.
@@ -601,7 +567,6 @@ function findCatalogMatch(t) {
 }
 
 function applyVapixEventAction(sel) {
-  /* Called from the vapix_query action dropdown — updates the hidden topic inputs */
   const idx = parseInt(sel.value);
   const ev = vapixEventCatalog && vapixEventCatalog[idx];
   if (!ev) return;
@@ -642,7 +607,3 @@ function updateWebhookUrl(inp) {
     urlEl.value = `${base}?token=${inp.value}`;
   }
 }
-
-/* ===================================================
- * Rule Templates
- * =================================================== */

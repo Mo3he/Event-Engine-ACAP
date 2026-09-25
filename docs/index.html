@@ -961,7 +961,6 @@
         GitHub
       </a>
     </div>
-    <!-- Disclaimer -->
     <div style="margin:24px auto 0;max-width:600px;background:rgba(55,138,221,0.07);border:1px solid rgba(55,138,221,0.18);border-radius:10px;padding:12px 18px;font-size:12.5px;color:var(--text-muted);line-height:1.6;text-align:center;">
       <strong style="color:var(--text);">Disclaimer:</strong>
       This is an independent, community-developed ACAP package and is <strong style="color:var(--text);">not an official Axis Communications product</strong>.
@@ -1092,7 +1091,6 @@
     </div>
 
     <div class="tca-grid reveal">
-      <!-- Triggers -->
       <div class="tca-col">
         <div class="tca-header">
           <div class="tca-header-row"><span class="tca-dot green"></span><h3>Triggers</h3></div>
@@ -1112,7 +1110,6 @@
         </ul>
       </div>
 
-      <!-- Conditions -->
       <div class="tca-col">
         <div class="tca-header">
           <div class="tca-header-row"><span class="tca-dot amber"></span><h3>Conditions</h3></div>
@@ -1129,7 +1126,6 @@
         </ul>
       </div>
 
-      <!-- Actions -->
       <div class="tca-col">
         <div class="tca-header">
           <div class="tca-header-row"><span class="tca-dot blue"></span><h3>Actions</h3></div>
@@ -1410,7 +1406,6 @@ function setTheme(theme) {
   try { localStorage.setItem('ee-theme', theme); } catch(e) {}
 }
 
-// Init from stored preference or system preference
 const stored = localStorage.getItem('ee-theme');
 if (stored) {
   setTheme(stored);
@@ -1444,9 +1439,7 @@ toggle.addEventListener('click', () => {
     if (badge) badge.textContent = d.name || tag;
     const badgeLink = document.getElementById('hero-badge-link');
     if (badgeLink && d.html_url) badgeLink.href = d.html_url;
-    /* Match the real asset names: a signed release prefixes them with
-       "signed_" and its tag carries a -Signed suffix, so building the
-       filename from the version alone points at a package that isn't there. */
+    /* Use the real asset URLs: signed releases prefix names with "signed_", so version-built filenames 404. */
     document.querySelectorAll('a.eap-link').forEach(a => {
       const arch = a.dataset.arch;
       if (!arch) return;

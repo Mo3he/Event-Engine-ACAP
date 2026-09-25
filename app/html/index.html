@@ -158,7 +158,6 @@
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
       <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
 
-      <!-- Backup & Restore -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
@@ -175,7 +174,6 @@
         </div>
       </div>
 
-      <!-- MQTT Settings -->
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="font-size:13px;color:var(--text-muted);margin:0;">MQTT BROKER</h3>
@@ -248,7 +246,6 @@
         </form>
       </div>
 
-      <!-- Sparkplug B Settings -->
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="font-size:13px;color:var(--text-muted);margin:0;">SPARKPLUG B EDGE NODE</h3>
@@ -328,7 +325,6 @@
         </form>
       </div>
 
-      <!-- SMTP Settings -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">EMAIL (SMTP)</h3>
         <form id="smtp-form" onsubmit="saveSmtpSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
@@ -368,7 +364,6 @@
         </form>
       </div>
 
-      <!-- Location -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">LOCATION</h3>
         <form id="engine-settings-form" onsubmit="saveEngineSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
@@ -393,7 +388,6 @@
         </form>
       </div>
 
-      <!-- Alert Stream -->
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="font-size:13px;color:var(--text-muted);margin:0;">ALERT STREAM</h3>
@@ -415,7 +409,6 @@
         </div>
       </div>
 
-      <!-- Serial Port Setup -->
       <div class="card" id="serial-setup-card" style="margin-bottom:16px;display:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="font-size:13px;color:var(--text-muted);margin:0;">RS-485 / SERIAL GATEWAY</h3>
@@ -448,7 +441,6 @@
         <div id="serial-log" style="font-size:12px;color:var(--text-muted);font-family:monospace;display:none;max-height:120px;overflow-y:auto;background:var(--input-bg);border-radius:6px;padding:8px 10px;white-space:pre-wrap;"></div>
       </div>
 
-      <!-- SOCKS5 Proxy Settings -->
       <div class="card" style="margin-bottom:16px;">
         <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">SOCKS5 PROXY</h3>
         <form id="proxy-form" onsubmit="saveProxySettings(event)" style="display:flex;flex-direction:column;gap:14px;">
@@ -485,7 +477,6 @@
   </div>
 </div>
 
-<!-- ===== Toast Container ===== -->
 <div class="toast-container" id="toast-container"></div>
 
 <script src="api.js?v=197" onerror="__scriptLoadError('api.js')"></script>

@@ -8,24 +8,15 @@ extern "C" {
 #endif
 
 /*
- * Trigger subscription manager.
+ * Trigger subscription manager: routes events, webhooks, schedules, MQTT and
+ * Sparkplug commands, Modbus polls and rule chaining to the rule engine.
  *
- * Manages all trigger subscriptions for every rule.
- * Routes incoming events/webhooks/schedules to the rule engine.
+ * ACAP_EVENTS_Subscribe/Unsubscribe MUST run on the GMainLoop thread, not the
+ * FastCGI thread; rule_engine.c defers subscription work with g_idle_add().
  *
- * IMPORTANT: ACAP_EVENTS_Subscribe and ACAP_EVENTS_Unsubscribe MUST be
- * called from the GMainLoop thread, not the FastCGI thread. Use
- * Triggers_Subscribe_Rule_Idle() from HTTP handlers to safely schedule
- * subscription work on the main loop.
- *
- * Trigger types handled:
- *   vapix_event       — subscribes to a VAPIX event topic
- *   http_webhook      — matched by token in the /fire HTTP endpoint
- *   schedule          — delegated to scheduler.c
- *   io_input          — VAPIX IO state change event
- *   counter_threshold — polled every tick against counter value
- *   rule_fired        — fired when another rule executes
- *   mqtt_message      — MQTT topic message received from broker
+ * Trigger types: vapix_event, io_input, http_webhook, schedule,
+ * counter_threshold, rule_fired, mqtt_message, sparkplug_command,
+ * aoa_scenario, modbus_read, manual.
  */
 
 typedef void (*Trigger_Fire_Fn)(const char* rule_id, int trigger_index, cJSON* trigger_data);
@@ -52,12 +43,11 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
 /* Dispatch a metric write received from a Sparkplug host (NCMD/DCMD) */
 void Triggers_On_Sparkplug_Command(const char* metric, const char* value);
 
-/* Called every 1s from main loop — checks counter threshold triggers */
+/* Called every 1s from main loop: scheduler, I/O hold timers, counter thresholds, Modbus polls */
 void Triggers_Tick(void);
 
-/* Register a passive subscription for a vapix_query action (caches data; never fires rules).
- * action_cfg must contain topic0/topic1/topic2/topic3 keys identical to a VAPIX trigger.
- * Must be called from the GMainLoop thread. */
+/* Register a passive subscription for a vapix_query action (caches data, never fires rules).
+ * action_cfg carries topic0..topic3 like a VAPIX trigger. GMainLoop thread only. */
 void Triggers_Subscribe_Passive(const char* rule_id, int action_idx, cJSON* action_cfg);
 
 /* Return the last-seen event data cached by a passive subscription matching topic_cfg.

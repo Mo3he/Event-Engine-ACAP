@@ -63,7 +63,7 @@ typedef struct {
     char client_id[128];
     char username[128];
     char password[128];
-    int  keepalive;       /* seconds, 0 = disabled */
+    int  keepalive;       /* seconds, 0 = default (60) */
     int  use_tls;         /* 1 = TLS transport, 0 = plain TCP */
     int  enabled;
 } MQTT_Config;
@@ -71,7 +71,7 @@ typedef struct {
 int  MQTT_Init(MQTT_Config* config, MQTT_Message_Callback cb, void* user_data);
 void MQTT_Cleanup(void);
 
-/* Update config (triggers reconnect if host/port changed) */
+/* Update config; reconnects if the broker list, TLS, credentials, client id or enabled changed */
 int  MQTT_Reconfigure(MQTT_Config* config);
 
 /* Publish — thread-safe, returns 1 on success.
@@ -99,7 +99,7 @@ void MQTT_Force_Reconnect(void);
 int  MQTT_Subscribe(const char* topic_filter);
 void MQTT_Unsubscribe(const char* topic_filter);
 
-/* Set SOCKS5 proxy for the broker connection (e.g. "localhost:1055").
+/* Set SOCKS5 proxy for the broker connection (e.g. "localhost", 1055).
  * Pass NULL or "" to disable. Triggers reconnect if currently connected. */
 void MQTT_Set_Proxy(const char* proxy_host, int proxy_port);
 

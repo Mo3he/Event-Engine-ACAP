@@ -68,7 +68,6 @@ static void gen_uuid(char* out37) {
             memset(buf, 0, sizeof(buf)); /* fallback zeros — extremely unlikely */
         close(fd);
     } else {
-        /* Fallback to rand() if /dev/urandom unavailable */
         for (int i = 0; i < 16; i++) buf[i] = (unsigned char)(rand() & 0xFF);
     }
     buf[6] = (buf[6] & 0x0F) | 0x40; /* version 4 */
@@ -139,7 +138,6 @@ static void rule_from_json(Rule* r, cJSON* obj) {
     cJSON* tw = cJSON_GetObjectItem(obj, "trigger_window");
     r->trigger_window = tw ? (int)tw->valuedouble : 0;
 
-    /* Compute trigger count from triggers array (capped at MAX_TRIGGERS_PER_RULE) */
     int tc = r->triggers_json ? cJSON_GetArraySize(r->triggers_json) : 0;
     r->trigger_count = (tc > MAX_TRIGGERS_PER_RULE) ? MAX_TRIGGERS_PER_RULE : tc;
 
@@ -307,9 +305,8 @@ static gboolean do_subscribe(gpointer data) {
         if (strcmp(rules[i].id, w->rule_id) == 0) {
             Triggers_Subscribe_Rule(rules[i].id, rules[i].triggers_json);
 
-            /* Register passive subscriptions for any vapix_query actions so
-             * their event data is cached and available when the action runs.
-             * Skip for remote vapix_query — those fetch live via getEventInstances. */
+            /* Passive subscriptions cache event data for local vapix_query
+             * actions; remote ones query the device live via ONVIF PullPoint. */
             int aidx = 0;
             cJSON* action;
             cJSON_ArrayForEach(action, rules[i].actions_json) {
@@ -349,7 +346,6 @@ int RuleEngine_Init(void) {
     Actions_Init();
     Triggers_Init(on_trigger_fired);
 
-    /* Load saved rules */
     cJSON* saved = NULL;
     if (ACAP_FILE_Exists("localdata/rules.json")) {
         saved = ACAP_FILE_Read("localdata/rules.json");
@@ -375,7 +371,6 @@ int RuleEngine_Init(void) {
 
     pthread_mutex_unlock(&store_lock);
 
-    /* Subscribe all enabled rules */
     for (int i = 0; i < rule_count; i++) {
         if (rules[i].enabled)
             schedule_subscribe(rules[i].id, rules[i].triggers_json);
@@ -635,10 +630,8 @@ void RuleEngine_Tick(void) {
     Variables_Flush();
     Actions_ForEach_Active_Siren(siren_condition_check, NULL);
 
-    /* Re-fire rules whose time_window condition just transitioned closed→open.
-     * This handles the case where a stateful trigger (e.g. CO2 threshold) fired
-     * before the window and is still active when the window reopens — no new
-     * trigger event arrives because the underlying state never changed. */
+    /* Re-fire rules whose time_window just reopened while a stateful trigger
+     * (e.g. CO2 threshold) is still active, since no new event will arrive. */
     char (*refire_ids)[37] = NULL;
     int refire_count = 0;
 
@@ -654,9 +647,7 @@ void RuleEngine_Tick(void) {
         int prev = r->cond_window_state;
         r->cond_window_state = now_open;
 
-        /* Window just closed — remember if a trigger is still active so we can
-         * re-fire when the window reopens (even if no new trigger event arrives
-         * while the window is closed). */
+        /* On window close, remember a still-active trigger for the reopen re-fire */
         int has_active = (r->trigger_logic == 2)
             ? Triggers_All_Currently_Active(r->id, -1)
             : Triggers_Any_Active(r->id);

@@ -3,7 +3,7 @@
 function openRuleEditor(rule) {
   editingRule = rule;
   _ruleEditorDirty = false;
-  /* Inject tag from localStorage if not already in the rule object */
+  /* Tags live in the camera-side UI settings, not in the rule object */
   if (rule && rule.id && !rule.tag) rule.tag = getRuleTag(rule.id);
   triggerLogic = rule && rule.trigger_logic ? rule.trigger_logic : 'OR';
   conditionLogic = rule && rule.condition_logic ? rule.condition_logic : 'AND';
@@ -23,7 +23,6 @@ function openRuleEditor(rule) {
   renderConditionList();
   renderActionList();
 
-  /* Mark dirty on any input change inside the modal */
   setTimeout(() => {
     const body = document.getElementById('modal-body');
     if (body) body.addEventListener('input', _markRuleEditorDirty, { capture: true });
@@ -209,9 +208,7 @@ function triggerTypeOptions(selected) {
 function triggerFields(t, rowIdx) {
   const type = t.type || 'vapix_event';
   if (type === 'vapix_event') {
-    /* Topic data may be in object form {ns:val} (from applyVapixEvent / saved JSON)
-     * or in flat form topic0_ns / topic0_val (after collectTriggerRow reads form inputs).
-     * Handle both so rerenderTrigger doesn't lose the selected event. */
+    /* Topics arrive as {ns:val} objects (saved JSON) or flat topicN_ns/_val (after collectTriggerRow). */
     const ns  = k => t[`${k}_ns`]  !== undefined ? t[`${k}_ns`]
                    : (t[k] ? Object.keys(t[k])[0]   || '' : '');
     const val = k => t[`${k}_val`] !== undefined ? t[`${k}_val`]
@@ -234,7 +231,6 @@ function triggerFields(t, rowIdx) {
     const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys  : [];
     const dataTypes = matchIdx >= 0 ? (vapixEventCatalog[matchIdx].dataTypes || t._dataTypes || {}) : (t._dataTypes || {});
 
-    /* Partition keys by type for filtered dropdowns */
     const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
     const numericKeys = dataKeys.filter(k => dataTypes[k] === 'numeric');
     const stringKeys  = dataKeys.filter(k => dataTypes[k] === 'string');
@@ -244,7 +240,6 @@ function triggerFields(t, rowIdx) {
     const numericOpts = [...numericKeys, ...unknownKeys];
     const stringOpts  = [...stringKeys,  ...unknownKeys];
 
-    /* Determine current condition type from saved fields */
     const condType  = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
     const filterKey = t.filter_key || (boolOpts[0] || '');
     const filterVal = t.filter_value;
@@ -681,7 +676,6 @@ function renderTriggerList() {
       <div class="tca-fields">${triggerFields(t, i)}</div>
     </div>
   `).join('');
-  /* Initialise solar previews for any astronomical triggers */
   triggerRows.forEach((t, i) => {
     if ((t.type === 'schedule' || t.schedule_type === 'astronomical') &&
         t.schedule_type === 'astronomical')
@@ -1030,7 +1024,6 @@ function conditionFields(c, rowIdx) {
         </div>`;
         const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic === c.event_key);
         dataKeys = matchedEv && matchedEv.dataKeys ? matchedEv.dataKeys : [];
-        /* Get types from the full catalog if available */
         if (fullCatalog && matchedEv) {
           const catEv = fullCatalog.find(ev => {
             const p = vapixCatalogTopicPath(ev);
@@ -1050,7 +1043,6 @@ function conditionFields(c, rowIdx) {
         </div>`;
       }
     } else {
-      /* Local device: show catalog quick-select if available */
       const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
         ? vapixEventCatalog.map((ev, i) => {
             const path = vapixCatalogTopicPath(ev);
@@ -1090,11 +1082,9 @@ function conditionFields(c, rowIdx) {
       ? `<select data-k="data_key" onchange="rerenderCondition(this)">${dataKeys.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
       : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
 
-    /* --- Determine selected key's type from catalog --- */
     const selKey = c.data_key || (dataKeys[0] || '');
     const selType = dataTypes[selKey] || '';
 
-    /* Partition keys by type for operator-aware dropdowns */
     const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
     const numericKeys = dataKeys.filter(k => dataTypes[k] === 'numeric');
     const stringKeys  = dataKeys.filter(k => dataTypes[k] === 'string');
@@ -1357,7 +1347,6 @@ let _tokenTargetInput  = null;  /* the input/textarea to insert into */
 function toggleTokenPicker(btn) {
   const existingPanel = document.getElementById('_token_picker_panel');
 
-  /* clicking same button again → close */
   if (existingPanel && _tokenPickerBtn === btn) {
     existingPanel.remove();
     _tokenPickerBtn = null;
@@ -1376,9 +1365,7 @@ function toggleTokenPicker(btn) {
   actionRows  = collectRows(actionRows,  'arow');
   triggerRows = collectRows(triggerRows, 'trow');
 
-  /* build token groups */
   const triggerTokens = getTriggerTokens();
-  /* Check if any action in the current form has attach_snapshot enabled */
   const hasSnapshot = actionRows.some(a =>
     ['http_request', 'email', 'mqtt_publish', 'slack_webhook', 'teams_webhook', 'telegram'].includes(a.type) && a.attach_snapshot
   );
@@ -1449,7 +1436,6 @@ function toggleTokenPicker(btn) {
   panel.style.left = left + 'px';
   panel.style.top = top + 'px';
 
-  /* close on outside click */
   setTimeout(() => {
     document.addEventListener('click', function _close(e) {
       if (!panel.contains(e.target) && e.target !== btn) {
@@ -1536,7 +1522,7 @@ const REMOTE_CAPABLE_ACTIONS = new Set([
   'paging_console_execute', 'paging_console_button'
 ]);
 
-/* Reusable remote device section for triggers and conditions (uses rerenderFn callback name) */
+/* Remote device section for conditions; rerenderFn is the onchange handler name */
 function remoteDeviceSection(obj, rerenderFn) {
   const isRemote = obj.remote_host_toggle === 'remote'
     || (obj.remote_host && obj.remote_host_toggle !== 'local');
@@ -1581,7 +1567,6 @@ function conditionRemoteDeviceFields(c) {
 
 function remoteDeviceFields(a) {
   if (!REMOTE_CAPABLE_ACTIONS.has(a.type)) return '';
-  /* Show remote inputs if toggle is 'remote' OR if there's a saved remote_host (and not explicitly set to local) */
   const isRemote = a.remote_host_toggle === 'remote'
     || (a.remote_host && a.remote_host_toggle !== 'local');
   return `
@@ -1616,10 +1601,7 @@ function remoteDeviceFields(a) {
   </div>`;
 }
 
-/* Returns a capability control HTML string for a remote-device action, or null if not remote.
- * query: "ptz"|"audio"|"siren"|"privacy"|"guardtour"|"acap"
- * dataKey: the data-k attribute for the resulting input/select
- * currentVal: the currently saved value for that field */
+/* Returns the remote-device control HTML, or null when the action targets the local device. */
 function remoteCapControl(a, rowIdx, query, dataKey, currentVal, placeholder) {
   const isRemote = a.remote_host_toggle === 'remote'
     || (a.remote_host && a.remote_host_toggle !== 'local');
@@ -1988,10 +1970,7 @@ function actionFields(a, rowIdx) {
       </div>
     </div>`;
   if (type === 'vapix_query') {
-    /* Hidden topic inputs — mirroring the trigger pattern.
-     * Topics may be in object form {ns:val} (from applyVapixEventAction / saved JSON)
-     * or in flat form topic0_ns / topic0_val (after collectRows reads form inputs).
-     * Handle both so re-renders don't lose the selected event. */
+    /* Topics arrive as {ns:val} objects (saved JSON) or flat topicN_ns/_val (after collectRows). */
     const ns  = k => a[`${k}_ns`]  !== undefined ? a[`${k}_ns`]
                    : (a[k] ? Object.keys(a[k])[0]   || '' : '');
     const val = k => a[`${k}_val`] !== undefined ? a[`${k}_val`]
@@ -2009,7 +1988,6 @@ function actionFields(a, rowIdx) {
       return ak === bk && x[ak] === y[bk];
     };
     const topicKeys = ['topic0','topic1','topic2','topic3'];
-    /* Build normalized topic objects — handles both object form and flat _ns/_val form */
     const getTopic = k => {
       if (a[k] && typeof a[k] === 'object') return a[k];
       const v = val(k); return v ? { [ns(k)]: v } : null;
@@ -3073,7 +3051,6 @@ function moveAction(i, dir) {
 }
 
 async function testActionRow(i) {
-  /* Collect and normalize current form data for this row */
   const el = document.getElementById('arow-' + i);
   if (!el) return;
   const data = { type: actionRows[i].type };
@@ -3115,9 +3092,7 @@ function collectRows(rows, prefix) {
 function normalizeTrigger(t) {
   const out = { type: t.type };
   if (t.type === 'vapix_event' || t.type === 'io_input') {
-    /* Topics may be in flat form (topic0_ns/topic0_val from form inputs) or
-     * object form ({topic0: {ns: val}} from applyVapixEvent / saved JSON).
-     * Handle both so topics are never silently dropped. */
+    /* Accept both flat topicN_ns/_val and {topicN: {ns: val}} so topics are never silently dropped. */
     ['topic0','topic1','topic2','topic3'].forEach(k => {
       if (t[`${k}_val`])          out[k] = { [t[`${k}_ns`] || '']: t[`${k}_val`] };
       else if (t[k] && typeof t[k] === 'object') out[k] = t[k];
@@ -3248,7 +3223,6 @@ function normalizeAction(a) {
                  'action_id','page_id','slot','duration_ms','gap_ms','count'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
-  /* Remote device support */
   const isRemote = a.remote_host_toggle === 'remote'
     || (a.remote_host && a.remote_host_toggle !== 'local');
   if (isRemote && REMOTE_CAPABLE_ACTIONS.has(a.type)) {
@@ -3280,7 +3254,6 @@ function normalizeAction(a) {
     out.retain = a.retain === 'true' || a.retain === true;
     out.qos    = parseInt(a.qos) || 0;
     out.attach_snapshot = a.attach_snapshot === true;
-    /* Fallback action chain */
     const fbType = a.on_failure_type || '';
     if (fbType === 'send_syslog') {
       out.on_failure = [{ type: 'send_syslog', message: a.on_failure_message || 'MQTT publish failed' }];
@@ -3389,7 +3362,6 @@ function normalizeAction(a) {
   if (a.type === 'http_request') {
     out.attach_snapshot = a.attach_snapshot === true;
     if (a.allow_insecure === true) out.allow_insecure = true;
-    /* Fallback action chain */
     const fbType = a.on_failure_type || '';
     if (fbType === 'send_syslog') {
       out.on_failure = [{ type: 'send_syslog', message: a.on_failure_message || 'HTTP request failed' }];
@@ -3403,7 +3375,6 @@ function normalizeAction(a) {
 }
 
 async function saveRule() {
-  // Collect all form values
   triggerRows   = collectRows(triggerRows,   'trow').map(normalizeTrigger);
   conditionRows = collectRows(conditionRows, 'crow').map(normalizeCondition);
   actionRows    = collectRows(actionRows,    'arow').map(normalizeAction);
@@ -3413,7 +3384,6 @@ async function saveRule() {
   if (!triggerRows.length) { toast('At least one trigger is required', 'error'); return; }
   if (!actionRows.length) { toast('At least one action is required', 'error'); return; }
 
-  /* Per-trigger required field validation */
   for (let i = 0; i < triggerRows.length; i++) {
     const t = triggerRows[i];
     if ((t.type === 'vapix_event' || t.type === 'io_input') && !t.topic0) {
@@ -3422,7 +3392,6 @@ async function saveRule() {
     }
   }
 
-  /* Per-action required field validation */
   for (let i = 0; i < actionRows.length; i++) {
     const a = actionRows[i];
     const label = `Action ${i + 1} (${ruleTypeLabel('action', a.type)})`;

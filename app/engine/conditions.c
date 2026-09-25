@@ -68,7 +68,6 @@ static int cond_time_window(cJSON* cfg) {
     struct tm* tm = localtime(&now);
     int dow = tm->tm_wday; /* 0=Sun */
 
-    /* Check day-of-week */
     if (days && cJSON_IsArray(days)) {
         int day_ok = 0;
         cJSON* d;
@@ -102,7 +101,6 @@ static int cond_day_night(cJSON* cfg) {
     if (lat_j) lat = lat_j->valuedouble;
     if (lon_j) lon = lon_j->valuedouble;
 
-    /* Fallback to engine settings if not specified per-condition */
     if (!lat_j && !lon_j) {
         cJSON* eng = ACAP_Get_Config("engine");
         if (eng) {
@@ -118,15 +116,13 @@ static int cond_day_night(cJSON* cfg) {
     return (strcmp(want, "day") == 0) ? is_day : !is_day;
 }
 
-/* Forward declaration — defined after remote helpers */
 static cJSON* cond_remote_pullpoint(const char* host, const char* user,
                                      const char* pass, const char* event_key);
 static cJSON* cond_local_pullpoint(const char* event_key);
 
 /*-----------------------------------------------------
  * vapix_event_state
- * Checks the current state of a VAPIX event by querying
- * the event instance list.
+ * Checks the current state of a VAPIX event.
  *
  * Match modes (determined by "op" field):
  *   op absent / "eq_str"  → string equality (legacy "expected")
@@ -222,7 +218,6 @@ static int cond_vapix_event_state(cJSON* cfg) {
     /* For remote mode, val is always a cJSON string (from PullPoint XML).
      * For local mode, val may be string, number, or bool from JSON. */
     if (!op || strcmp(op, "eq_str") == 0) {
-        /* Legacy string equality (backward compatible) */
         if (expected) {
             char val_str[128] = "";
             if (cJSON_IsString(val))
@@ -234,7 +229,6 @@ static int cond_vapix_event_state(cJSON* cfg) {
             if (strcmp(val_str, expected) == 0) result = 1;
         }
     } else if (strcmp(op, "boolean") == 0) {
-        /* Boolean match: expected is "true"/"1" or "false"/"0" */
         if (expected) {
             int want = (strcmp(expected, "true") == 0 || strcmp(expected, "1") == 0) ? 1 : 0;
             int actual = 0;
@@ -244,7 +238,6 @@ static int cond_vapix_event_state(cJSON* cfg) {
             if (actual == want) result = 1;
         }
     } else if (strcmp(op, "contains") == 0) {
-        /* Substring match */
         if (expected) {
             const char* sval = cJSON_GetStringValue(val);
             char num_buf[64] = "";
@@ -255,7 +248,6 @@ static int cond_vapix_event_state(cJSON* cfg) {
             if (sval && strstr(sval, expected) != NULL) result = 1;
         }
     } else {
-        /* Numeric comparison */
         double actual_num;
         int valid = 0;
         if (cJSON_IsNumber(val)) {
@@ -529,9 +521,8 @@ static cJSON* cond_remote_pullpoint(const char* host, const char* user,
     return result;
 }
 
-/* Local PullPoint: uses ACAP_VAPIX_Soap_Post via the loopback (no external
- * credentials needed). Same drain-then-wait logic as the remote version but
- * the subscription is already authenticated by the ACAP framework. */
+/* Local PullPoint over loopback via ACAP_VAPIX_Soap_Post (the ACAP framework
+ * supplies credentials). Same drain-then-wait logic as the remote version. */
 static cJSON* cond_local_pullpoint(const char* event_key) {
     static const char create_soap[] =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -694,7 +685,6 @@ static int cond_http_check(cJSON* cfg) {
         if (!root) {
             ok = 0; /* expected JSON but body is not valid JSON */
         } else {
-            /* Walk the dot-separated path */
             char path_copy[256];
             strncpy(path_copy, json_path, sizeof(path_copy) - 1);
             path_copy[sizeof(path_copy) - 1] = '\0';
@@ -831,8 +821,7 @@ static int cond_aoa_occupancy(cJSON* cfg) {
  *-----------------------------------------------------*/
 
 static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSON* trigger_data, int skip_expensive) {
-    /* NOTE: trigger_data is currently unused but available for future enhancements
-     * (e.g., condition: "fire only if trigger value > 30") */
+    /* trigger_data is currently unused */
     if (!conditions_array || cJSON_GetArraySize(conditions_array) == 0)
         return 1; /* no conditions → always pass */
 

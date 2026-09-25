@@ -81,7 +81,7 @@ typedef struct {
 
     /* io_input */
     int    io_port;
-    int    io_edge;       /* 0=rising, 1=falling, 2=both */
+    int    io_edge;       /* 0=rising, 1=falling, 2=both, 3=supervised fault (cut/short) */
     int    io_hold_secs;  /* must hold in triggered state for N secs; 0=fire immediately */
     time_t io_since;      /* when edge first matched; 0=not pending */
     int    io_last_state; /* last known state: 1=active, 0=inactive, -1=unknown */
@@ -174,11 +174,9 @@ static cJSON* build_subscription_decl(const char* rule_id, int tidx, cJSON* cfg)
 static int event_topic_matches(Subscription* s, cJSON* event) {
     if (!s->topic_filter) return 1; /* no filter = match all */
 
-    /* ACAP_EVENTS_Parse encodes topic levels into a single "event" path string
-     * (e.g. "VideoSource/Thermometry/TemperatureDetection") rather than as
-     * separate topic0/topic1/topic2 keys.  Build the expected path from the
-     * filter's topic values (local names only; namespace prefixes are ignored
-     * since they are lost during ACAP event parsing) and compare. */
+    /* ACAP_EVENTS_Parse flattens topic levels into one "event" path (e.g.
+     * "VideoSource/Thermometry/TemperatureDetection") and drops namespaces,
+     * so rebuild that path from the filter's local names and compare. */
     cJSON* event_path = cJSON_GetObjectItem(event, "event");
     if (!event_path || !event_path->valuestring) return 0;
 
@@ -195,8 +193,7 @@ static int event_topic_matches(Subscription* s, cJSON* event) {
         while (*val && pos < (int)sizeof(expected) - 1) expected[pos++] = *val++;
     }
     expected[pos] = '\0';
-    /* Prefix match: if filter has fewer topic levels than the event, still match.
-     * e.g. filter "VideoSource/Thermometry" matches event path
+    /* Prefix match on whole levels: "VideoSource/Thermometry" matches
      * "VideoSource/Thermometry/TemperatureDetection". */
     size_t elen = strlen(expected);
     if (strncmp(event_path->valuestring, expected, elen) != 0) return 0;
@@ -253,7 +250,6 @@ void Triggers_Unsubscribe_Rule(const char* rule_id) {
 int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
     if (!rule_id || !triggers_array) return 0;
 
-    /* Remove existing subs for this rule first */
     Triggers_Unsubscribe_Rule(rule_id);
 
     int idx = 0;
@@ -525,11 +521,10 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
 
         /* IO edge filter + hold duration */
         if (s->type == TRIG_IO_INPUT) {
-            /* Filter by port number (if specified) */
             if (s->io_port > 0) {
                 cJSON* port_j = cJSON_GetObjectItem(event, "port");
                 int event_port = port_j && cJSON_IsNumber(port_j) ? (int)port_j->valuedouble : -1;
-                if (event_port != s->io_port) continue; /* port mismatch — skip this event */
+                if (event_port != s->io_port) continue;
             }
 
             if (s->io_edge == 3) {
@@ -546,10 +541,7 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
             } else {
                 cJSON* st = cJSON_GetObjectItem(event, "state");
                 int active = st ? (cJSON_IsTrue(st) ? 1 : 0) : -1;
-                /* NOTE: io_last_state is currently unused; commented out to avoid dead code */
-                /* if (active >= 0) s->io_last_state = active; */
 
-                /* Check edge match */
                 int edge_matches = 1;
                 if (s->io_edge == 0 && active == 0) edge_matches = 0; /* rising  = want active   */
                 if (s->io_edge == 1 && active == 1) edge_matches = 0; /* falling = want inactive */
@@ -583,10 +575,8 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
                 s->value_since = 0; s->value_hysteresis = 0;
                 continue;
             }
-            /* Condition passes — apply hysteresis always so we fire once per activation */
             if (s->value_hysteresis) continue; /* already fired; waiting for reset */
             if (s->value_hold_secs > 0) {
-                /* Must hold for N seconds before firing */
                 if (!s->value_since) { s->value_since = time(NULL); continue; }
                 if ((time(NULL) - s->value_since) < (time_t)s->value_hold_secs) continue;
             }
@@ -750,7 +740,6 @@ void Triggers_Tick(void) {
             (now_mb - s->modbus_last_poll) < (time_t)s->modbus_poll_interval) continue;
         s->modbus_last_poll = now_mb;
 
-        /* Build a transient cfg JSON for modbus_pool_get */
         cJSON* cfg = cJSON_CreateObject();
         cJSON_AddStringToObject(cfg, "connection_type", s->modbus_connection_type);
         cJSON_AddStringToObject(cfg, "host",            s->modbus_host);
@@ -793,7 +782,6 @@ void Triggers_Tick(void) {
             continue;
         }
 
-        /* Apply threshold comparison if configured */
         int passes = s->value_op[0]
             ? value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)
             : 1;
@@ -873,7 +861,6 @@ cJSON* Triggers_Get_Cached(cJSON* topic_cfg) {
         Subscription* s = &subs[i];
         if (!s->passive || !s->cached_data || !s->topic_filter) continue;
 
-        /* Build this passive sub's path and compare */
         char sub_path[200] = "";
         for (int k = 0; keys[k]; k++) {
             cJSON* t = cJSON_GetObjectItem(s->topic_filter, keys[k]);
@@ -896,8 +883,7 @@ int Triggers_Any_Active(const char* rule_id) {
         } else if (s->type == TRIG_COUNTER_THRESHOLD) {
             if (s->counter_hysteresis) return 1;
         }
-        /* Other trigger types (schedule, webhook, mqtt, io_input, rule_fired,
-         * sparkplug_command) are momentary — no persistent active state. */
+        /* All other trigger types are treated as momentary here. */
     }
     return 0;
 }
@@ -936,8 +922,7 @@ int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index) 
             active = Counter_Compare(s->counter_name, s->counter_op, s->counter_threshold);
         } else {
             /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual,
-             * sparkplug_command) have no persistent state. They are only active
-             * if they are the trigger that just fired (handled above). */
+             * modbus_read, sparkplug_command) count only as the firing trigger. */
             active = 0;
         }
 

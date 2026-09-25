@@ -1338,7 +1338,6 @@
   </main>
 </div>
 
-<!-- ═══════════════════════ JS ═══════════════════════ -->
 <script>
 /* Theme toggle */
 document.getElementById('theme-btn').addEventListener('click', function() {
@@ -1373,7 +1372,7 @@ document.getElementById('theme-btn').addEventListener('click', function() {
   update();
 })();
 
-/* Template download — fetches from GitHub raw or relative path */
+/* Templates are always fetched from GitHub raw (main branch) */
 var TEMPLATE_BASE = 'https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/use-cases/templates/';
 
 function downloadTemplate(name) {
@@ -1492,7 +1491,6 @@ function downloadTemplate(name) {
       sh.style.display = hasVisible ? '' : 'none';
     });
 
-    /* Filter sidebar links */
     sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) {
       var href = a.getAttribute('href').slice(1);
       var el = document.getElementById(href);

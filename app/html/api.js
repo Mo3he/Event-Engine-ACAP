@@ -1,8 +1,5 @@
 'use strict';
 
-/* ===================================================
- * API Layer
- * =================================================== */
 const BASE = '/local/acap_event_engine';
 
 async function apiFetch(url, opts) {

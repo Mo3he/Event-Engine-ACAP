@@ -402,8 +402,8 @@ static cJSON* get_body_json(const ACAP_HTTP_Request req) {
 }
 
 /*=====================================================
- * GET/POST/PUT/DELETE /local/acap_event_engine/rules
- * 
+ * GET/POST/DELETE /local/acap_event_engine/rules
+ *
  * GET /rules                          - List all rules
  * GET /rules?id=UUID                  - Get a single rule
  * GET /rules?id=UUID&action=export    - Export one rule as JSON download
@@ -461,11 +461,10 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
             }
 
             if (action && *action && strcmp(action, "export") == 0) {
-                /* Export rule as downloadable file */
                 const char* rule_name = cJSON_GetStringValue(cJSON_GetObjectItem(rule, "name"));
                 char filename[256] = "rule.json";
                 if (rule_name && *rule_name) {
-                    /* Sanitize filename: allow alphanumeric, dash, underscore; replace spaces/special */
+                    /* Keep [A-Za-z0-9_-], map space/'.'/',' to '_', drop anything else */
                     int fi = 0;
                     for (int si = 0; rule_name[si] && fi < 240; si++) {
                         char c = rule_name[si];
@@ -479,7 +478,6 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     snprintf(filename + fi, sizeof(filename) - fi, ".json");
                 }
 
-                /* Convert rule to JSON string to get size */
                 char* json_str = cJSON_Print(rule);
                 unsigned json_size = json_str ? strlen(json_str) : 0;
                 
@@ -491,7 +489,6 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     ACAP_HTTP_Respond_Error(resp, 500, "Failed to serialize rule");
                 }
             } else {
-                /* Return rule as JSON response */
                 ACAP_HTTP_Respond_JSON(resp, rule);
             }
 
@@ -536,7 +533,6 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 return; 
             }
 
-            /* Expect an array of rules */
             if (!cJSON_IsArray(body)) {
                 cJSON_Delete(body);
                 ACAP_HTTP_Respond_Error(resp, 400, "Import body must be a JSON array of rules");
@@ -544,7 +540,6 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 return;
             }
 
-            /* Process each rule in the array */
             cJSON* result = cJSON_CreateObject();
             cJSON* imported_array = cJSON_AddArrayToObject(result, "imported");
             cJSON* errors_array = cJSON_AddArrayToObject(result, "errors");
@@ -557,7 +552,6 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 
                 const char* rname = cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name"));
 
-                /* Validate rule before import */
                 if (!validate_rule_json(rule_item, error, sizeof(error))) {
                     cJSON* err_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(err_obj, "index", total - 1);
@@ -829,7 +823,6 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
             return;
         }
 
-        /* Validate: letters, digits, underscore only */
         for (const char* p = id; *p; p++) {
             if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
                   (*p >= '0' && *p <= '9') || *p == '_')) {
@@ -897,7 +890,6 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
         else
             cJSON_AddItemToObject(entry, "data", cJSON_CreateArray());
 
-        /* Register with ACAP SDK */
         if (!ACAP_EVENTS_Add_Event_JSON(entry)) {
             cJSON_Delete(entry);
             cJSON_Delete(events);
@@ -906,7 +898,6 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
             return;
         }
 
-        /* Persist */
         cJSON* response_entry = cJSON_Duplicate(entry, 1);
         cJSON_AddItemToArray(events, entry);
         ACAP_FILE_Write(ACAP_USER_EVENTS_FILE, events);
@@ -966,7 +957,7 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
 }
 
 /*=====================================================
- * GET /local/acap_event_engine/events
+ * GET/DELETE /local/acap_event_engine/events
  *=====================================================*/
 static void HTTP_Events(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     const char* method = get_method(req);
@@ -1000,7 +991,7 @@ static void HTTP_Events(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 }
 
 /*=====================================================
- * GET /local/acap_event_engine/status
+ * GET /local/acap_event_engine/engine
  *=====================================================*/
 static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     (void)req;
@@ -1098,7 +1089,9 @@ static void HTTP_Fire(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 /*=====================================================
  * POST /local/acap_event_engine/remote-caps
  * Proxy VAPIX capability queries to a remote Axis device.
- * Body: { "host":"IP", "user":"root", "pass":"pass", "query":"ptz|audio|siren|privacy|guardtour|acap" }
+ * Body: { "host":"IP", "user":"root", "pass":"pass", "query":"<query>" }
+ *   query: ptz|audio|siren|privacy|guardtour|acap|param|allparams|aoa|
+ *          vapix_events|paging
  * Returns the parsed capability list as a JSON array.
  *=====================================================*/
 
@@ -1346,7 +1339,6 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
             ACAP_HTTP_Respond_Error(resp, 400, "Missing param_name");
             return;
         }
-        /* Normalise to always include root. prefix */
         char full_param[256];
         if (strncmp(param_name, "root.", 5) == 0)
             snprintf(full_param, sizeof(full_param), "%s", param_name);
@@ -1376,11 +1368,9 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
                  full_param);
         char* def_raw = rc_get(host, user, pass, def_req);
 
-        /* Build result item */
         cJSON* item = cJSON_CreateObject();
         cJSON_AddStringToObject(item, "currentValue", currentVal);
 
-        /* Parse XML to extract enum values and default. */
         cJSON* enum_arr = cJSON_AddArrayToObject(item, "enumValues");
         char   defValueStr[128] = "";
         if (def_raw) {
@@ -1447,7 +1437,6 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
                     if (len < (int)sizeof(name)) {
                         strncpy(name, line, len);
                         name[len] = '\0';
-                        /* trim trailing \r and spaces */
                         int l2 = len;
                         while (l2 > 0 && (name[l2-1] == '\r' || name[l2-1] == ' ')) name[--l2] = '\0';
                         if (name[0]) {
@@ -1463,7 +1452,6 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
         }
 
     } else if (strcmp(query, "aoa") == 0) {
-        /* Return AOA scenarios from the remote device */
         char* raw = rc_post(host, user, pass,
                             "/local/objectanalytics/control.cgi",
                             "{\"apiVersion\":\"1.0\",\"method\":\"getConfiguration\"}");
@@ -1493,9 +1481,8 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
         }
 
     } else if (strcmp(query, "vapix_events") == 0) {
-        /* Fetch VAPIX event properties via SOAP GetEventProperties.
-         * Returns [{soap: "<raw XML>"}] so the JS can parse with its existing
-         * parseVapixEventCatalog() function (same call the local catalog uses). */
+        /* Returns [{soap: "<raw XML>"}] so the UI parses it with the same
+         * parseVapixEventCatalog() it uses for the local catalog. */
         const char* soap_body =
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
             "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
@@ -1601,7 +1588,6 @@ static void HTTP_AOA(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 
     cJSON* arr = cJSON_CreateArray();
     cJSON* data = cJSON_GetObjectItem(root, "data");
-    /* Scenarios are at data.scenarios in the AOA API */
     cJSON* scenarios = data ? cJSON_GetObjectItem(data, "scenarios") : NULL;
     if (scenarios && cJSON_IsArray(scenarios)) {
         cJSON* s;
@@ -1691,14 +1677,11 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    /* Apply proxy config from engine settings */
     cJSON* eng_cfg = cJSON_GetObjectItem(settings, "engine");
     if (eng_cfg) apply_proxy_config(eng_cfg);
 
-    /* Register event callback */
     ACAP_EVENTS_SetCallback(Event_Callback);
 
-    /* Initialize subsystems */
     Variables_Init();
     EventLog_Init();
     EventLog_Load();
@@ -1718,12 +1701,10 @@ int main(void) {
 
     Sparkplug_Configure(cJSON_GetObjectItem(settings, "sparkplug"));
 
-    /* SMTP — load saved password into in-memory config */
     load_smtp_password();
 
     RuleEngine_Init();
 
-    /* Alert stream — HTTP multipart event stream */
     AlertStream_Init();
 
     /* Re-register any user-created ACAP events saved in localdata */
@@ -1736,14 +1717,11 @@ int main(void) {
         }
     }
 
-    /* Set status */
     ACAP_STATUS_SetString("app", "status", "Running");
     ACAP_STATUS_SetNumber("app", "rules",  RuleEngine_Count());
 
-    /* Register HTTP endpoints */
-    /* NOTE: ACAP_Init() internally registers "app", "settings", and "status" first.
-     *       Any attempt to re-register those names is silently dropped.
-     *       Our status/info endpoint is therefore registered as "engine". */
+    /* ACAP_Init() already owns "app", "settings" and "status" (re-registering
+     * is silently dropped), so our status endpoint is "engine". */
     ACAP_HTTP_Node("engine",    HTTP_Status);
     ACAP_HTTP_Node("rules",     HTTP_Rules);
     ACAP_HTTP_Node("triggers",  HTTP_Triggers);
@@ -1756,13 +1734,10 @@ int main(void) {
     ACAP_HTTP_Node("remote-caps", HTTP_RemoteCaps);
     ACAP_HTTP_Node("sparkplug",  HTTP_Sparkplug);
 
-    /* 1-second engine tick */
     g_timeout_add_seconds(1, Engine_Tick, NULL);
 
-    /* Fire EngineReady event */
     ACAP_EVENTS_Fire_State("EngineReady", 1);
 
-    /* Main loop */
     main_loop = g_main_loop_new(NULL, FALSE);
     GSource* sig = g_unix_signal_source_new(SIGTERM);
     if (sig) {

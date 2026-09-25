@@ -1,16 +1,10 @@
 'use strict';
 
-/* ===================================================
- * Update Checker — polls GitHub releases for newer versions
- * =================================================== */
 const UPDATE_CHECK_REPO = 'Mo3he/Event-Engine-ACAP';
 const UPDATE_CHECK_URL  = `https://api.github.com/repos/${UPDATE_CHECK_REPO}/releases/latest`;
 const UPDATE_CHECK_KEY  = 'ee_update_dismissed';
 
-/**
- * Compare two semver-like version strings (e.g. "1.9.3" vs "1.10.0").
- * Returns  1 if a > b, -1 if a < b, 0 if equal.
- */
+/* Returns 1 if a > b, -1 if a < b, 0 if equal (e.g. "1.10.0" > "1.9.3"). */
 function compareVersions(a, b) {
   const pa = a.replace(/^v/i, '').split('.').map(Number);
   const pb = b.replace(/^v/i, '').split('.').map(Number);
@@ -24,10 +18,7 @@ function compareVersions(a, b) {
   return 0;
 }
 
-/**
- * Check GitHub for a newer release.  Shows a banner when an update is available.
- * @param {string} currentVersion — the running engine version (e.g. "1.9.3")
- */
+/* force: ignore a dismissed version and toast "up to date" or errors too. */
 async function checkForUpdate(currentVersion, force) {
   if (!currentVersion) return;
 

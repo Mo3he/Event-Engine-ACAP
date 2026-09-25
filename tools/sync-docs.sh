@@ -1,10 +1,7 @@
 #!/bin/sh
 # Regenerate the published manual (docs/help.html) from the in-app manual.
-#
-# The two files are identical apart from the header navigation: the in-app copy
-# links back to the app, the published copy links to the site and the repo.
-# Keeping this as a script means the site cannot silently rot when the in-app
-# manual changes, which is exactly what happened during 1.9.14.
+# The two differ only in header navigation; scripting it keeps the site from
+# silently drifting when the in-app manual changes (as happened in 1.9.14).
 #
 #   tools/sync-docs.sh           regenerate docs/help.html
 #   tools/sync-docs.sh --check   fail if docs/help.html is out of date (CI)

@@ -37,7 +37,7 @@
       defaultModelExpandDepth: 2,
       tryItOutEnabled: true,
       requestInterceptor: (req) => {
-        // Pre-fill server URL from current window location
+        // Retarget absolute spec URLs at the camera serving this page
         if (!req.url.startsWith('http')) return req;
         const base = window.location.origin + '/local/acap_event_engine';
         req.url = req.url.replace(/^https?:\/\/[^/]+\/local\/acap_event_engine/, base);

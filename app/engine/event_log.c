@@ -197,9 +197,7 @@ void EventLog_Load(void) {
     if (!arr || !cJSON_IsArray(arr)) { if (arr) cJSON_Delete(arr); return; }
 
     pthread_mutex_lock(&lock);
-    /* Load entries in order (oldest first) */
     int n = cJSON_GetArraySize(arr);
-    /* Load at most EVENT_LOG_SIZE entries, oldest first (arr is newest-first from save) */
     int start = n > EVENT_LOG_SIZE ? n - EVENT_LOG_SIZE : 0;
     for (int i = n - 1; i >= start; i--) {
         cJSON* obj = cJSON_GetArrayItem(arr, i);

@@ -8,16 +8,14 @@ extern "C" {
 #endif
 
 /*
- * Scheduler — evaluates time-based triggers.
+ * Scheduler: evaluates time-based triggers every 1 s from the GMainLoop timer.
+ * Schedule types:
+ *   "cron"         5-field cron expression ("* * * * *")
+ *   "interval"     fire every N seconds
+ *   "daily_time"   fire once per day at HH:MM on selected days
+ *   "astronomical" sunrise/sunset/dawn/dusk/solar_noon plus an offset
  *
- * Called every 1 second from the GMainLoop timer.
- * Supports three schedule types:
- *   "cron"       — 5-field cron expression ("* * * * *")
- *   "interval"   — fire every N seconds
- *   "daily_time" — fire once per day at HH:MM on selected days
- *
- * When a schedule fires, the registered callback is invoked with the
- * rule_id and trigger_index so rule_engine can dispatch it.
+ * The callback receives rule_id and trigger_index.
  */
 
 typedef void (*Scheduler_Callback)(const char* rule_id, int trigger_index);

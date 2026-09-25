@@ -8,13 +8,8 @@ extern "C" {
 #endif
 
 /*
- * Variables & Counters store.
- *
- * Variables are named string values that persist across engine restarts.
- * Counters are numeric variables optimized for increment/decrement operations.
- * Both are stored in localdata/variables.json and flushed periodically.
- *
- * Thread-safe: all functions acquire an internal mutex.
+ * Variables & Counters store, persisted in localdata/variables.json by
+ * Variables_Flush(). Counters are numeric variables. Thread-safe.
  */
 
 int           Variables_Init(void);
@@ -34,7 +29,7 @@ int           Counter_Increment(const char* name, double delta);
 int           Counter_Reset(const char* name);
 int           Counter_Compare(const char* name, const char* op, double threshold);
 
-/* Persist dirty data (called from housekeeping tick) */
+/* Persist dirty data (called every 1 s from RuleEngine_Tick) */
 void          Variables_Flush(void);
 
 #ifdef __cplusplus

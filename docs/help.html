@@ -308,7 +308,6 @@
 
 <div class="shell">
 
-  <!-- Top bar -->
   <div class="topbar">
     <span class="topbar-title">Event Engine</span>
     <span class="topbar-sub">User Manual</span>
@@ -321,7 +320,6 @@
 
   <div class="body-wrap">
 
-    <!-- Sidebar -->
     <nav class="sidebar" id="sidebar">
       <div class="search-box" id="search-box" style="margin:12px 12px 8px;">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -416,7 +414,6 @@
       <a href="#alert-stream" class="sub">Alert Stream</a>
     </nav>
 
-    <!-- Main content -->
     <main class="content">
 
       <!-- ═══════════════════════════════════════════ OVERVIEW -->
@@ -1488,7 +1485,6 @@ updateActive();
       });
       if (currentGroup.els.length) h3groups.push(currentGroup);
 
-      /* If there are h3 subgroups, filter them individually */
       if (h3groups.length > 1 || (h3groups.length === 1 && h3groups[0].heading)) {
         h3groups.forEach(function(g) {
           var gText = g.els.map(function(el) { return el.textContent; }).join(' ');
@@ -1521,7 +1517,6 @@ updateActive();
       var href = a.getAttribute('href').slice(1);
       var h3 = document.getElementById(href);
       if (!h3) return;
-      /* Gather text from this h3 until the next h3 or h2 */
       var text = h3.textContent;
       var sib = h3.nextElementSibling;
       while (sib && sib.tagName !== 'H3' && sib.tagName !== 'H2') {

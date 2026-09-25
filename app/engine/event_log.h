@@ -9,10 +9,8 @@ extern "C" {
 #endif
 
 /*
- * Event Log — in-memory ring buffer of rule execution history.
- *
- * Stores up to EVENT_LOG_SIZE entries. When full, oldest entries are
- * overwritten. Thread-safe: accessed from both GMainLoop and FastCGI threads.
+ * Event Log: in-memory ring buffer of rule execution history (oldest entries
+ * are overwritten). Thread-safe: used from both GMainLoop and FastCGI threads.
  */
 
 #define EVENT_LOG_SIZE 500

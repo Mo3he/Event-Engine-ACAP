@@ -8,25 +8,13 @@ extern "C" {
 #endif
 
 /*
- * Condition evaluators.
- *
- * Conditions_Evaluate() runs through a conditions array applying AND or OR
- * logic and returns 1 (pass) or 0 (fail).
- *
- * Individual condition types:
- *   time_window      — current time within start/end on specified days
- *   event_state      — VAPIX event current state value
- *   counter          — compare a counter to a threshold
- *   http_check       — HTTP GET/POST response matches expected
- *   io_state         — current IO port state
- *   variable_compare — compare a stored variable
- *
- * trigger_data is passed through for potential template use in http_check.
+ * Condition evaluators: time_window, day_night, counter, io_state,
+ * variable_compare, vapix_event_state, http_check, aoa_occupancy.
  */
 
-/* logic: 0 = AND, 1 = OR
- * skip_expensive: if 1, http_check and event_state are treated as pass (not evaluated) */
+/* logic: 0 = AND, 1 = OR. Returns 1 (pass) or 0 (fail). */
 int Conditions_Evaluate(cJSON* conditions_array, int logic, cJSON* trigger_data);
+/* Treats http_check, vapix_event_state and aoa_occupancy as pass (not evaluated) */
 int Conditions_Evaluate_Lightweight(cJSON* conditions_array, int logic);
 void Conditions_Set_Proxy(const char* proxy); /* set SOCKS5 proxy for http_check (e.g. "socks5h://localhost:1055") */
 

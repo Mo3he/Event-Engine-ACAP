@@ -8,33 +8,19 @@ extern "C" {
 #endif
 
 /*
- * Alert Stream — real-time HTTP multipart event stream.
- *
- * Provides a long-lived HTTP endpoint at /local/acap_event_engine/alertStream.
- * Clients perform a GET request (authenticated via the camera's Digest Auth
- * reverse proxy) and receive a multipart/mixed response where each part is
- * a JSON object describing a rule-fire event.
- *
- * Implementation:
- *   A dedicated thread runs its own FCGX_Accept_r loop on the shared FCGI
- *   socket. When a client connects, a per-client thread is spawned that
- *   writes the multipart header and then blocks on a condition variable.
- *   AlertStream_Broadcast() signals all waiting client threads to write
- *   the latest event data as a new multipart chunk.
- *
- * Thread safety:
- *   AlertStream_Broadcast() may be called from any thread.
+ * Alert Stream: real-time HTTP multipart/mixed event stream at
+ * /local/acap_event_engine/alertStream. Apache (Digest Auth) reverse-proxies
+ * it to a TCP server on 127.0.0.1:8888; each client gets its own thread and
+ * each event is one JSON part. A slow client only gets the newest pending event.
  */
 
-/* Initialize the alert stream subsystem and start the accept thread.
- * Must be called after ACAP_Init() (needs the FCGI socket). */
+/* Start the loopback HTTP server and its accept thread. */
 int  AlertStream_Init(void);
 
 /* Shut down all stream connections and stop the accept thread. */
 void AlertStream_Cleanup(void);
 
-/* Broadcast an event to all connected stream clients.
- * May be called from any thread. Non-blocking (queues data and signals). */
+/* Broadcast an event to all connected stream clients. Non-blocking; any thread. */
 void AlertStream_Broadcast(const char* rule_id, const char* rule_name,
                            cJSON* trigger_data);
 
