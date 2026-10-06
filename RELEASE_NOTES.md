@@ -35,8 +35,9 @@ before being fixed and verified after.
 ### Upgrading to 1.9.16
 
 The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
-in-place upgrade from v1.9.14 or later. Upgrading from v1.9.13 or earlier needs
-an uninstall first (export your rules before); see the v1.9.15 notes below.
+in-place upgrade. If upgrading from v1.9.13 or earlier fails with an install
+error, export your rules, uninstall the old version and install this one; see
+the v1.9.15 notes below.
 
 ### Fixes in 1.9.16
 
