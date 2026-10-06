@@ -187,7 +187,12 @@ function ruleTypeLabel(group, type) {
 function escHtml(s) {
   return String(s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+/* For a value passed as a JS string argument inside an on*="..." attribute. */
+function escJsArg(s) {
+  return escHtml(JSON.stringify(String(s)));
 }
 
 /* ===================================================
@@ -1063,47 +1068,48 @@ function renderRules() {
   }
 
   list.innerHTML = visibleRules.map((r, idx) => {
+    const jsId = escJsArg(r.id);
     const isManualOnly = (r.trigger_types||[]).length > 0 && (r.trigger_types||[]).every(t => t === 'manual');
     const fireBtn = isManualOnly
-      ? `<button class="btn btn-primary btn-sm" onclick="testRule('${r.id}')" title="Fire rule now"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg> Fire</button>`
-      : `<button class="btn btn-ghost btn-sm btn-icon" onclick="testRule('${r.id}')" title="Test / Fire now"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg></button>`;
+      ? `<button class="btn btn-primary btn-sm" onclick="testRule(${jsId})" title="Fire rule now"><svg xmlns="http://www.w3.org/2000/svg" height="18px" viewBox="0 -960 960 960" width="18px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg> Fire</button>`
+      : `<button class="btn btn-ghost btn-sm btn-icon" onclick="testRule(${jsId})" title="Test / Fire now"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M320-200v-560l440 280-440 280Z"/></svg></button>`;
     const tag = getRuleTag(r.id);
     const hasError = !!ruleErrorMap[r.id];
     const isSelected = bulkSelected.has(r.id);
     const isFirst = idx === 0;
     const isLast = idx === visibleRules.length - 1;
     return `
-    <div class="rule-card ${r.enabled ? '' : 'disabled'} ${isSelected ? 'bulk-selected' : ''}" id="rule-card-${r.id}">
+    <div class="rule-card ${r.enabled ? '' : 'disabled'} ${isSelected ? 'bulk-selected' : ''}" id="rule-card-${escHtml(r.id)}">
       <div class="reorder-arrows">
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveRuleUp('${r.id}')" title="Move up" ${isFirst ? 'disabled' : ''}>↑</button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveRuleDown('${r.id}')" title="Move down" ${isLast ? 'disabled' : ''}>↓</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveRuleUp(${jsId})" title="Move up" ${isFirst ? 'disabled' : ''}>↑</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveRuleDown(${jsId})" title="Move down" ${isLast ? 'disabled' : ''}>↓</button>
       </div>
-      <input type="checkbox" class="bulk-cb" ${isSelected ? 'checked' : ''} onchange="bulkToggle('${r.id}', this.checked)" onclick="event.stopPropagation()" title="Select for bulk action">
+      <input type="checkbox" class="bulk-cb" ${isSelected ? 'checked' : ''} onchange="bulkToggle(${jsId}, this.checked)" onclick="event.stopPropagation()" title="Select for bulk action">
       <label class="toggle" title="${r.enabled ? 'Disable' : 'Enable'} rule">
-        <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule('${r.id}', this.checked)">
+        <input type="checkbox" ${r.enabled ? 'checked' : ''} onchange="toggleRule(${jsId}, this.checked)">
         <span class="toggle-slider"></span>
       </label>
       <div class="rule-meta">
         <div class="rule-name-row">
           ${hasError ? '<span class="rule-error-dot" title="Recent action error"></span>' : ''}
           <div class="rule-name">${escHtml(r.name)}</div>
-          <code class="rule-uuid" onclick="copyRuleId('${r.id}')" title="${r.id}">UUID: ${r.id.slice(0, 8)}</code>
+          <code class="rule-uuid" onclick="copyRuleId(${jsId})" title="${escHtml(r.id)}">UUID: ${escHtml(r.id.slice(0, 8))}</code>
         </div>
         <div class="rule-badges">
           ${tag ? `<span class="badge badge-tag">${escHtml(tag)}</span>` : ''}
           ${(r.trigger_types||[]).map(t => `<span class="badge badge-trigger">${escHtml(ruleTypeLabel('trigger',t))}</span>`).join('')}
           ${(r.condition_types||[]).map(t => `<span class="badge badge-cond">${escHtml(ruleTypeLabel('condition',t))}</span>`).join('')}
           ${(r.action_types||[]).map(t => `<span class="badge badge-action">${escHtml(ruleTypeLabel('action',t))}</span>`).join('')}
-          ${r.cooldown ? `<span class="badge">cooldown ${r.cooldown}s</span>` : ''}
+          ${r.cooldown ? `<span class="badge">cooldown ${escHtml(r.cooldown)}s</span>` : ''}
         </div>
       </div>
       <div class="rule-fired-time">${r.last_fired ? '<svg xmlns="http://www.w3.org/2000/svg" height="16px" viewBox="0 -960 960 960" width="16px" fill="currentColor" style="vertical-align:middle;margin-right:4px"><path d="M280-80v-360H120l320-440v360h160L280-80Z"/></svg>' + fmtTime(r.last_fired) : 'Never fired'}</div>
       <div class="rule-actions">
         ${fireBtn}
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="editRule('${r.id}')" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-12 27-17.5t30-5.5q16 0 31 5.5t27 17.5l57 57q12 12 18 27.5t6 30.5q0 15-6 30t-18 27L290-120H120Zm640-583-57-57 57 57ZM619-619l-28-29 57 57-29-28Z"/></svg></button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="exportRule('${r.id}')" title="Export"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h120v80H240v400h480v-400H600v-80h120q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm200-240v-447l-64 64-56-57 160-160 160 160-56 57-64-64v447h-80Z"/></svg></button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="duplicateRule('${r.id}')" title="Duplicate"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"/></svg></button>
-        <button class="btn btn-ghost btn-sm btn-icon" onclick="deleteRule('${r.id}')" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h120v-40h440v40h120v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="editRule(${jsId})" title="Edit"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-12 27-17.5t30-5.5q16 0 31 5.5t27 17.5l57 57q12 12 18 27.5t6 30.5q0 15-6 30t-18 27L290-120H120Zm640-583-57-57 57 57ZM619-619l-28-29 57 57-29-28Z"/></svg></button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="exportRule(${jsId})" title="Export"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M240-80q-33 0-56.5-23.5T160-160v-400q0-33 23.5-56.5T240-640h120v80H240v400h480v-400H600v-80h120q33 0 56.5 23.5T800-560v400q0 33-23.5 56.5T720-80H240Zm200-240v-447l-64 64-56-57 160-160 160 160-56 57-64-64v447h-80Z"/></svg></button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="duplicateRule(${jsId})" title="Duplicate"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"/></svg></button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="deleteRule(${jsId})" title="Delete"><svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h120v-40h440v40h120v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></button>
       </div>
     </div>`;
   }).join('');
@@ -1386,7 +1392,7 @@ function updateLogFilter() {
   if (!sel) return;
   const cur = sel.value;
   sel.innerHTML = '<option value="">All Rules</option>' +
-    allRules.map(r => `<option value="${r.id}" ${cur === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('');
+    allRules.map(r => `<option value="${escHtml(r.id)}" ${cur === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('');
 }
 
 /* ===================================================

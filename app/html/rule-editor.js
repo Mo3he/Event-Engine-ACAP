@@ -88,7 +88,7 @@ function buildRuleForm(rule) {
       <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'flex' : 'none'};gap:16px;align-items:flex-start;margin-bottom:8px;">
         <div class="form-group" style="flex:0 0 260px;">
           <label>Correlation Window (s, 0 = no time limit)</label>
-          <input id="f-trigger-window" type="number" min="0" value="${rule && rule.trigger_window ? rule.trigger_window : 0}" placeholder="0 = no time limit">
+          <input id="f-trigger-window" type="number" min="0" value="${escHtml(rule && rule.trigger_window ? rule.trigger_window : 0)}" placeholder="0 = no time limit">
           <div class="form-hint">All triggers must fire within this time. 0 = no time limit.</div>
         </div>
       </div>
@@ -118,13 +118,13 @@ function buildRuleForm(rule) {
     <div class="form-row">
       <div class="form-group">
         <label>Cooldown (s, 0 = off)</label>
-        <input id="f-cooldown" type="number" min="0" value="${rule ? rule.cooldown || 0 : 0}" placeholder="0 = no cooldown">
+        <input id="f-cooldown" type="number" min="0" value="${escHtml(rule ? rule.cooldown || 0 : 0)}" placeholder="0 = no cooldown">
         <div class="form-hint">Prevents the rule from firing again for this many seconds after it triggers. Useful to avoid alert floods.</div>
       </div>
       <div class="form-group">
         <label>Max Executions</label>
         <div style="display:flex;gap:6px;align-items:center;">
-          <input id="f-maxex" type="number" min="0" value="${rule ? rule.max_executions || 0 : 0}" placeholder="0 = unlimited" style="width:80px;">
+          <input id="f-maxex" type="number" min="0" value="${escHtml(rule ? rule.max_executions || 0 : 0)}" placeholder="0 = unlimited" style="width:80px;">
           <select id="f-maxex-period">
             <option value=""       ${!(rule && rule.max_exec_period) ? 'selected' : ''}>lifetime</option>
             <option value="minute" ${rule && rule.max_exec_period === 'minute' ? 'selected' : ''}>per minute</option>
@@ -323,7 +323,7 @@ function triggerFields(t, rowIdx) {
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
           <span style="opacity:.7;font-size:12px">Hold for at least</span>
           <input type="number" data-k="value_hold_secs" min="0" step="1"
-                 value="${valueHold}" style="width:70px">
+                 value="${escHtml(valueHold)}" style="width:70px">
           <span style="opacity:.7;font-size:12px">seconds (0 = fire immediately)</span>
         </div>` : ''}
       </div>
@@ -388,7 +388,7 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Days</label>
-        <input type="text" data-k="days_str" value="${(t.days || [1,2,3,4,5]).join(',')}" placeholder="0=Sun,1=Mon,...6=Sat">
+        <input type="text" data-k="days_str" value="${escHtml([].concat(t.days || [1,2,3,4,5]).join(','))}" placeholder="0=Sun,1=Mon,...6=Sat">
         <div class="form-hint">Comma-separated day numbers (0=Sun)</div>
       </div>
     </div>` : ''}
@@ -396,7 +396,7 @@ function triggerFields(t, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Interval (seconds)</label>
-        <input type="number" data-k="interval_seconds" min="1" value="${t.interval_seconds || 60}">
+        <input type="number" data-k="interval_seconds" min="1" value="${escHtml(t.interval_seconds || 60)}">
       </div>
     </div>` : ''}
     ${t.schedule_type === 'cron' ? `
@@ -422,7 +422,7 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Offset (minutes, + = later)</label>
         <input type="number" data-k="offset_minutes" id="astro-offset-${rowIdx}"
-               value="${t.offset_minutes || 0}" placeholder="0"
+               value="${escHtml(t.offset_minutes || 0)}" placeholder="0"
                oninput="refreshAstroTriggerPreview(${rowIdx})">
       </div>
     </div>
@@ -430,14 +430,14 @@ function triggerFields(t, rowIdx) {
       <div class="form-group">
         <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
         <input type="number" step="0.0001" data-k="latitude" id="astro-lat-${rowIdx}"
-               value="${t.latitude !== undefined ? t.latitude : engineLat}" placeholder="e.g. 59.3293"
+               value="${escHtml(t.latitude !== undefined ? t.latitude : engineLat)}" placeholder="e.g. 59.3293"
                oninput="refreshAstroTriggerPreview(${rowIdx})">
         <div class="form-hint">North is positive (e.g. 59.33), South is negative (e.g. −33.87)</div>
       </div>
       <div class="form-group">
         <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
         <input type="number" step="0.0001" data-k="longitude" id="astro-lon-${rowIdx}"
-               value="${t.longitude !== undefined ? t.longitude : engineLon}" placeholder="e.g. 18.0686"
+               value="${escHtml(t.longitude !== undefined ? t.longitude : engineLon)}" placeholder="e.g. 18.0686"
                oninput="refreshAstroTriggerPreview(${rowIdx})">
         <div class="form-hint">East is positive (e.g. 18.07), West is negative (e.g. −73.94)</div>
       </div>
@@ -447,7 +447,7 @@ function triggerFields(t, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Port Number</label>
-        <input type="number" data-k="port" min="1" value="${t.port || 1}">
+        <input type="number" data-k="port" min="1" value="${escHtml(t.port || 1)}">
       </div>
       <div class="form-group">
         <label>Edge</label>
@@ -461,7 +461,7 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Hold duration (s)</label>
-        <input type="number" data-k="hold_secs" min="0" value="${t.hold_secs || 0}">
+        <input type="number" data-k="hold_secs" min="0" value="${escHtml(t.hold_secs || 0)}">
         <div class="form-hint">Fire only if state holds for this many seconds (0 = immediate)</div>
       </div>
     </div>`;
@@ -483,7 +483,7 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Value</label>
-        <input type="number" data-k="value" value="${t.value !== undefined ? t.value : 0}">
+        <input type="number" data-k="value" value="${escHtml(t.value !== undefined ? t.value : 0)}">
       </div>
     </div>`;
   if (type === 'rule_fired') return `
@@ -492,7 +492,7 @@ function triggerFields(t, rowIdx) {
         <label>Rule (leave empty to match any rule firing)</label>
         <select data-k="rule_id">
           <option value="" ${!t.rule_id ? 'selected' : ''}>— Any rule —</option>
-          ${allRules.map(r => `<option value="${r.id}" ${t.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+          ${allRules.map(r => `<option value="${escHtml(r.id)}" ${t.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
         </select>
       </div>
     </div>`;
@@ -525,14 +525,14 @@ function triggerFields(t, rowIdx) {
   if (type === 'aoa_scenario') {
     let scenarioControl;
     if (aoaScenarios === null) {
-      scenarioControl = `<input type="number" data-k="scenario_id" value="${t.scenario_id || 1}" min="1" placeholder="Loading…">`;
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(t.scenario_id || 1)}" min="1" placeholder="Loading…">`;
     } else if (!aoaScenarios.length) {
-      scenarioControl = `<input type="number" data-k="scenario_id" value="${t.scenario_id || 1}" min="1"><div class="form-hint">No scenarios found — enter the scenario number manually (1-based).</div>`;
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(t.scenario_id || 1)}" min="1"><div class="form-hint">No scenarios found — enter the scenario number manually (1-based).</div>`;
     } else {
       const hasVal = t.scenario_id !== undefined;
       const opts = aoaScenarios.map(s => {
         const sel = hasVal && parseInt(t.scenario_id) === s.id ? 'selected' : '';
-        return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+        return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
       }).join('');
       scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
     }
@@ -584,7 +584,7 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Port</label>
-        <input type="number" data-k="port" value="${t.port||(ctype==='serial_gateway'?4001:502)}" min="1" max="65535">
+        <input type="number" data-k="port" value="${escHtml(t.port||(ctype==='serial_gateway'?4001:502))}" min="1" max="65535">
       </div>` : ''}
     </div>
     ${ctype === 'rtu' ? `
@@ -595,7 +595,7 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Baud Rate</label>
-        <input type="number" data-k="baud" value="${t.baud||9600}" min="1200">
+        <input type="number" data-k="baud" value="${escHtml(t.baud||9600)}" min="1200">
       </div>
       <div class="form-group">
         <label>Parity</label>
@@ -609,7 +609,7 @@ function triggerFields(t, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Slave ID</label>
-        <input type="number" data-k="slave_id" value="${t.slave_id||1}" min="1" max="247">
+        <input type="number" data-k="slave_id" value="${escHtml(t.slave_id||1)}" min="1" max="247">
         <div class="form-hint">Modbus device address (1-247)</div>
       </div>
       <div class="form-group">
@@ -623,12 +623,12 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Register Address</label>
-        <input type="number" data-k="register" value="${t.register||0}" min="0" max="65535">
+        <input type="number" data-k="register" value="${escHtml(t.register||0)}" min="0" max="65535">
         <div class="form-hint">0-based register address</div>
       </div>
       <div class="form-group">
         <label>Poll Interval (s)</label>
-        <input type="number" data-k="poll_interval" value="${t.poll_interval||30}" min="1">
+        <input type="number" data-k="poll_interval" value="${escHtml(t.poll_interval||30)}" min="1">
       </div>
     </div>
     <div class="form-row">
@@ -646,11 +646,11 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Threshold</label>
-        <input type="number" data-k="threshold" value="${t.threshold!==undefined?t.threshold:''}" placeholder="0">
+        <input type="number" data-k="threshold" value="${escHtml(t.threshold!==undefined?t.threshold:'')}" placeholder="0">
       </div>
       <div class="form-group">
         <label>Threshold 2 <span style="font-weight:normal;opacity:.7">(between only)</span></label>
-        <input type="number" data-k="threshold2" value="${t.threshold2!==undefined?t.threshold2:''}" placeholder="100">
+        <input type="number" data-k="threshold2" value="${escHtml(t.threshold2!==undefined?t.threshold2:'')}" placeholder="100">
       </div>
     </div>`;
   }
@@ -803,7 +803,7 @@ function conditionFields(c, rowIdx) {
       </div>
       <div class="form-group">
         <label>Days (0=Sun,6=Sat)</label>
-        <input type="text" data-k="days_str" value="${(c.days || [1,2,3,4,5]).join(',')}" placeholder="1,2,3,4,5">
+        <input type="text" data-k="days_str" value="${escHtml([].concat(c.days || [1,2,3,4,5]).join(','))}" placeholder="1,2,3,4,5">
       </div>
     </div>`;
   if (type === 'counter') return `
@@ -824,7 +824,7 @@ function conditionFields(c, rowIdx) {
       </div>
       <div class="form-group">
         <label>Value</label>
-        <input type="number" data-k="value" value="${c.value !== undefined ? c.value : 0}">
+        <input type="number" data-k="value" value="${escHtml(c.value !== undefined ? c.value : 0)}">
       </div>
     </div>`;
   if (type === 'variable_compare') return `
@@ -852,7 +852,7 @@ function conditionFields(c, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Port</label>
-        <input type="number" data-k="port" min="1" value="${c.port || 1}">
+        <input type="number" data-k="port" min="1" value="${escHtml(c.port || 1)}">
       </div>
       <div class="form-group">
         <label>Expected State</label>
@@ -872,7 +872,7 @@ function conditionFields(c, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Expected HTTP Status</label>
-        <input type="number" data-k="expected_status" value="${c.expected_status || 200}" placeholder="200">
+        <input type="number" data-k="expected_status" value="${escHtml(c.expected_status || 200)}" placeholder="200">
       </div>
       <div class="form-group">
         <label>Expected Body Contains (optional)</label>
@@ -911,21 +911,21 @@ function conditionFields(c, rowIdx) {
         const hasVal = c.scenario_id !== undefined;
         const opts = cached.map(s => {
           const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
-          return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+          return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
         }).join('');
         scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>${loadBtn}</div>`;
       } else {
-        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1" style="flex:1">${loadBtn}</div>`;
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" style="flex:1">${loadBtn}</div>`;
       }
     } else if (aoaScenarios === null) {
-      scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1" placeholder="Loading…">`;
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" placeholder="Loading…">`;
     } else if (!aoaScenarios.length) {
-      scenarioControl = `<input type="number" data-k="scenario_id" value="${c.scenario_id || 1}" min="1">`;
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1">`;
     } else {
       const hasVal = c.scenario_id !== undefined;
       const opts = aoaScenarios.map(s => {
         const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
-        return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+        return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
       }).join('');
       scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
     }
@@ -959,7 +959,7 @@ function conditionFields(c, rowIdx) {
       </div>
       <div class="form-group">
         <label>Count</label>
-        <input type="number" data-k="value" value="${c.value !== undefined ? c.value : 0}" min="0">
+        <input type="number" data-k="value" value="${escHtml(c.value !== undefined ? c.value : 0)}" min="0">
         <div class="form-hint">Current occupancy count must satisfy the condition to pass. This polls AOA on each rule evaluation.</div>
       </div>
     </div>`;
@@ -986,11 +986,11 @@ function conditionFields(c, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
-        <input type="number" step="any" data-k="lat" value="${c.lat !== undefined ? c.lat : ''}" placeholder="From settings (${engineLat})">
+        <input type="number" step="any" data-k="lat" value="${escHtml(c.lat !== undefined ? c.lat : '')}" placeholder="From settings (${escHtml(engineLat)})">
       </div>
       <div class="form-group">
         <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
-        <input type="number" step="any" data-k="lon" value="${c.lon !== undefined ? c.lon : ''}" placeholder="From settings (${engineLon})">
+        <input type="number" step="any" data-k="lon" value="${escHtml(c.lon !== undefined ? c.lon : '')}" placeholder="From settings (${escHtml(engineLon)})">
       </div>
     </div>`;
   }
@@ -1626,7 +1626,7 @@ function remoteCapControl(a, rowIdx, query, dataKey, currentVal, placeholder) {
       return `<div style="display:flex;align-items:center;gap:4px;flex:1;">
         <select onchange="applyRemotePtzPreset(this,${rowIdx})" style="flex:1">${opts}</select>
         <input type="hidden" data-k="preset"  value="${escHtml(currentVal || '')}">
-        <input type="hidden" data-k="channel" value="${a.channel || 1}">
+        <input type="hidden" data-k="channel" value="${escHtml(a.channel || 1)}">
         ${btn}
       </div>`;
     }
@@ -1718,7 +1718,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group">
         <label>Max Duration (s, 0=unlimited)</label>
-        <input type="number" data-k="duration" min="0" value="${a.duration || 0}">
+        <input type="number" data-k="duration" min="0" value="${escHtml(a.duration || 0)}">
       </div>
     </div>
     ${recStart ? `
@@ -1754,11 +1754,11 @@ function actionFields(a, rowIdx) {
     <div class="form-row" style="flex-wrap:wrap;">
       <div class="form-group" style="flex:0 0 80px;">
         <label>Channel</label>
-        <input type="number" data-k="channel" min="1" value="${a.channel || 1}">
+        <input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}">
       </div>
       <div class="form-group" style="flex:0 0 130px;">
         <label>Duration (s, 0=keep)</label>
-        <input type="number" data-k="duration" min="0" value="${a.duration || 0}" onchange="rerenderAction(this)">
+        <input type="number" data-k="duration" min="0" value="${escHtml(a.duration || 0)}" onchange="rerenderAction(this)">
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Position</label>
@@ -1776,11 +1776,11 @@ function actionFields(a, rowIdx) {
       ${a.position==='custom' ? `
       <div class="form-group" style="flex:0 0 70px;">
         <label>X (-1..1)</label>
-        <input type="number" step="0.01" min="-1" max="1" data-k="pos_x" value="${a.pos_x !== undefined ? a.pos_x : -0.99}">
+        <input type="number" step="0.01" min="-1" max="1" data-k="pos_x" value="${escHtml(a.pos_x !== undefined ? a.pos_x : -0.99)}">
       </div>
       <div class="form-group" style="flex:0 0 70px;">
         <label>Y (-1..1)</label>
-        <input type="number" step="0.01" min="-1" max="1" data-k="pos_y" value="${a.pos_y !== undefined ? a.pos_y : -0.99}">
+        <input type="number" step="0.01" min="-1" max="1" data-k="pos_y" value="${escHtml(a.pos_y !== undefined ? a.pos_y : -0.99)}">
       </div>` : ''}
       <div class="form-group" style="flex:0 0 120px;">
         <label>Text Colour</label>
@@ -1811,23 +1811,23 @@ function actionFields(a, rowIdx) {
     let presetControl, channelControl = '';
     if (ptzPresets === null) {
       presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="Loading presets…" disabled>`;
-      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${a.channel || 1}"></div>`;
+      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}"></div>`;
     } else if (!ptzPresets.length) {
       presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="HomePosition">`;
-      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${a.channel || 1}"></div>`;
+      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}"></div>`;
     } else {
       let opts = `<option value=":">— select preset —</option>`;
       for (const ch of ptzPresets) {
-        opts += `<optgroup label="Camera ${ch.channel}">`;
+        opts += `<optgroup label="Camera ${escHtml(ch.channel)}">`;
         for (const name of ch.presets) {
           const sel = (a.preset === name && (parseInt(a.channel) || 1) === ch.channel) ? 'selected' : '';
-          opts += `<option value="${ch.channel}:${escHtml(name)}" ${sel}>${escHtml(name)}</option>`;
+          opts += `<option value="${escHtml(ch.channel)}:${escHtml(name)}" ${sel}>${escHtml(name)}</option>`;
         }
         opts += `</optgroup>`;
       }
       presetControl = `<select data-k="ptz_combined" onchange="applyPtzPreset(this)">${opts}</select>
         <input type="hidden" data-k="preset"  value="${escHtml(a.preset || '')}">
-        <input type="hidden" data-k="channel" value="${a.channel || 1}">`;
+        <input type="hidden" data-k="channel" value="${escHtml(a.channel || 1)}">`;
     }
     return `
     <div class="form-row">
@@ -1841,7 +1841,7 @@ function actionFields(a, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Port</label>
-        <input type="number" data-k="port" min="1" value="${a.port || 1}">
+        <input type="number" data-k="port" min="1" value="${escHtml(a.port || 1)}">
       </div>
       <div class="form-group">
         <label>State</label>
@@ -1889,7 +1889,7 @@ function actionFields(a, rowIdx) {
     <div class="form-row">
       <div class="form-group" style="flex:0 0 120px;">
         <label>Volume (%)</label>
-        <input type="number" data-k="volume" min="0" max="100" value="${a.volume !== undefined ? a.volume : ''}" placeholder="default">
+        <input type="number" data-k="volume" min="0" max="100" value="${escHtml(a.volume !== undefined ? a.volume : '')}" placeholder="default">
         <div class="form-hint">Leave empty for device default</div>
       </div>
       <div class="form-group" style="flex:0 0 150px;">
@@ -1899,7 +1899,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 120px;">
         <label>Channel</label>
-        <input type="number" data-k="channel" min="1" value="${a.channel || ''}" placeholder="default">
+        <input type="number" data-k="channel" min="1" value="${escHtml(a.channel || '')}" placeholder="default">
         <div class="form-hint">Leave empty for default</div>
       </div>
     </div>
@@ -1999,7 +1999,7 @@ function actionFields(a, rowIdx) {
       if (cached && cached.length) {
         const matchIdx = cached.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
         eventDropdown = `
-        <select onchange="applyRemoteVapixEventAction(this, '${escHtml(host)}')">
+        <select onchange="applyRemoteVapixEventAction(this, ${escJsArg(host)})">
           <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
           ${cached.map((ev, i) =>
             `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
@@ -2052,7 +2052,7 @@ function actionFields(a, rowIdx) {
           <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventStartAdd(this)" title="Create a new custom ACAP event">＋ New</button>
         </div>
         ${selEvent ? `<div class="form-hint">${escHtml(selEvent.name || selEvent.id)} · ${selEvent.system ? 'System event' : 'Custom event'} · ${selEvent.state ? 'Stateful (High/Low)' : 'Stateless (pulse)'}</div>` : '<div class="form-hint">No events available — use ＋ New to create one.</div>'}
-        ${selEvent && !selEvent.system ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--danger,#e05252);" onclick="acapEventDelete('${escHtml(selId)}')">Remove Event</button>` : ''}
+        ${selEvent && !selEvent.system ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--danger,#e05252);" onclick="acapEventDelete(${escJsArg(selId)})">Remove Event</button>` : ''}
       </div>
     </div>
     ${isStateful ? `
@@ -2094,7 +2094,7 @@ function actionFields(a, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Wait (seconds)</label>
-        <input type="number" data-k="seconds" min="1" value="${a.seconds || 5}">
+        <input type="number" data-k="seconds" min="1" value="${escHtml(a.seconds || 5)}">
         <div class="form-hint">Actions after this row execute after the delay</div>
       </div>
     </div>`;
@@ -2127,7 +2127,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group">
         <label>Delta / Value</label>
-        <input type="number" data-k="delta" value="${a.delta !== undefined ? a.delta : 1}">
+        <input type="number" data-k="delta" value="${escHtml(a.delta !== undefined ? a.delta : 1)}">
       </div>
     </div>`;
   if (type === 'sparkplug_publish') {
@@ -2377,7 +2377,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Flush every</label>
-        <input type="number" data-k="interval" value="${a.interval || 300}" min="30" step="30"> <span style="color:var(--text-muted);">sec</span>
+        <input type="number" data-k="interval" value="${escHtml(a.interval || 300)}" min="30" step="30"> <span style="color:var(--text-muted);">sec</span>
       </div>
     </div>
     ${(a.deliver_via||'slack') === 'slack' ? `
@@ -2426,7 +2426,7 @@ function actionFields(a, rowIdx) {
         <label>Target Rule</label>
         <select data-k="rule_id">
           <option value="">Select a rule...</option>
-          ${allRules.map(r => `<option value="${r.id}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+          ${allRules.map(r => `<option value="${escHtml(r.id)}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
         </select>
       </div>
     </div>`;
@@ -2436,7 +2436,7 @@ function actionFields(a, rowIdx) {
         <label>Target Rule</label>
         <select data-k="rule_id">
           <option value="">Select a rule...</option>
-          ${allRules.map(r => `<option value="${r.id}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+          ${allRules.map(r => `<option value="${escHtml(r.id)}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group" style="flex:0 0 140px;">
@@ -2482,7 +2482,7 @@ function actionFields(a, rowIdx) {
       </div>` : ''}
       <div class="form-group" style="flex:0 0 100px;">
         <label>Channel</label>
-        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
       </div>
     </div>`;
   }
@@ -2552,7 +2552,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 80px;">
         <label>Channel</label>
-        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
       </div>
     </div>
     <div class="form-row">
@@ -2583,7 +2583,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 100px;">
         <label>Channel</label>
-        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
       </div>
     </div>`;
   if (type === 'privacy_mask') {
@@ -2617,7 +2617,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 100px;">
         <label>Channel</label>
-        <input type="number" data-k="channel" value="${a.channel || 1}" min="1" max="8">
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
       </div>
     </div>`;
   }
@@ -2632,12 +2632,12 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 100px;">
         <label>Device ID</label>
-        <input type="number" data-k="id" value="${a.id || 1}" min="1">
+        <input type="number" data-k="id" value="${escHtml(a.id || 1)}" min="1">
         <div class="form-hint">Use <b>getServiceInfo</b> to find IDs.</div>
       </div>
       <div class="form-group" style="flex:0 0 130px;">
         <label>Duration (s, optional)</label>
-        <input type="number" data-k="duration" value="${a.duration || ''}" min="1" placeholder="Default">
+        <input type="number" data-k="duration" value="${escHtml(a.duration || '')}" min="1" placeholder="Default">
         <div class="form-hint">Variable-duration wipers only.</div>
       </div>
     </div>`;
@@ -2661,7 +2661,7 @@ function actionFields(a, rowIdx) {
       ${op === 'on' || op === 'flash' ? `
       <div class="form-group" style="flex:0 0 140px;">
         <label>Intensity (0–100, optional)</label>
-        <input type="number" data-k="intensity" value="${a.intensity ?? ''}" min="0" max="100" placeholder="Auto">
+        <input type="number" data-k="intensity" value="${escHtml(a.intensity ?? '')}" min="0" max="100" placeholder="Auto">
         <div class="form-hint">Leave blank to use the camera's current intensity setting.</div>
       </div>` : ''}
     </div>
@@ -2669,17 +2669,17 @@ function actionFields(a, rowIdx) {
     <div class="form-row">
       <div class="form-group" style="flex:0 0 140px;">
         <label>Flash duration (ms)</label>
-        <input type="number" data-k="duration_ms" value="${a.duration_ms ?? ''}" min="50" max="5000" placeholder="300">
+        <input type="number" data-k="duration_ms" value="${escHtml(a.duration_ms ?? '')}" min="50" max="5000" placeholder="300">
         <div class="form-hint">On-time per pulse (50–5000 ms). Bypasses the 1s schedule minimum.</div>
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Flash count</label>
-        <input type="number" data-k="count" value="${a.count ?? ''}" min="1" max="20" placeholder="1">
+        <input type="number" data-k="count" value="${escHtml(a.count ?? '')}" min="1" max="20" placeholder="1">
         <div class="form-hint">Number of pulses (1–20).</div>
       </div>
       <div class="form-group" style="flex:0 0 140px;">
         <label>Gap (ms)</label>
-        <input type="number" data-k="gap_ms" value="${a.gap_ms ?? ''}" min="50" max="5000" placeholder="= duration">
+        <input type="number" data-k="gap_ms" value="${escHtml(a.gap_ms ?? '')}" min="50" max="5000" placeholder="= duration">
         <div class="form-hint">Off-time between pulses. Only used when count &gt; 1.</div>
       </div>
     </div>
@@ -2722,14 +2722,14 @@ function actionFields(a, rowIdx) {
   if (type === 'aoa_get_counts') {
     let scenarioControl;
     if (aoaScenarios === null) {
-      scenarioControl = `<input type="number" data-k="scenario_id" value="${a.scenario_id || 1}" min="1" placeholder="Loading…">`;
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(a.scenario_id || 1)}" min="1" placeholder="Loading…">`;
     } else if (!aoaScenarios.length) {
-      scenarioControl = `<input type="number" data-k="scenario_id" value="${a.scenario_id || 1}" min="1">`;
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(a.scenario_id || 1)}" min="1">`;
     } else {
       const hasVal = a.scenario_id !== undefined;
       const opts = aoaScenarios.map(s => {
         const sel = hasVal && parseInt(a.scenario_id) === s.id ? 'selected' : '';
-        return `<option value="${s.id}" ${sel}>${s.id}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+        return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
       }).join('');
       scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
     }
@@ -2819,7 +2819,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 130px;">
         <label>Scroll Speed (0–10)</label>
-        <input type="number" data-k="scrollSpeed" value="${speed}" min="0" max="10">
+        <input type="number" data-k="scrollSpeed" value="${escHtml(speed)}" min="0" max="10">
         <div class="form-hint">0 = static, 10 = fastest.</div>
       </div>
       <div class="form-group" style="flex:0 0 200px;">
@@ -2837,7 +2837,7 @@ function actionFields(a, rowIdx) {
     <div class="form-row">
       <div class="form-group" style="flex:0 0 200px;">
         <label>${durType === 'repetitions' ? 'Repetitions' : 'Seconds'}</label>
-        <input type="number" data-k="duration_value" value="${a.duration_value || (durType==='repetitions' ? 3 : 10)}" min="1">
+        <input type="number" data-k="duration_value" value="${escHtml(a.duration_value || (durType==='repetitions' ? 3 : 10))}" min="1">
       </div>
     </div>` : ''}
     ${!durType ? `
@@ -2926,7 +2926,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 80px;">
         <label>Slot</label>
-        <input type="number" data-k="slot" value="${a.slot || 1}" min="1" max="32">
+        <input type="number" data-k="slot" value="${escHtml(a.slot || 1)}" min="1" max="32">
       </div>
     </div>
     <div class="form-row">
@@ -2956,7 +2956,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group">
         <label>Port</label>
-        <input type="number" data-k="port" value="${a.port||(ctype==='serial_gateway'?4001:502)}" min="1" max="65535">
+        <input type="number" data-k="port" value="${escHtml(a.port||(ctype==='serial_gateway'?4001:502))}" min="1" max="65535">
       </div>` : ''}
     </div>
     ${ctype === 'rtu' ? `
@@ -2967,7 +2967,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group">
         <label>Baud Rate</label>
-        <input type="number" data-k="baud" value="${a.baud||9600}" min="1200">
+        <input type="number" data-k="baud" value="${escHtml(a.baud||9600)}" min="1200">
       </div>
       <div class="form-group">
         <label>Parity</label>
@@ -2981,7 +2981,7 @@ function actionFields(a, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Slave ID</label>
-        <input type="number" data-k="slave_id" value="${a.slave_id||1}" min="1" max="247">
+        <input type="number" data-k="slave_id" value="${escHtml(a.slave_id||1)}" min="1" max="247">
         <div class="form-hint">Modbus device address (1-247)</div>
       </div>
       <div class="form-group">
@@ -2993,12 +2993,12 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group">
         <label>Register Address</label>
-        <input type="number" data-k="register" value="${a.register||0}" min="0" max="65535">
+        <input type="number" data-k="register" value="${escHtml(a.register||0)}" min="0" max="65535">
         <div class="form-hint">0-based register address</div>
       </div>
       <div class="form-group">
         <label>Value</label>
-        <input type="number" data-k="value" value="${a.value!==undefined?a.value:0}">
+        <input type="number" data-k="value" value="${escHtml(a.value!==undefined?a.value:0)}">
         <div class="form-hint">For coils: 0 = off, 1 = on. For holding registers: 16-bit unsigned integer (0-65535).</div>
       </div>
     </div>`;

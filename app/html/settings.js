@@ -117,7 +117,7 @@ function updateMqttStatusBadge(mq) {
   const suffix = mq.use_tls ? ' · TLS' : '';
   if (mq.connected) {
     dot.style.background = 'var(--accent-success)';
-    text.textContent = `Connected — ${escHtml(mq.host || '')}:${mq.port || 1883}${suffix}`;
+    text.textContent = `Connected — ${mq.host || ''}:${mq.port || 1883}${suffix}`;
   } else if (mq.enabled) {
     dot.style.background = 'var(--accent-warning, #f59e0b)';
     text.textContent = `Connecting…${suffix}`;
