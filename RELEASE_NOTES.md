@@ -1,5 +1,32 @@
 # Release Notes
 
+## v1.9.17 - Security fix
+
+Fixes a cross-site scripting issue in the web interface. Upgrading is
+recommended, especially if you import rules from backups or templates you did
+not create yourself.
+
+### Upgrading to 1.9.17
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade from v1.9.14 or later. Rules, settings and variables are kept.
+Upgrading from v1.9.13 or earlier needs an uninstall first (export your rules
+before); see the v1.9.15 notes below.
+
+### Fixes in 1.9.17
+
+- **Imported rules can no longer run script in the browser.** Some values from
+  rules were inserted into the web page without escaping: the rule ID in the
+  rules list buttons, about 70 fields in the rule editor (ports, channels,
+  durations, scenario IDs and similar), and variable names on the Variables
+  tab. An imported rule keeps its own ID and these fields are not type-checked,
+  so a crafted rule file could run script with the logged-in admin's rights as
+  soon as the rules list was shown. All such values are now escaped, including
+  values loaded from remote devices. Verified on a device with a deliberately
+  crafted rule and variable: both display as plain text and nothing runs.
+- **MQTT status text.** A broker host name containing `&` or `<` was shown with
+  HTML entities (`&amp;`) in the Settings status line.
+
 ## v1.9.16 - Bug fixes
 
 Fixes for six bugs, all reproduced on a real device (AXIS P3288-LV, AXIS OS 12.11)
