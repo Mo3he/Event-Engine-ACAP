@@ -1419,7 +1419,7 @@ function renderVariables(vars) {
       <td><code>${escHtml(k)}</code></td>
       <td class="var-value-cell">${escHtml(String(vars[k]))}</td>
       <td style="text-align:right;">
-        <button class="btn btn-ghost btn-sm" onclick="deleteVariable('${escHtml(k)}')">Delete</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteVariable(${escJsArg(k)})">Delete</button>
       </td>
     </tr>
   `).join('');
