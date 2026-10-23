@@ -30,7 +30,7 @@ int    RuleEngine_IsEnabled(const char* id);
 int    RuleEngine_SetEnabled(const char* id, int enabled);
 
 /* Dispatch — call from GMainLoop thread */
-void   RuleEngine_Dispatch_Event(cJSON* event);                 /* VAPIX event */
+void   RuleEngine_Dispatch_Event(cJSON* event, unsigned int subscription); /* VAPIX event */
 int    RuleEngine_Dispatch_Webhook(const char* token, cJSON* payload); /* returns rules fired */
 void   RuleEngine_Dispatch_RuleFired(const char* rule_id);
 

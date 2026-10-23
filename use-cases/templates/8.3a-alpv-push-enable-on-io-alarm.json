@@ -1,0 +1,30 @@
+{
+  "name": "ALPV — Enable Native Push (Profile 1) When I/O Alarm Starts",
+  "description": "Switches on AXIS License Plate Verifier push profile 1 when digital input 1 becomes active, so ALPV sends plate reads in its own format (UTMC-1, UTMC-2, HTTP POST, TCP or FTP) only during the alarm. Pair with 8.3b. Configure profile 1 in ALPV first and leave it disabled. Replace the username and password with an administrator account on this device. Disabled on import.",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "rising"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "http_request",
+      "url": "http://127.0.0.1/local/fflprapp/cloud.cgi",
+      "method": "POST",
+      "username": "ADMIN_USER",
+      "password": "ADMIN_PASSWORD",
+      "headers": "Content-Type: text/xml",
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><cloud_config><enable>true</enable></cloud_config>"
+    }
+  ]
+}

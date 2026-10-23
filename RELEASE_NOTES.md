@@ -1,5 +1,47 @@
 # Release Notes
 
+## v1.9.18 - Bug fixes
+
+Fixes rules firing more than once for a single event when several rules (or a
+rule and a Device Event Query) use the same event, and adds License Plate
+Verifier (ALPV) use case templates. Upgrading is recommended if more than one
+rule uses the same device event.
+
+### Upgrading to 1.9.18
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. If upgrading from
+v1.9.13 or earlier fails with an install error, export your rules, uninstall the
+old version and install this one; see the v1.9.15 notes below.
+
+### Fixes in 1.9.18
+
+- **Rules no longer fire more than once per event.** Every rule that subscribes
+  to a device event gets its own copy of each event, and each copy was handled
+  by all rules on that topic. With two rules on the same event, both fired
+  twice; a Device Event Query on the same topic as a trigger had the same
+  effect. Saving a rule could also re-fire other rules on the same topic once
+  for every current state (64 times for virtual inputs). Each copy is now only
+  handled by the subscription that received it. Verified on a P1467-LE
+  (AXIS OS 12.11.118): two rules on one topic now fire once each per event.
+- **AND "All active simultaneously" with I/O Input triggers.** The I/O trigger
+  was checked for an `active` field, but port events report `state`, so the
+  input counted as active as soon as it had changed once. Events from other
+  ports also overwrote the stored state. The check now uses the stored state of
+  the trigger's own port.
+- **Device Event Query returns the event that fired the rule.** When a rule
+  triggered on an event and then queried the same event, the query could
+  return the previous one, because the query's copy was stored after the rule
+  had already run. Query data is now refreshed before any rule fires. Verified
+  with a correlation rule in both orders on a D6310.
+
+### Use case templates
+
+- New category 8, License Plate Verification (ALPV): push plate reads only while
+  an I/O alarm is active (8.1), when a loud vehicle is detected at the same
+  time (8.2), or switch ALPV's own push profile, for example UTMC, on and off
+  from a digital input (8.3a/b).
+
 ## v1.9.17 - Security fix
 
 Fixes a cross-site scripting issue in the web interface. Upgrading is

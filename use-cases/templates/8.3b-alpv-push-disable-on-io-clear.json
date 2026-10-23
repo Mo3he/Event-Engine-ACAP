@@ -1,0 +1,30 @@
+{
+  "name": "ALPV — Disable Native Push (Profile 1) When I/O Alarm Ends",
+  "description": "Switches off AXIS License Plate Verifier push profile 1 when digital input 1 becomes inactive. Pair with 8.3a. Replace the username and password with an administrator account on this device. Disabled on import.",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "io_input",
+      "port": 1,
+      "edge": "falling"
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "http_request",
+      "url": "http://127.0.0.1/local/fflprapp/cloud.cgi",
+      "method": "POST",
+      "username": "ADMIN_USER",
+      "password": "ADMIN_PASSWORD",
+      "headers": "Content-Type: text/xml",
+      "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><cloud_config><enable>false</enable></cloud_config>"
+    }
+  ]
+}

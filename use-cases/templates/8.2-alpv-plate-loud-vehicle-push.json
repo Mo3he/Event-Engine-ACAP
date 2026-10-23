@@ -1,0 +1,43 @@
+{
+  "name": "ALPV — Push Plate Read Correlated with Loud Vehicle",
+  "description": "Pushes a plate read by AXIS License Plate Verifier only when audio detection (loud vehicle) and the plate read happen within 10 seconds of each other, in either order. The Device Event Query action reloads the latest plate data so {{trigger.*}} always holds the plate, even when the audio event arrives last. Replace the URL, headers and body with the format your receiver expects. Disabled on import until the receiver is configured.",
+  "enabled": false,
+  "trigger_logic": "AND",
+  "trigger_window": 10,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tnsaxis": "CameraApplicationPlatform" },
+      "topic1": { "": "ALPV.AllPlates" },
+      "string_key": "carState",
+      "string_value": "new"
+    },
+    {
+      "type": "vapix_event",
+      "topic0": { "tns1": "AudioSource" },
+      "topic1": { "tnsaxis": "TriggerLevel" },
+      "filter_key": "triggered",
+      "filter_value": true
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "vapix_query",
+      "topic0": { "tnsaxis": "CameraApplicationPlatform" },
+      "topic1": { "": "ALPV.AllPlates" }
+    },
+    {
+      "type": "http_request",
+      "url": "https://receiver.example.com/anpr",
+      "method": "POST",
+      "headers": "Content-Type: application/json",
+      "body": "{\"camera\":\"{{camera.serial}}\",\"timestamp\":\"{{timestamp}}\",\"reason\":\"loud_vehicle\",\"plate_event\":{{trigger_json}}}",
+      "attach_snapshot": false
+    }
+  ]
+}

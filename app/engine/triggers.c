@@ -476,26 +476,49 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
     return 1;
 }
 
-void Triggers_On_VAPIX_Event(cJSON* event) {
+/* Replace a subscription's cached data with the event's fields
+ * (everything except the "event" path key). */
+static void cache_event(Subscription* s, cJSON* event) {
+    cJSON_Delete(s->cached_data);
+    s->cached_data = cJSON_CreateObject();
+    cJSON* item;
+    cJSON_ArrayForEach(item, event) {
+        if (!item->string || strcmp(item->string, "event") == 0) continue;
+        cJSON_AddItemToObject(s->cached_data, item->string, cJSON_Duplicate(item, 1));
+    }
+}
+
+void Triggers_On_VAPIX_Event(cJSON* event, unsigned int subscription) {
     if (!event || !fire_fn) return;
+
+    /* Refresh Device Event Query caches from any delivery of a matching topic
+     * before rules fire, so a rule that triggers on the same event and then
+     * queries it reads this event rather than the previous one. */
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->passive && event_topic_matches(s, event)) cache_event(s, event);
+    }
 
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
+        if (s->passive) continue;
         if (s->type != TRIG_VAPIX_EVENT && s->type != TRIG_IO_INPUT && s->type != TRIG_AOA_SCENARIO) continue;
+        /* Every matching subscription receives its own copy of the event, so only
+         * the subscription it was delivered to may handle it. Otherwise each rule
+         * would fire once per subscription on the same topic. */
+        if (subscription && (unsigned int)s->acap_subscription_id != subscription) continue;
         if (!event_topic_matches(s, event)) continue;
 
-        /* Update cache for all matching subs (passive and active).
-         * Flatten root-level event fields (excluding the "event" path key). */
-        cJSON_Delete(s->cached_data);
-        s->cached_data = cJSON_CreateObject();
-        cJSON* item;
-        cJSON_ArrayForEach(item, event) {
-            if (!item->string || strcmp(item->string, "event") == 0) continue;
-            cJSON_AddItemToObject(s->cached_data, item->string, cJSON_Duplicate(item, 1));
+        /* Port events for all ports share one topic; ignore other ports before
+         * caching so the cached state always belongs to this trigger's port. */
+        if (s->type == TRIG_IO_INPUT && s->io_port > 0) {
+            cJSON* port_j = cJSON_GetObjectItem(event, "port");
+            int event_port = port_j && cJSON_IsNumber(port_j) ? (int)port_j->valuedouble : -1;
+            /* Rules number ports from 1; the event's port is 0-based ("Port 1" = 0). */
+            if (event_port != s->io_port - 1) continue;
         }
 
-        /* Passive subscriptions only cache — they never fire rules */
-        if (s->passive) continue;
+        cache_event(s, event);
 
         /* AOA scenario: require active=true, apply optional object-class filter */
         if (s->type == TRIG_AOA_SCENARIO) {
@@ -545,13 +568,6 @@ void Triggers_On_VAPIX_Event(cJSON* event) {
 
         /* IO edge filter + hold duration */
         if (s->type == TRIG_IO_INPUT) {
-            if (s->io_port > 0) {
-                cJSON* port_j = cJSON_GetObjectItem(event, "port");
-                int event_port = port_j && cJSON_IsNumber(port_j) ? (int)port_j->valuedouble : -1;
-                /* Rules number ports from 1; the event's port is 0-based ("Port 1" = 0). */
-                if (event_port != s->io_port - 1) continue;
-            }
-
             if (s->io_edge == 3) {
                 /* Supervised fault state (cut/short) — compare string "state" field.
                  * Note: requires supervision pre-configured via axis-cgi/supervisedio.cgi */
@@ -925,7 +941,18 @@ int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index) 
         /* The trigger that just fired is always considered active */
         if (fired_trigger_index >= 0 && s->trigger_index == fired_trigger_index) {
             active = 1;
-        } else if (s->type == TRIG_VAPIX_EVENT || s->type == TRIG_IO_INPUT) {
+        } else if (s->type == TRIG_IO_INPUT) {
+            /* Port events carry "state", not "active" */
+            if (!s->cached_data) return 0;
+            if (s->io_edge == 3) {
+                const char* st = cJSON_GetStringValue(cJSON_GetObjectItem(s->cached_data, "state"));
+                active = st && strcmp(st, s->string_value) == 0;
+            } else {
+                cJSON* st = cJSON_GetObjectItem(s->cached_data, "state");
+                if (st && cJSON_IsBool(st))
+                    active = (s->io_edge == 1) ? !cJSON_IsTrue(st) : cJSON_IsTrue(st);
+            }
+        } else if (s->type == TRIG_VAPIX_EVENT) {
             if (!s->cached_data) return 0;
             if (s->filter_key[0] && s->filter_value >= 0) {
                 cJSON* fv = cJSON_GetObjectItem(s->cached_data, s->filter_key);

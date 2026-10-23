@@ -510,6 +510,10 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 7.7 | `7.7-vms-event-bridge.json` | Advanced | Manual trigger + webhook → fire VAPIX event for VMS |
 | 7.8 | `7.8-security-audit-logger.json` | Advanced |  rule_fired trigger + condition_logic OR → audit log |
 | 7.9 | `7.9-network-gated-alert.json` | Advanced | http_check condition → motion alert only when endpoint reachable |
+| 8.1 | `8.1-alpv-plate-io-alarm-push.json` | ALPV | Plate read + I/O input active → HTTP push |
+| 8.2 | `8.2-alpv-plate-loud-vehicle-push.json` | ALPV | Plate read AND audio detection within 10 s → HTTP push |
+| 8.3a | `8.3a-alpv-push-enable-on-io-alarm.json` | ALPV | I/O input active → enable ALPV push profile 1 (e.g. UTMC) |
+| 8.3b | `8.3b-alpv-push-disable-on-io-clear.json` | ALPV | I/O input inactive → disable ALPV push profile 1 |
 
 ---
 
@@ -688,6 +692,125 @@ name works for the trigger — it does not need to be declared, since inbound
 commands are not part of the birth certificate.
 
 **Template:** [`templates/7.14-sparkplug-command-handler.json`](templates/7.14-sparkplug-command-handler.json)
+
+---
+
+## Use Case 8: License Plate Verification (ALPV)
+
+AXIS License Plate Verifier (ALPV) publishes a device event for every plate it
+reads. Event Engine can subscribe to that event and combine it with other
+signals on the camera (digital inputs, audio detection, analytics) so that only
+the plate reads that matter are delivered to a back-end system. There are two
+ways to deliver them:
+
+- **Event Engine sends the push itself** (8.1, 8.2): an **HTTP Request** action
+  with any body and headers. Works with any condition, including correlation.
+- **Event Engine switches ALPV's own push on and off** (8.3): ALPV keeps sending
+  in its native formats (UTMC-1, UTMC-2, HTTP POST, TCP, FTP), with its own
+  images, and Event Engine only decides *when* the push profile is enabled. Use
+  this when the receiver needs ALPV's exact format, for example UTMC.
+
+**Before you start:**
+
+- Install and configure ALPV on the camera first. Its events appear in the
+  Device Event dropdown as **CameraApplicationPlatform / ALPV.AllPlates**.
+- Use 1.9.18 or later. In 1.9.17 and earlier, when two rules (or a
+  trigger and a Device Event Query) subscribe to `ALPV.AllPlates`, each rule
+  fires once per subscription, so every plate is pushed more than once.
+- **ALPV raises `ALPV.AllPlates` up to three times per vehicle**, with
+  `carState` set to `new`, `update` and `lost`. Add a text Value Condition
+  `carState` = `new` to the trigger (the templates do) to get one event per
+  vehicle, which matches ALPV's own push default.
+- Useful fields (ALPV 3.1.7): `text` (the plate), `country`, `region`,
+  `iso3166-2`, `carState`, `carMoveDirection`, `lpConfidence`,
+  `capture_timestamp`, `vehicleType`, `vehicleMake`, `vehicleModel`,
+  `vehicleColor`, `listName`, `action` and `lpImage`, each available as
+  `{{trigger.KEY}}`. `lpImage` is the plate crop as a base64 JPEG, so
+  `{{trigger_json}}` includes the image. **Attach camera snapshot** adds a
+  separate full-frame JPEG as `{{trigger.snapshot_base64}}`.
+- **Testing without traffic:** ALPV can generate a test vehicle with
+  `GET /local/fflprapp/api.cgi?api=events_generate&profile=1&plate=TEST123`
+  (the **Test** button on ALPV's push page). It raises the normal
+  `ALPV.AllPlates` events, so Event Engine rules fire on it. It also sends the
+  test to the given push profile even when that profile is disabled.
+- Do not use **ACAP Control** to stop and start ALPV as a gate: ALPV misses
+  plates while stopped and needs time to restart.
+
+### 8.1 Plate Reads While an I/O Alarm Is Active
+
+**Scenario:** An external detector (for example a GNSS jammer/spoofing detector)
+closes a relay wired to the camera's digital input while its alarm is on. Every
+plate read during the alarm must be pushed; plate reads at other times are
+ignored.
+
+**How it works:**
+
+- A **Device Event** trigger fires on `ALPV.AllPlates` with `carState` = `new`
+- An **I/O State** condition checks that input port 1 is currently **active**
+- An **HTTP Request** action POSTs the plate data (`{{trigger_json}}`) to the
+  receiver
+
+**Setup:** Set the input's normal state (open/closed circuit) in the camera's
+I/O settings so that "active" means "alarm on". This pattern needs the input to
+stay active for the whole alarm. If the detector only pulses its relay, use the
+correlation pattern from 8.2 with an **I/O Input** trigger instead of audio.
+Leave ALPV's own push to the same receiver disabled, otherwise plates arrive
+twice.
+
+**Template:** [`templates/8.1-alpv-plate-io-alarm-push.json`](templates/8.1-alpv-plate-io-alarm-push.json)
+
+---
+
+### 8.2 Plate Read Correlated with a Loud Vehicle
+
+**Scenario:** A plate should only be pushed when audio detection flags a loud
+vehicle at roughly the same time. The sound and the plate read are both short
+events and can arrive in either order.
+
+**How it works:**
+
+- `trigger_logic: "AND"` with `trigger_window: 10` (**AND → Correlation window**
+  in the UI): the `ALPV.AllPlates` event (`carState` = `new`) and an **Audio
+  detection** event (`AudioSource/TriggerLevel`, filtered on `triggered = true`)
+  must both fire within 10 seconds
+- A **Device Event Query** action reloads the latest `ALPV.AllPlates` data. The
+  actions receive the data of whichever trigger fired last, so without this
+  step `{{trigger.*}}` would hold the audio event instead of the plate when the
+  sound arrives after the plate read
+- An **HTTP Request** action POSTs the plate data to the receiver
+
+**Setup:** Enable audio and audio detection on the camera and set the trigger
+level (**Alarm level**) so that a loud vehicle exceeds it. Keep the value filter
+on the audio trigger: without it the trigger also fires when the sound *ends*,
+and that could be paired with a plate. After the rule fires, both events are
+needed again before it fires the next time.
+
+**Template:** [`templates/8.2-alpv-plate-loud-vehicle-push.json`](templates/8.2-alpv-plate-loud-vehicle-push.json)
+
+---
+
+### 8.3 Switch ALPV's Native Push (UTMC) On During an I/O Alarm
+
+**Scenario:** The back-end expects ALPV's own message format, for example
+UTMC-1 or UTMC-2, but plates should only be sent while an external alarm is
+active. ALPV's push conditions cover lists, regions and direction, not inputs.
+
+**How it works:**
+
+- **8.3a:** an **I/O Input** trigger (port 1, rising) runs an **HTTP Request**
+  that POSTs `<cloud_config><enable>true</enable></cloud_config>` to ALPV's
+  push profile 1 at `http://127.0.0.1/local/fflprapp/cloud.cgi`
+- **8.3b:** the same input falling posts `<enable>false</enable>`
+- ALPV only updates the fields sent; the rest of the profile is unchanged
+
+**Setup:** In ALPV, configure push profile 1 (protocol, server, sensor provider
+ID, location) and leave it disabled. Profiles 2 and 3 are `cloud2.cgi` and
+`cloud3.cgi`. Replace `ADMIN_USER` / `ADMIN_PASSWORD` with an administrator
+account on the device. Plates read in the moment between the input changing and
+the profile being switched may be sent or missed, so this suits alarms that
+last seconds or longer. For short signals use 8.2.
+
+**Templates:** [`templates/8.3a-alpv-push-enable-on-io-alarm.json`](templates/8.3a-alpv-push-enable-on-io-alarm.json) and [`templates/8.3b-alpv-push-disable-on-io-clear.json`](templates/8.3b-alpv-push-disable-on-io-clear.json)
 
 ---
 

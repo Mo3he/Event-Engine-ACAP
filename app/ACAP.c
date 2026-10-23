@@ -1700,7 +1700,7 @@ ACAP_EVENTS_Main_Callback(guint subscription, AXEvent* axEvent, gpointer user_da
     if (user_data)
         cJSON_AddItemReferenceToObject(eventData, "source", (cJSON*)user_data);
     if (EVENT_USER_CALLBACK)
-        EVENT_USER_CALLBACK(eventData, user_data);
+        EVENT_USER_CALLBACK(eventData, subscription, user_data);
     cJSON_Delete(eventData);
     ax_event_free(axEvent);
 }

@@ -438,8 +438,8 @@ failover can leave a stale `NDEATH` undelivered.
 
 ## Use case templates
 
-The [`use-cases/`](use-cases/) directory contains 50 ready-to-import JSON rule
-templates across 7 categories:
+The [`use-cases/`](use-cases/) directory contains 56 ready-to-import JSON rule
+templates across 8 categories:
 
 1. **Notifications & Data:** sensor data to Power BI, InfluxDB, MQTT/Home
    Assistant; multi-platform motion alerts; daily activity digests
@@ -456,6 +456,9 @@ templates across 7 categories:
 7. **Advanced Patterns:** counter-driven escalation; tailgate detection;
    night-only recording; snapshot FTP with fallback; ACAP watchdog; VMS event
    bridge; security audit logger; network-gated alerts; dual-zone AND_ACTIVE logic
+8. **License Plate Verification (ALPV):** push plate reads only while an I/O
+   alarm is active, or when a loud vehicle is detected at the same time; switch
+   ALPV's own push (e.g. UTMC) on and off from an input
 
 Import a template: open the web UI -> Rules tab -> Import, or POST the JSON to
 `/local/acap_event_engine/rules?action=import`. See
@@ -576,7 +579,7 @@ app/
     └── default_rules.json  # Example rules loaded on first run
 use-cases/
 ├── USE_CASES.md            # Detailed use-case descriptions
-└── templates/              # 50 ready-to-import JSON rule templates
+└── templates/              # 56 ready-to-import JSON rule templates
 ```
 
 ## Build from source

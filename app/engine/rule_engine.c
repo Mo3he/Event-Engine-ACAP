@@ -607,8 +607,8 @@ int RuleEngine_SetEnabled(const char* id, int enabled) {
     return 0;
 }
 
-void RuleEngine_Dispatch_Event(cJSON* event) {
-    Triggers_On_VAPIX_Event(event);
+void RuleEngine_Dispatch_Event(cJSON* event, unsigned int subscription) {
+    Triggers_On_VAPIX_Event(event, subscription);
 }
 
 int RuleEngine_Dispatch_Webhook(const char* token, cJSON* payload) {

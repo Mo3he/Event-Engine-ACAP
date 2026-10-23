@@ -194,10 +194,10 @@ static const char* app_version(void) {
 /*=====================================================
  * VAPIX event callback (GMainLoop thread)
  *=====================================================*/
-static void Event_Callback(cJSON* event, void* user_data) {
+static void Event_Callback(cJSON* event, unsigned int subscription, void* user_data) {
     (void)user_data;
     Sparkplug_On_Device_Event(event);
-    RuleEngine_Dispatch_Event(event);
+    RuleEngine_Dispatch_Event(event, subscription);
 }
 
 /*=====================================================

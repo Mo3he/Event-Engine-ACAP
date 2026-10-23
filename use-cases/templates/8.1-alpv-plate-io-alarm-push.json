@@ -1,0 +1,37 @@
+{
+  "name": "ALPV — Push Plate Reads While I/O Alarm Is Active",
+  "description": "Every plate read by AXIS License Plate Verifier is pushed to a receiver, but only while digital input 1 is active (e.g. a relay from a GNSS jammer/spoofing detector that stays closed while the alarm is on). Plate reads with the input inactive are ignored. Replace the URL, headers and body with the format your receiver expects. Disabled on import until the receiver is configured.",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": { "tnsaxis": "CameraApplicationPlatform" },
+      "topic1": { "": "ALPV.AllPlates" },
+      "string_key": "carState",
+      "string_value": "new"
+    }
+  ],
+  "conditions": [
+    {
+      "type": "io_state",
+      "port": 1,
+      "state": "active"
+    }
+  ],
+  "actions": [
+    {
+      "type": "http_request",
+      "url": "https://receiver.example.com/anpr",
+      "method": "POST",
+      "headers": "Content-Type: application/json",
+      "body": "{\"camera\":\"{{camera.serial}}\",\"timestamp\":\"{{timestamp}}\",\"reason\":\"io_alarm\",\"plate_event\":{{trigger_json}}}",
+      "attach_snapshot": false
+    }
+  ]
+}

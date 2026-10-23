@@ -331,6 +331,11 @@
     <a href="#uc7-13" class="sub">7.13 Sparkplug B Telemetry</a>
     <a href="#uc7-14" class="sub">7.14 Sparkplug B Commands</a>
 
+    <a href="#uc8">8 — License Plates (ALPV)</a>
+    <a href="#uc8-1" class="sub">8.1 Plate + I/O Alarm</a>
+    <a href="#uc8-2" class="sub">8.2 Plate + Loud Vehicle</a>
+    <a href="#uc8-3" class="sub">8.3 Native Push (UTMC)</a>
+
     <div class="sidebar-group">Reference</div>
     <a href="#summary">Template Summary</a>
     <a href="#customisation">Customisation Guide</a>
@@ -1245,6 +1250,85 @@
       </div>
     </div>
 
+    <!-- ═══════════════════════ UC8: ALPV ═══════════════════════ -->
+    <div class="section-header" id="uc8">
+      <h2>8 — License Plate Verification (ALPV)</h2>
+      <p>AXIS License Plate Verifier publishes a device event for every plate it reads. Combine it with digital inputs or audio detection so only the plate reads that matter reach a back-end system: either Event Engine sends the push itself (8.1, 8.2), or it switches ALPV's own push on and off so ALPV keeps its native formats such as UTMC (8.3).</p>
+    </div>
+
+    <div class="setup-box">
+      <strong>Before you start:</strong> Use 1.9.18 or later: in 1.9.17 and earlier, two subscriptions to <code>ALPV.AllPlates</code> (two rules, or a trigger plus a Device Event Query) make each rule fire once per subscription. ALPV events appear in the Device Event dropdown as <strong>CameraApplicationPlatform / ALPV.AllPlates</strong>. <strong>ALPV raises this event up to three times per vehicle</strong> (<code>carState</code> = <code>new</code>, <code>update</code>, <code>lost</code>); add a text Value Condition <code>carState</code> = <code>new</code> for one event per vehicle (the templates do). Useful fields (ALPV 3.1.7): <code>text</code> (the plate), <code>country</code>, <code>region</code>, <code>carState</code>, <code>carMoveDirection</code>, <code>lpConfidence</code>, <code>capture_timestamp</code>, <code>vehicleType</code>/<code>Make</code>/<code>Model</code>/<code>Color</code>, <code>listName</code> and <code>lpImage</code> (the plate crop as a base64 JPEG), each available as <span class="var">{{trigger.KEY}}</span>. <strong>Testing without traffic:</strong> <code>/local/fflprapp/api.cgi?api=events_generate&amp;profile=1&amp;plate=TEST123</code> (ALPV's push <strong>Test</strong> button) raises the normal ALPV events, and also sends the test to that push profile even when it is disabled. Don't use <strong>ACAP Control</strong> to stop/start ALPV as a gate (it misses plates while stopped).
+    </div>
+
+    <div class="uc-card" id="uc8-1">
+      <h3>8.1 Plate Reads While an I/O Alarm Is Active</h3>
+      <p class="scenario">An external detector (for example a GNSS jammer/spoofing detector) closes a relay wired to the camera's digital input while its alarm is on. Every plate read during the alarm is pushed; plate reads at other times are ignored.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (ALPV.AllPlates, carState=new)</span>
+        <span class="tag condition">io_state</span>
+        <span class="tag action">http_request</span>
+        <span class="tag feature">trigger_json</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>Device Event</strong> trigger fires on <code>ALPV.AllPlates</code> with <code>carState</code> = <code>new</code></li>
+        <li data-step="2">An <strong>I/O State</strong> condition checks that input port 1 is currently active</li>
+        <li data-step="3">An <strong>HTTP Request</strong> POSTs the plate data (<span class="var">{{trigger_json}}</span>) to the receiver</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Set the input's normal state in the camera's I/O settings so that "active" means "alarm on". The input must stay active for the whole alarm. If the detector only pulses its relay, use the correlation pattern from 8.2 with an <strong>I/O Input</strong> trigger instead of audio. Leave ALPV's own push to the same receiver disabled to avoid duplicates.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('8.1-alpv-plate-io-alarm-push')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.1 — Plate + I/O Alarm</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc8-2">
+      <h3>8.2 Plate Read Correlated with a Loud Vehicle</h3>
+      <p class="scenario">A plate is only pushed when audio detection flags a loud vehicle at roughly the same time. The sound and the plate read are both short events and can arrive in either order.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (ALPV.AllPlates, carState=new)</span>
+        <span class="tag trigger">vapix_event (Audio detection)</span>
+        <span class="tag action">vapix_query</span>
+        <span class="tag action">http_request</span>
+        <span class="tag feature">trigger_logic AND</span>
+        <span class="tag feature">trigger_window 10s</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><code>trigger_logic: "AND"</code> + <code>trigger_window: 10</code> (<strong>AND → Correlation window</strong> in the UI): the plate read and audio detection (<code>triggered = true</code>) must both fire within 10 seconds</li>
+        <li data-step="2"><strong>Device Event Query</strong> reloads the latest <code>ALPV.AllPlates</code> data, because actions receive the data of whichever trigger fired last</li>
+        <li data-step="3">An <strong>HTTP Request</strong> POSTs the plate data to the receiver</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Enable audio and audio detection on the camera and set the trigger level (<strong>Alarm level</strong>) so a loud vehicle exceeds it. Keep the value filter on the audio trigger: without it the trigger also fires when the sound ends. After the rule fires, both events are needed again before it fires the next time.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('8.2-alpv-plate-loud-vehicle-push')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.2 — Plate + Loud Vehicle</button>
+      </div>
+    </div>
+
+    <div class="uc-card" id="uc8-3">
+      <h3>8.3 Switch ALPV's Native Push (UTMC) On During an I/O Alarm</h3>
+      <p class="scenario">The back-end expects ALPV's own message format, for example UTMC-1 or UTMC-2, but plates should only be sent while an external alarm is active. ALPV's push conditions cover lists, regions and direction, not inputs.</p>
+      <div class="tags">
+        <span class="tag trigger">io_input (rising / falling)</span>
+        <span class="tag action">http_request</span>
+        <span class="tag feature">ALPV native push</span>
+        <span class="tag feature">UTMC</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><strong>8.3a:</strong> input 1 rising → <strong>HTTP Request</strong> POSTs <code>&lt;cloud_config&gt;&lt;enable&gt;true&lt;/enable&gt;&lt;/cloud_config&gt;</code> to <code>http://127.0.0.1/local/fflprapp/cloud.cgi</code> (ALPV push profile 1)</li>
+        <li data-step="2"><strong>8.3b:</strong> input 1 falling → the same with <code>false</code></li>
+        <li data-step="3">ALPV only updates the fields sent; the rest of the profile is unchanged</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> In ALPV, configure push profile 1 (protocol, server, sensor provider ID, location) and leave it disabled. Profiles 2 and 3 are <code>cloud2.cgi</code> and <code>cloud3.cgi</code>. Replace <code>ADMIN_USER</code>/<code>ADMIN_PASSWORD</code> with an administrator account on the device. Plates read in the moment the input changes may be sent or missed, so this suits alarms lasting seconds or longer; for short signals use 8.2.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('8.3a-alpv-push-enable-on-io-alarm')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.3a — Enable on Alarm</button>
+        <button class="dl-btn" onclick="downloadTemplate('8.3b-alpv-push-disable-on-io-clear')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.3b — Disable on Clear</button>
+      </div>
+    </div>
+
     <!-- ═══════════════════════ SUMMARY ═══════════════════════ -->
     <div class="section-header" id="summary">
       <h2>Template Summary</h2>
@@ -1309,6 +1393,10 @@
         <tr><td>7.12</td><td>dual-zone-and-active</td><td>Advanced</td><td>Door + Motion AND_ACTIVE → recording + MQTT (on_failure → syslog)</td></tr>
         <tr><td>7.13</td><td>sparkplug-telemetry</td><td>Advanced</td><td>Schedule + vapix_query → sparkplug_publish (protobuf NDATA)</td></tr>
         <tr><td>7.14</td><td>sparkplug-command-handler</td><td>Advanced</td><td>sparkplug_command → audio_clip + set_variable + sparkplug_publish</td></tr>
+        <tr><td>8.1</td><td>alpv-plate-io-alarm-push</td><td>ALPV</td><td>Plate read + I/O input active → HTTP push</td></tr>
+        <tr><td>8.2</td><td>alpv-plate-loud-vehicle-push</td><td>ALPV</td><td>Plate read AND audio detection within 10 s → vapix_query + HTTP push</td></tr>
+        <tr><td>8.3a</td><td>alpv-push-enable-on-io-alarm</td><td>ALPV</td><td>I/O input active → enable ALPV push profile 1 (e.g. UTMC)</td></tr>
+        <tr><td>8.3b</td><td>alpv-push-disable-on-io-clear</td><td>ALPV</td><td>I/O input inactive → disable ALPV push profile 1</td></tr>
       </tbody>
     </table>
 

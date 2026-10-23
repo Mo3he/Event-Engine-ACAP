@@ -29,7 +29,7 @@ int  Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array);
 void Triggers_Unsubscribe_Rule(const char* rule_id);
 
 /* Called from ACAP single event callback (main loop thread) */
-void Triggers_On_VAPIX_Event(cJSON* event);
+void Triggers_On_VAPIX_Event(cJSON* event, unsigned int subscription);
 
 /* Called from /fire HTTP endpoint — matches token against registered webhooks */
 int  Triggers_On_Webhook(const char* token, cJSON* payload);

@@ -69,7 +69,9 @@ typedef void (*ACAP_Config_Update)(const char* service, cJSON* data);
  * @param event The event data (caller must NOT delete - handled internally)
  * @param user_data User-provided context from ACAP_EVENTS_Subscribe
  */
-typedef void (*ACAP_EVENTS_Callback)(cJSON* event, void* user_data);
+/* subscription is the ID returned by ACAP_EVENTS_Subscribe for the subscription
+ * that delivered this event (each matching subscription gets its own copy). */
+typedef void (*ACAP_EVENTS_Callback)(cJSON* event, unsigned int subscription, void* user_data);
 
 /**
  * @brief HTTP endpoint callback function type.
