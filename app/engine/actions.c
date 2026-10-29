@@ -271,8 +271,38 @@ void Actions_Init(void) {
  *   {{trigger_json}}     all trigger data as a compact JSON object
  *   {{var.NAME}}         variable value
  *   {{counter.NAME}}     counter value
+ * Any variable may end in |N (round to N decimals) or |xml (escape & < > " ').
  *-----------------------------------------------------*/
-#define MAX_TEMPLATE_OUTPUT (256 * 1024)
+/* Large enough for a full-resolution snapshot in base64 plus the rest of a body */
+#define MAX_TEMPLATE_OUTPUT (2 * 1024 * 1024)
+
+/* Escape the five XML special characters. Returns malloc'd string or NULL. */
+static char* xml_escape(const char* s) {
+    size_t n = 0;
+    for (const char* p = s; *p; p++) {
+        switch (*p) {
+            case '&': n += 5; break;
+            case '<': case '>': n += 4; break;
+            case '"': case '\'': n += 6; break;
+            default: n++;
+        }
+    }
+    char* out = malloc(n + 1);
+    if (!out) return NULL;
+    char* o = out;
+    for (const char* p = s; *p; p++) {
+        switch (*p) {
+            case '&':  memcpy(o, "&amp;", 5);  o += 5; break;
+            case '<':  memcpy(o, "&lt;", 4);   o += 4; break;
+            case '>':  memcpy(o, "&gt;", 4);   o += 4; break;
+            case '"':  memcpy(o, "&quot;", 6); o += 6; break;
+            case '\'': memcpy(o, "&apos;", 6); o += 6; break;
+            default:   *o++ = *p;
+        }
+    }
+    *o = '\0';
+    return out;
+}
 
 /* url_encode_values percent-encodes each substituted value so a '+' (timezone
  * offset) is not decoded as a space by form-urlencoded servers. */
@@ -307,17 +337,22 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
                 key[key_len] = '\0';
             }
 
-            /* Split optional |N decimal format specifier BEFORE lookup.
+            /* Split optional |N decimal format or |xml escape specifier BEFORE lookup.
              * e.g. "trigger.Temperature|2" → key="trigger.Temperature", dp=2 */
             int has_fmt = 0;
+            int xml_esc = 0;
             int dp = 0;
             char* pipe = strchr(key, '|');
             if (pipe) {
                 *pipe = '\0';
-                dp = atoi(pipe + 1);
-                if (dp < 0) dp = 0;
-                if (dp > 15) dp = 15;
-                has_fmt = 1;
+                if (strcmp(pipe + 1, "xml") == 0) {
+                    xml_esc = 1;
+                } else {
+                    dp = atoi(pipe + 1);
+                    if (dp < 0) dp = 0;
+                    if (dp > 15) dp = 15;
+                    has_fmt = 1;
+                }
             }
 
             const char* replacement = NULL;
@@ -371,6 +406,12 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
 
             if (!replacement) replacement = "";
 
+            char* xml_escaped = NULL;
+            if (xml_esc && replacement[0]) {
+                xml_escaped = xml_escape(replacement);
+                if (xml_escaped) replacement = xml_escaped;
+            }
+
             char* escaped = NULL;
             if (url_encode_values && replacement[0]) {
                 escaped = curl_easy_escape(NULL, replacement, 0);
@@ -381,6 +422,7 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
             if (out_len + rlen + 1 > MAX_TEMPLATE_OUTPUT) {
                 LOG_WARN("template expansion exceeded %d bytes, truncating", MAX_TEMPLATE_OUTPUT);
                 curl_free(escaped);
+                free(xml_escaped);
                 free(dyn_replacement);
                 break;
             }
@@ -392,6 +434,7 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
             out_len += rlen;
             out[out_len] = '\0';
             curl_free(escaped);
+            free(xml_escaped);
             free(dyn_replacement);
             p = end + 2;
         } else {
@@ -421,6 +464,8 @@ static char* expand_url_template(const char* tmpl, cJSON* trigger_data) {
 
 static void execute_from(const char* rule_id, cJSON* actions_array,
                          int start_index, cJSON* trigger_data);
+static void execute_from_ex(const char* rule_id, cJSON* actions_array,
+                            int start_index, cJSON* trigger_data, int alpv_attempt);
 
 /* Base64 encoding for snapshot attachment */
 static const char b64_chars[] =
@@ -559,6 +604,53 @@ static cJSON* build_trigger_data_with_snapshot(cJSON* cfg, cJSON* trigger_data) 
 /* http_request */
 static size_t curl_discard(void* p, size_t sz, size_t n, void* ud) {
     (void)p; (void)ud; return sz * n;
+}
+
+/* One non-blocking attempt to fetch the image AXIS License Plate Verifier saved
+ * for a car (ROI_BMP: plate crop, vehicle crop, 480x270 or full frame, per
+ * ALPV's "Save full frame" setting). ALPV saves it a few seconds after it first
+ * sees the car, so the caller retries. Returns base64 (malloc'd) or NULL and
+ * sets *status: 1 = not saved yet (car known), 0 = car not listed yet,
+ * -1 = failed. */
+static char* alpv_try_image_base64(const char* car_id, int* status) {
+    *status = 0;
+    char needle[96];
+    snprintf(needle, sizeof(needle), "<CAR_ID>%s</CAR_ID>", car_id);
+
+    char* xml = ACAP_VAPIX_Get_Path("/local/fflprapp/events.cgi?limit=30");
+    if (!xml) { *status = -1; return NULL; }
+
+    char* hit = strstr(xml, needle);
+    if (!hit) { free(xml); return NULL; }
+    *status = 1;
+    char* evt_end = strstr(hit, "</event>");
+    char* roi = strstr(hit, "<ROI_BMP>");
+    if (!roi || (evt_end && roi > evt_end)) { free(xml); return NULL; }
+    roi += strlen("<ROI_BMP>");
+    char* roi_end = strstr(roi, "</ROI_BMP>");
+    if (!roi_end || roi_end == roi) { free(xml); return NULL; }
+
+    /* The XML escapes '&' in the relative URL */
+    char path[512];
+    int n = snprintf(path, sizeof(path), "/local/fflprapp/");
+    for (char* p = roi; p < roi_end && n < (int)sizeof(path) - 1; ) {
+        if (strncmp(p, "&amp;", 5) == 0) { path[n++] = '&'; p += 5; }
+        else path[n++] = *p++;
+    }
+    path[n] = '\0';
+    free(xml);
+
+    size_t len = 0;
+    char* img = ACAP_VAPIX_GetBinary_Path(path, &len);
+    if (!img || len == 0) {
+        free(img);
+        LOG_WARN("alpv image: could not fetch %s", path);
+        *status = -1;
+        return NULL;
+    }
+    char* b64 = base64_encode((unsigned char*)img, len);
+    free(img);
+    return b64;
 }
 
 /* Common curl setup: timeout, discard-write, follow-redirects, proxy */
@@ -1041,6 +1133,7 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
                 cJSON_AddStringToObject(td_with_snap, "snapshot_base64", snap_b64);
         }
     }
+
     cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
 
     char* url    = expand_url_template(url_tmpl, effective_td);
@@ -1112,10 +1205,13 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
-    if (res == CURLE_OK)
+    if (res == CURLE_OK) {
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-    else
+        if (http_code < 200 || http_code >= 300)
+            LOG_ACTION_ERR("http_request to %s returned HTTP %ld", url, http_code);
+    } else {
         LOG_ACTION_ERR("http_request to %s failed: %s", url, curl_easy_strerror(res));
+    }
 
     if (hdrs) curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
@@ -3133,6 +3229,24 @@ static gboolean delay_resume(gpointer user_data) {
     return G_SOURCE_REMOVE;
 }
 
+/* Waiting for ALPV to save a car's image must not block the main loop, so the
+ * HTTP Request and the actions after it are re-run from a 1 s timer. */
+#define ALPV_IMAGE_MAX_ATTEMPTS 15
+
+typedef struct {
+    DelayCtx d;
+    int      attempt;
+} AlpvRetryCtx;
+
+static gboolean alpv_retry_resume(gpointer user_data) {
+    AlpvRetryCtx* ctx = (AlpvRetryCtx*)user_data;
+    execute_from_ex(ctx->d.rule_id, ctx->d.remaining_actions, 0, ctx->d.trigger_data, ctx->attempt);
+    cJSON_Delete(ctx->d.remaining_actions);
+    cJSON_Delete(ctx->d.trigger_data);
+    free(ctx);
+    return G_SOURCE_REMOVE;
+}
+
 /*-----------------------------------------------------
  * Notification Digest — buffer messages and flush
  * periodically instead of sending one per event.
@@ -3281,6 +3395,11 @@ static void action_modbus_write(cJSON* cfg) {
 
 static void execute_from(const char* rule_id, cJSON* actions_array,
                          int start_index, cJSON* trigger_data) {
+    execute_from_ex(rule_id, actions_array, start_index, trigger_data, 0);
+}
+
+static void execute_from_ex(const char* rule_id, cJSON* actions_array,
+                            int start_index, cJSON* trigger_data, int alpv_attempt) {
     g_current_rule_id = rule_id;
     int total = cJSON_GetArraySize(actions_array);
     for (int i = start_index; i < total; i++) {
@@ -3304,6 +3423,39 @@ static void execute_from(const char* rule_id, cJSON* actions_array,
             ctx->trigger_data = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateNull();
             g_timeout_add_seconds((guint)seconds, delay_resume, ctx);
             return; /* stop synchronous execution */
+        }
+
+        /* http_request with "attach_alpv_image": add the image ALPV saved for
+         * the car as {{trigger.alpv_image_base64}}, retrying until it exists */
+        cJSON* alpv_j = cJSON_GetObjectItem(action, "attach_alpv_image");
+        if (strcmp(type, "http_request") == 0 && alpv_j && cJSON_IsTrue(alpv_j)) {
+            int attempt = (i == start_index) ? alpv_attempt : 0;
+            const char* car_id = trigger_data ? cJSON_GetStringValue(cJSON_GetObjectItem(trigger_data, "carID")) : NULL;
+            int status = -1;
+            char* b64 = car_id ? alpv_try_image_base64(car_id, &status) : NULL;
+            if (!car_id) LOG_WARN("http_request: attach_alpv_image needs an ALPV event with carID");
+
+            if (!b64 && status >= 0 && attempt + 1 < ALPV_IMAGE_MAX_ATTEMPTS) {
+                cJSON* remaining = cJSON_CreateArray();
+                for (int j = i; j < total; j++)
+                    cJSON_AddItemToArray(remaining, cJSON_Duplicate(cJSON_GetArrayItem(actions_array, j), 1));
+                AlpvRetryCtx* ctx = malloc(sizeof(AlpvRetryCtx));
+                snprintf(ctx->d.rule_id, sizeof(ctx->d.rule_id), "%s", rule_id ? rule_id : "");
+                ctx->d.remaining_actions = remaining;
+                ctx->d.trigger_data = cJSON_Duplicate(trigger_data, 1);
+                ctx->attempt = attempt + 1;
+                g_timeout_add_seconds(1, alpv_retry_resume, ctx);
+                return; /* resume from this action once ALPV has saved the image */
+            }
+            if (!b64 && car_id)
+                LOG_WARN("alpv image: none for car %s after %d s, sending without it",
+                         car_id, attempt + 1);
+
+            cJSON* td = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
+            if (b64) { cJSON_AddStringToObject(td, "alpv_image_base64", b64); free(b64); }
+            action_http_request(rule_id, action, td);
+            cJSON_Delete(td);
+            continue;
         }
 
         /* Synchronous actions */

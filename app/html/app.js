@@ -160,7 +160,7 @@ const RULE_TYPE_LABELS = {
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
     variable_compare: 'Variable', http_check: 'HTTP Check', aoa_occupancy: 'AOA Occupancy',
-    day_night: 'Day/Night', vapix_event_state: 'Device Event State'
+    day_night: 'Day/Night', vapix_event_state: 'Device Event State', trigger_data: 'Trigger Data'
   },
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',

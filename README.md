@@ -135,6 +135,7 @@ The web UI is accessible at
 | **I/O State** | Check the current state of an I/O port. Supports **remote device** target |
 | **Counter Compare** | Compare a counter value against a threshold |
 | **Variable Compare** | Compare a named variable against a value |
+| **Trigger Data** | Compare a field of the event that fired the rule (any `{{trigger.KEY}}`) against a value: equals, not equals, contains, does not contain, or a numeric comparison. The value can contain variables such as `{{var.NAME}}`, so a rule can compare the event with state saved by an earlier firing (e.g. one alarm per ALPV `carID`) |
 | **HTTP Check** | Make an HTTP request; pass only if the response matches an expected status, body substring, or **JSONPath value** (dot-notation path into a JSON response, e.g. `data.temperature`) |
 | **AOA Occupancy** | Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a threshold (gt / gte / lt / lte / eq). Filters by object class or uses the total count. Supports **remote device** target; use Load to fetch available scenarios from the remote device |
 | **Device Event State** | Check the current state of any device event by polling event instances. Match a topic substring and verify that a data key equals an expected value (e.g. is motion currently active?). Supports **remote device** target; use Load to fetch the full event catalog from the remote device |
@@ -149,7 +150,7 @@ stop a siren when motion ends).
 
 | Type | Description |
 |------|-------------|
-| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **fallback action** executed when the request fails (non-2xx or network error): log, MQTT publish, or secondary HTTP request |
+| **HTTP Request** | GET, POST, PUT, or DELETE to any URL. Optional **snapshot attachment** (fetches a JPEG and makes it available as `{{trigger.snapshot_base64}}`). Optional **Attach ALPV image**: for AXIS License Plate Verifier events, fetches the image ALPV saved for the car (vehicle crop, plate crop or frame, per ALPV's *Save full frame* setting) as `{{trigger.alpv_image_base64}}`. Optional **fallback action** executed when the request fails (non-2xx or network error): log, MQTT publish, or secondary HTTP request |
 | **MQTT Publish** | Publish a message to a topic with configurable QoS (0 or 1) and retain flag |
 | **Slack** | Send a message to a Slack channel via incoming webhook. Optional channel and username override |
 | **Teams** | Send an Adaptive Card to Microsoft Teams via Power Automate / Workflows webhook. Optional title and theme color |
@@ -286,9 +287,11 @@ rule editor to pick from available values.
 | `{{trigger_json}}` | Full trigger event data as a compact JSON string |
 | `{{trigger.KEY}}` | Individual field from the trigger event (e.g. `{{trigger.CO2}}`) |
 | `{{trigger.KEY\|N}}` | Numeric value rounded to N decimal places (e.g. `{{trigger.Temperature\|2}}` -> `20.35`) |
+| `{{trigger.KEY\|xml}}` | Value with `&` `<` `>` `"` `'` escaped for XML bodies (works on any variable) |
 | `{{var.NAME}}` | Value of a named variable |
 | `{{counter.NAME}}` | Value of a named counter |
 | `{{trigger.snapshot_base64}}` | Base64-encoded JPEG snapshot (only when **Attach snapshot** is enabled on the HTTP Request action) |
+| `{{trigger.alpv_image_base64}}` | Base64-encoded JPEG that ALPV saved for the car (only when **Attach ALPV image** is enabled on the HTTP Request action) |
 
 The rule editor shows which `{{trigger.*}}` keys are available for the selected
 trigger type.
@@ -438,7 +441,7 @@ failover can leave a stale `NDEATH` undelivered.
 
 ## Use case templates
 
-The [`use-cases/`](use-cases/) directory contains 56 ready-to-import JSON rule
+The [`use-cases/`](use-cases/) directory contains 57 ready-to-import JSON rule
 templates across 8 categories:
 
 1. **Notifications & Data:** sensor data to Power BI, InfluxDB, MQTT/Home
@@ -458,7 +461,8 @@ templates across 8 categories:
    bridge; security audit logger; network-gated alerts; dual-zone AND_ACTIVE logic
 8. **License Plate Verification (ALPV):** push plate reads only while an I/O
    alarm is active, or when a loud vehicle is detected at the same time; switch
-   ALPV's own push (e.g. UTMC) on and off from an input
+   ALPV's own push (e.g. UTMC) on and off from an input; block-list plates to
+   Milestone XProtect alarms
 
 Import a template: open the web UI -> Rules tab -> Import, or POST the JSON to
 `/local/acap_event_engine/rules?action=import`. See
@@ -579,7 +583,7 @@ app/
     └── default_rules.json  # Example rules loaded on first run
 use-cases/
 ├── USE_CASES.md            # Detailed use-case descriptions
-└── templates/              # 56 ready-to-import JSON rule templates
+└── templates/              # 57 ready-to-import JSON rule templates
 ```
 
 ## Build from source

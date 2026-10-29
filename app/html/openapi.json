@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`\n",
-    "version": "1.9.18",
+    "version": "1.9.19",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -408,7 +408,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["time_window", "io_state", "counter", "variable_compare", "http_check", "vapix_event_state", "aoa_occupancy", "day_night"]
+            "enum": ["time_window", "io_state", "counter", "variable_compare", "http_check", "vapix_event_state", "aoa_occupancy", "day_night", "trigger_data"]
           }
         }
       },
@@ -482,6 +482,26 @@
                 "default": "eq"
               },
               "value":    { "type": "string", "example": "true" }
+            }
+          }
+        ]
+      },
+
+      "ConditionTriggerData": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Condition" },
+          {
+            "type": "object",
+            "description": "Compare a field of the event that fired the rule (any {{trigger.KEY}}). Numbers compare numerically, text compares as text; contains/not_contains ignore case. The value may contain templates such as {{var.NAME}}. Fails if the field is missing.",
+            "properties": {
+              "type":  { "type": "string", "enum": ["trigger_data"] },
+              "key":   { "type": "string", "example": "carState" },
+              "op": {
+                "type": "string",
+                "enum": ["eq", "ne", "contains", "not_contains", "gt", "gte", "lt", "lte"],
+                "default": "eq"
+              },
+              "value": { "type": "string", "example": "new" }
             }
           }
         ]
@@ -613,6 +633,11 @@
                 "type": "boolean",
                 "default": false,
                 "description": "If true, fetches a JPEG snapshot from the camera and makes it available as {{trigger.snapshot_base64}}"
+              },
+              "attach_alpv_image": {
+                "type": "boolean",
+                "default": false,
+                "description": "For AXIS License Plate Verifier events (carID): fetch the image ALPV saved for the car as {{trigger.alpv_image_base64}}. Waits up to 15 s for ALPV to save it without blocking other rules, then sends without it."
               },
               "on_failure": {
                 "type": "array",

@@ -853,6 +853,10 @@ char* ACAP_VAPIX_Post_Path_Raw(const char* path, const char* body, long* http_co
  */
 char* ACAP_VAPIX_GetBinary(const char* endpoint, size_t* out_size);
 
+/* Like ACAP_VAPIX_GetBinary(), but takes a full path such as
+ * "/local/fflprapp/tools.cgi?action=getImage&name=...". Caller MUST free(). */
+char* ACAP_VAPIX_GetBinary_Path(const char* path, size_t* out_size);
+
 #ifdef __cplusplus
 }
 #endif

@@ -79,7 +79,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
     };
     static const char* const condition_types[] = {
         "time_window", "io_state", "counter", "variable_compare", "http_check",
-        "aoa_occupancy", "day_night", "vapix_event_state", NULL
+        "aoa_occupancy", "day_night", "vapix_event_state", "trigger_data", NULL
     };
     static const char* const action_types[] = {
         "http_request", "mqtt_publish", "slack_webhook", "teams_webhook", "telegram",

@@ -1,0 +1,52 @@
+{
+  "name": "ALPV — Block List Plate to Milestone Alarm",
+  "description": "When AXIS License Plate Verifier matches a plate against a block list, send a Milestone XProtect Analytics Event with the plate (alarm list Object column), country (Tag column), vehicle details (description) and two images: the one ALPV saved for the car (vehicle crop, plate crop or frame, per ALPV's Save full frame setting) and the plate crop. One alarm per vehicle: the first block-list match for each carID. Requires Event Engine 1.9.19 or later. In Milestone, enable Analytics Events (port 9090), create an analytics event named BlockedList and an alarm definition on it. Replace MILESTONE_EVENT_SERVER. Disabled on import.",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": {
+        "tnsaxis": "CameraApplicationPlatform"
+      },
+      "topic1": {
+        "": "ALPV.AllPlates"
+      }
+    }
+  ],
+  "conditions": [
+    {
+      "type": "trigger_data",
+      "key": "listName",
+      "op": "contains",
+      "value": "block"
+    },
+    {
+      "type": "trigger_data",
+      "key": "carID",
+      "op": "ne",
+      "value": "{{var.alpv_last_blocked_car}}"
+    }
+  ],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "alpv_last_blocked_car",
+      "value": "{{trigger.carID}}"
+    },
+    {
+      "type": "http_request",
+      "url": "http://MILESTONE_EVENT_SERVER:9090/",
+      "method": "POST",
+      "headers": "Content-Type: text/xml\nExpect:",
+      "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?><AnalyticsEvent xmlns:i=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns=\"urn:milestone-systems\"><EventHeader><ID>00000000-0000-0000-0000-000000000000</ID><Timestamp>{{timestamp}}</Timestamp><Type>License Plate Recognition</Type><Message>BlockedList</Message><CustomTag>{{trigger.country|xml}}</CustomTag><Source><Name>{{camera.ip}}</Name></Source></EventHeader><Description>Plate {{trigger.text|xml}} ({{trigger.country|xml}}) on {{trigger.listName|xml}}. Vehicle: {{trigger.vehicleColor|xml}} {{trigger.vehicleMake|xml}} {{trigger.vehicleModel|xml}} {{trigger.vehicleType|xml}}. Direction: {{trigger.carMoveDirection|xml}}.</Description><ObjectList><Object><Name>LicensePlate</Name><Type>LicensePlate</Type><Value>{{trigger.text|xml}}</Value><AlarmTrigger>true</AlarmTrigger></Object><Object><Name>Vehicle</Name><Type>{{trigger.vehicleType|xml}}</Type><Value>{{trigger.vehicleMake|xml}} {{trigger.vehicleModel|xml}}</Value><Color>{{trigger.vehicleColor|xml}}</Color></Object></ObjectList><SnapshotList><Snapshot><TimeOffset>0</TimeOffset><Image>{{trigger.alpv_image_base64}}</Image></Snapshot><Snapshot><TimeOffset>0</TimeOffset><Image>{{trigger.lpImage}}</Image></Snapshot></SnapshotList><Vendor><Name>Axis Event Engine</Name></Vendor></AnalyticsEvent>",
+      "attach_snapshot": false,
+      "attach_alpv_image": true
+    }
+  ]
+}

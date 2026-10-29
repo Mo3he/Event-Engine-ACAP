@@ -1,5 +1,51 @@
 # Release Notes
 
+## v1.9.19 - ALPV to Milestone
+
+Sends AXIS License Plate Verifier block-list plates to Milestone XProtect as
+alarms with the plate, country, vehicle details and the vehicle image (new
+template 8.4), and fixes large HTTP bodies being cut off at 256 KB.
+
+### Upgrading to 1.9.19
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. If upgrading from
+v1.9.13 or earlier fails with an install error, export your rules, uninstall the
+old version and install this one; see the v1.9.15 notes below.
+
+### New in 1.9.19
+
+- **Trigger Data condition.** Compare a field of the event that fired the rule
+  (any `{{trigger.KEY}}`) with equals, not equals, contains, does not contain,
+  or a numeric comparison. A trigger's Value Condition filters on one field;
+  this adds more. The value can contain variables such as `{{var.NAME}}`, so a
+  rule can act once per object (e.g. one alarm per ALPV `carID`). Verified on
+  a D6310 for every operator, case-insensitive contains, numbers, booleans,
+  missing fields and variable comparison.
+- **Attach ALPV image** on the HTTP Request action. For AXIS License Plate
+  Verifier events, fetches the image ALPV saved for the car (vehicle crop, plate
+  crop or frame, per ALPV's *Save full frame* setting) as
+  `{{trigger.alpv_image_base64}}`. ALPV saves it a few seconds after first
+  seeing the car, so the request waits up to 15 s without blocking other rules.
+- **`|xml` on any variable** escapes `&` `<` `>` `"` `'` for XML bodies.
+
+### Fixes in 1.9.19
+
+- **Large bodies were cut off at 256 KB.** A full-resolution snapshot in base64
+  is larger than that, so the HTTP body was truncated and the receiver
+  rejected it. The limit is now 2 MB.
+- **HTTP errors are logged.** A non-2xx response from the server is now written
+  to the system log and the rule's event log; before, only network errors were.
+
+### New use case template
+
+- 8.4: AXIS License Plate Verifier block-list plate to a Milestone XProtect
+  alarm, as a Milestone Analytics Event with the plate in the Object column,
+  the country in the Tag column, vehicle details in the description, and
+  ALPV's saved image (vehicle crop recommended) and plate crop as snapshots,
+  one alarm per vehicle at its first block-list match. Tested end to end with
+  XProtect 2026 R1 and ALPV 3.0.13 on a P3275-LV.
+
 ## v1.9.18 - Bug fixes
 
 Fixes rules firing more than once for a single event when several rules (or a

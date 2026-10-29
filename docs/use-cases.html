@@ -335,6 +335,7 @@
     <a href="#uc8-1" class="sub">8.1 Plate + I/O Alarm</a>
     <a href="#uc8-2" class="sub">8.2 Plate + Loud Vehicle</a>
     <a href="#uc8-3" class="sub">8.3 Native Push (UTMC)</a>
+    <a href="#uc8-4" class="sub">8.4 Block List → Milestone</a>
 
     <div class="sidebar-group">Reference</div>
     <a href="#summary">Template Summary</a>
@@ -1329,6 +1330,30 @@
       </div>
     </div>
 
+    <div class="uc-card" id="uc8-4">
+      <h3>8.4 Block List Plate to a Milestone XProtect Alarm</h3>
+      <p class="scenario">Plate lists are managed with AXIS Optimizer and block-list hits must raise a Milestone alarm that shows the plate. <code>ALPV.Block_list</code> carries no plate data, and Milestone's Axis driver raises device events with the topic only, so the alarm's Tag and Object columns stay empty.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (ALPV.AllPlates)</span>
+        <span class="tag condition">trigger_data (listName contains block)</span>
+        <span class="tag condition">trigger_data (carID ≠ last blocked car)</span>
+        <span class="tag action">http_request</span>
+        <span class="tag feature">Milestone Analytics Event</span>
+        <span class="tag feature">snapshots</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1">A <strong>Device Event</strong> trigger on <code>ALPV.AllPlates</code>, a <strong>Trigger Data</strong> condition <code>listName</code> contains <code>block</code>, and a second one <code>carID</code> ≠ <span class="var">{{var.alpv_last_blocked_car}}</span> with a <strong>Set Variable</strong> action storing the <code>carID</code>: one alarm per vehicle, at its first block-list match (the correct plate often only arrives in an <code>update</code>, so filtering on <code>new</code> would miss hits)</li>
+        <li data-step="2">An <strong>HTTP Request</strong> POSTs a Milestone Analytics Event (XML) to the Event Server: the plate goes to the <strong>Object</strong> column, the country to <strong>Tag</strong>, vehicle details to the description, and the image ALPV saved for the car (<strong>Attach ALPV image</strong>: vehicle crop recommended, set in ALPV <em>Settings &gt; Storage &gt; Save full frame</em>) plus ALPV's plate crop as snapshots; text fields use <code>|xml</code></li>
+        <li data-step="3"><code>Source/Name</code> is <span class="var">{{camera.ip}}</span>, so Milestone links the alarm to the camera</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Requires 1.9.19 or later. Alarms can arrive up to about 15 s after the plate read while ALPV saves the vehicle image. In Management Client: enable <strong>Tools &gt; Options &gt; Analytics Events</strong> (port 9090) and allow the cameras' addresses; add an analytics event named <code>BlockedList</code> (must match <code>&lt;Message&gt;</code>); add an alarm definition on it with the camera(s) as source; add the <strong>Object</strong> and <strong>Tag</strong> columns under Alarm Data Settings. In the template replace <code>MILESTONE_EVENT_SERVER</code>; if cameras are added on a port other than 80 use <span class="var">{{camera.ip}}</span><code>:PORT</code>. Milestone answers <code>Warning: Device not known</code> or <code>Warning: Event message not known</code> on a mismatch.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('8.4-alpv-blocklist-to-milestone-alarm')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.4 — Block List to Milestone</button>
+      </div>
+    </div>
+
     <!-- ═══════════════════════ SUMMARY ═══════════════════════ -->
     <div class="section-header" id="summary">
       <h2>Template Summary</h2>
@@ -1397,6 +1422,7 @@
         <tr><td>8.2</td><td>alpv-plate-loud-vehicle-push</td><td>ALPV</td><td>Plate read AND audio detection within 10 s → vapix_query + HTTP push</td></tr>
         <tr><td>8.3a</td><td>alpv-push-enable-on-io-alarm</td><td>ALPV</td><td>I/O input active → enable ALPV push profile 1 (e.g. UTMC)</td></tr>
         <tr><td>8.3b</td><td>alpv-push-disable-on-io-clear</td><td>ALPV</td><td>I/O input inactive → disable ALPV push profile 1</td></tr>
+        <tr><td>8.4</td><td>alpv-blocklist-to-milestone-alarm</td><td>ALPV</td><td>Block-list plate → Milestone Analytics Event (plate, country, vehicle, snapshots)</td></tr>
       </tbody>
     </table>
 

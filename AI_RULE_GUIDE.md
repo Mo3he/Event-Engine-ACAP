@@ -477,6 +477,34 @@ Conditions are optional. If the `conditions` array is empty, the rule always pas
 | `op` | `"eq"` \| `"neq"` \| `"gt"` \| `"lt"` | `"eq"` | Comparison operator |
 | `value` | string | — | Value to compare against (string comparison; `"gt"` and `"lt"` are numeric) |
 
+### 4b. `trigger_data` — Trigger Data Comparison
+
+Compares a field of the event that fired the rule, the same field names as
+`{{trigger.KEY}}`. Use it to filter on a second field when the trigger's own
+value filter (`filter_key` / `value_key` / `string_key`) already filters on one.
+
+```json
+{
+  "type": "trigger_data",
+  "key": "carState",
+  "op": "eq",
+  "value": "new"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key` | string | — | Field name in the trigger data |
+| `op` | `"eq"` \| `"ne"` \| `"contains"` \| `"not_contains"` \| `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` | `"eq"` | Comparison operator. `contains` / `not_contains` ignore case; the others compare as numbers when both sides are numeric, otherwise as text |
+| `value` | string | — | Value to compare against. Booleans are `"true"` / `"false"`. May contain templates such as `{{var.NAME}}`, expanded like action fields |
+
+The condition fails when the field is missing, for example when the rule is
+fired manually or by **Run Rule**.
+
+To act once per object, compare an ID with a variable the rule sets itself:
+condition `{"type":"trigger_data","key":"carID","op":"ne","value":"{{var.last_car}}"}`
+plus a first action `{"type":"set_variable","name":"last_car","value":"{{trigger.carID}}"}`.
+
 ### 5. `http_check` — HTTP Response Check
 
 ```json
@@ -623,6 +651,7 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
 | `username` | string | — | HTTP Basic/Digest auth username |
 | `password` | string | — | HTTP Basic/Digest auth password |
 | `attach_snapshot` | boolean | `false` | Capture JPEG snapshot, available as `{{trigger.snapshot_base64}}` |
+| `attach_alpv_image` | boolean | `false` | For ALPV events (needs `carID`): fetch the image ALPV saved for the car, available as `{{trigger.alpv_image_base64}}`. ALPV saves it a few seconds after first seeing the car, so the request (and any later actions) waits up to 15 s without blocking other rules, then sends without it |
 | `on_failure` | array | — | Actions to execute if request fails (non-2xx or network error) |
 
 ### 2. `mqtt_publish` — MQTT Publish
@@ -1283,7 +1312,9 @@ All string fields in actions support `{{...}}` variable substitution:
 | `{{trigger_json}}` | Full trigger event data as compact JSON |
 | `{{trigger.KEY}}` | Individual field from the trigger event data |
 | `{{trigger.KEY\|N}}` | Numeric value rounded to N decimals (e.g. `{{trigger.Temperature\|2}}` → `20.35`) |
+| `{{trigger.KEY\|xml}}` | Value escaped for XML (`&` `<` `>` `"` `'`); works on any variable |
 | `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is `true`) |
+| `{{trigger.alpv_image_base64}}` | Base64 JPEG saved by ALPV for the car (when `attach_alpv_image` is `true`) |
 | `{{var.NAME}}` | Value of a named variable |
 | `{{counter.NAME}}` | Value of a named counter |
 

@@ -514,6 +514,7 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 8.2 | `8.2-alpv-plate-loud-vehicle-push.json` | ALPV | Plate read AND audio detection within 10 s → HTTP push |
 | 8.3a | `8.3a-alpv-push-enable-on-io-alarm.json` | ALPV | I/O input active → enable ALPV push profile 1 (e.g. UTMC) |
 | 8.3b | `8.3b-alpv-push-disable-on-io-clear.json` | ALPV | I/O input inactive → disable ALPV push profile 1 |
+| 8.4 | `8.4-alpv-blocklist-to-milestone-alarm.json` | ALPV | Block-list plate → Milestone XProtect Analytics Event (plate, country, vehicle, snapshots) |
 
 ---
 
@@ -811,6 +812,62 @@ the profile being switched may be sent or missed, so this suits alarms that
 last seconds or longer. For short signals use 8.2.
 
 **Templates:** [`templates/8.3a-alpv-push-enable-on-io-alarm.json`](templates/8.3a-alpv-push-enable-on-io-alarm.json) and [`templates/8.3b-alpv-push-disable-on-io-clear.json`](templates/8.3b-alpv-push-disable-on-io-clear.json)
+
+---
+
+### 8.4 Block List Plate to a Milestone XProtect Alarm
+
+**Scenario:** Plate lists are managed with AXIS Optimizer and block-list hits
+must raise an alarm in Milestone XProtect that shows the plate. ALPV's
+`ALPV.Block_list` event carries no plate data (only `active`), and Milestone's
+Axis driver raises device events with the topic only, so the alarm's Tag and
+Object columns stay empty.
+
+**How it works:**
+
+- A **Device Event** trigger fires on every `ALPV.AllPlates` event
+- A **Trigger Data** condition passes only when `listName` contains `block`
+  (ignoring case), so `Block list`, `Blocked` and `Block (Clifftest)` all match
+- A second **Trigger Data** condition, `carID` ≠ `{{var.alpv_last_blocked_car}}`,
+  and a **Set Variable** action that stores the `carID` give one alarm per
+  vehicle, raised at its first block-list match. ALPV sends `new`, `reliable`,
+  several `update` and `lost` events per vehicle, and the correct plate text
+  often only arrives in an `update`, so filtering on `new` would miss hits
+- An **HTTP Request** action POSTs a Milestone **Analytics Event** (XML,
+  namespace `urn:milestone-systems`) straight to the Event Server:
+  - `ObjectList/Object/Value` = the plate → alarm list **Object** column
+  - `EventHeader/CustomTag` = the country → **Tag** column
+  - `Description` = list, vehicle colour, make, model, type and direction
+  - `SnapshotList` = the image ALPV saved for the car (**Attach ALPV image**:
+    vehicle crop, plate crop or frame, per ALPV's *Settings > Storage > Save full
+    frame*) and ALPV's plate crop (`lpImage`). **Vehicle crop** is recommended:
+    about 50 KB, the whole car with a readable plate
+  - Text fields use `|xml` so characters such as `&` can't break the XML
+  - `Source/Name` = `{{camera.ip}}`, so Milestone links the alarm to the camera
+
+**Setup in Milestone (Management Client):**
+
+1. **Tools > Options > Analytics Events:** enable it (default port 9090) and
+   allow the cameras' addresses.
+2. **Rules and Events > Analytics Events:** add an event named `BlockedList`.
+   The name must match `<Message>` in the template.
+3. **Alarms > Alarm Definitions:** add an alarm triggered by that analytics
+   event, with the camera(s) as source.
+4. **Alarms > Alarm Data Settings > Alarm List Configuration:** add the
+   **Object** and **Tag** columns.
+
+**Setup in Event Engine:** requires 1.9.19 or later (Trigger Data condition,
+Attach ALPV image). ALPV saves the vehicle image a few seconds after it first
+sees the car, so an alarm can arrive up to about 15 s after the plate is read.
+Replace `MILESTONE_EVENT_SERVER` with the Event Server address. If the cameras
+are added to Milestone on a port other than 80, change `Source/Name` to
+`{{camera.ip}}:PORT`. If the block list in AXIS Optimizer is not named with
+"block", change the condition value to match its `listName`. Milestone answers
+`200` with `Warning: Device not known` or `Warning: Event message not known`
+when the source or event name does not match; use **Test Event** in the
+Management Client to check the Milestone side first.
+
+**Template:** [`templates/8.4-alpv-blocklist-to-milestone-alarm.json`](templates/8.4-alpv-blocklist-to-milestone-alarm.json)
 
 ---
 

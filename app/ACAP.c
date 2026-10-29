@@ -2214,14 +2214,25 @@ static size_t acap_binary_write_cb(char* ptr, size_t sz, size_t nmemb, void* ud)
 }
 
 char* ACAP_VAPIX_GetBinary(const char* endpoint, size_t* out_size) {
-    if (!VAPIX_CURL || !endpoint || !out_size) return NULL;
+    if (!endpoint) return NULL;
+    size_t path_size = strlen("/axis-cgi/") + strlen(endpoint) + 1;
+    char* path = malloc(path_size);
+    if (!path) return NULL;
+    snprintf(path, path_size, "/axis-cgi/%s", endpoint);
+    char* data = ACAP_VAPIX_GetBinary_Path(path, out_size);
+    free(path);
+    return data;
+}
+
+char* ACAP_VAPIX_GetBinary_Path(const char* path, size_t* out_size) {
+    if (!VAPIX_CURL || !path || !out_size) return NULL;
     *out_size = 0;
 
     const char* host = VAPIX_Credentials ? "127.0.0.12" : "127.0.0.1";
-    size_t url_size = strlen("http:///axis-cgi/") + strlen(host) + strlen(endpoint) + 1;
+    size_t url_size = strlen("http://") + strlen(host) + strlen(path) + 1;
     char* url = malloc(url_size);
     if (!url) return NULL;
-    snprintf(url, url_size, "http://%s/axis-cgi/%s", host, endpoint);
+    snprintf(url, url_size, "http://%s%s", host, path);
 
     struct acap_binary_buf buf = {NULL, 0};
     pthread_mutex_lock(&vapix_mutex);

@@ -354,6 +354,7 @@
       <a href="#cond-io" class="sub">I/O State</a>
       <a href="#cond-counter" class="sub">Counter Compare</a>
       <a href="#cond-var" class="sub">Variable Compare</a>
+      <a href="#cond-trigger" class="sub">Trigger Data</a>
       <a href="#cond-http" class="sub">HTTP Check</a>
       <a href="#cond-aoa" class="sub">AOA Occupancy</a>
       <a href="#cond-daynight" class="sub">Day / Night</a>
@@ -618,6 +619,16 @@ Content-Type: application/json
         <tr><td><strong>Value</strong></td><td>String to compare against.</td></tr>
       </table>
 
+      <h3 id="cond-trigger">Trigger Data</h3>
+      <p>Compare a field of the event that fired the rule, using the same field names as <code>{{trigger.KEY}}</code>. Use it to filter on a second field when the trigger's Value Condition already filters on one, for example an ALPV plate read where <code>listName</code> contains <code>block</code>.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Field</strong></td><td>Name of the field in the trigger data, e.g. <code>carState</code>.</td></tr>
+        <tr><td><strong>Operator</strong></td><td><code>=</code>, <code>≠</code>, <em>contains</em>, <em>does not contain</em>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, or <code>&lt;=</code>. <em>contains</em> ignores case; the comparisons use numbers when both sides are numeric.</td></tr>
+        <tr><td><strong>Value</strong></td><td>Value to compare against. Booleans are <code>true</code> / <code>false</code>. Can contain variables such as <code>{{var.NAME}}</code>.</td></tr>
+      </table>
+      <p>The condition fails when the field is missing, for example when the rule is fired manually. To act once per object, compare an ID with a variable the rule sets itself: condition <code>carID</code> ≠ <code>{{var.last_car}}</code>, and a first action <strong>Set Variable</strong> <code>last_car</code> = <code>{{trigger.carID}}</code>.</p>
+
       <h3 id="cond-http">HTTP Check</h3>
       <p>Make an HTTP request and pass the condition only if the response matches expectations.</p>
       <table>
@@ -696,6 +707,7 @@ Content-Type: application/json
         <tr><td><strong>Headers</strong></td><td>Optional key/value pairs (e.g. <code>Authorization: Bearer token</code>).</td></tr>
         <tr><td><strong>Body</strong></td><td>Request body (POST/PUT). Template substitution supported.</td></tr>
         <tr><td><strong>Attach snapshot</strong></td><td>Fetch a JPEG from the camera and make it available as <span class="var">{{trigger.snapshot_base64}}</span> in subsequent actions and in this action's body.</td></tr>
+        <tr><td><strong>Attach ALPV image</strong></td><td>For AXIS License Plate Verifier events: fetch the image ALPV saved for the car (vehicle crop, plate crop or frame, per ALPV's <em>Save full frame</em> setting) as <span class="var">{{trigger.alpv_image_base64}}</span>. ALPV saves it a few seconds after it first sees the car, so the request waits up to 15 s (other rules keep running), then sends without it.</td></tr>
         <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
         <tr><td><strong>Fallback action</strong></td><td>Execute an alternate action when the request fails (non-2xx or network error): log a syslog message, publish to MQTT, or send a secondary HTTP GET request.</td></tr>
       </table>
@@ -1094,6 +1106,7 @@ Content-Type: application/json
         <tr><td><span class="var">{{trigger.reason}}</span></td><td>Detected object class, e.g. <code>Human</code> (AOA Scenario trigger)</td></tr>
         <tr><td><span class="var">{{trigger.fired_rule_id}}</span></td><td>ID of the rule that fired (Rule Chain trigger)</td></tr>
         <tr><td><span class="var">{{trigger.snapshot_base64}}</span></td><td>Base64-encoded JPEG (when <em>Attach snapshot</em> is enabled on HTTP Request)</td></tr>
+        <tr><td><span class="var">{{trigger.alpv_image_base64}}</span></td><td>Base64-encoded JPEG saved by ALPV for the car (when <em>Attach ALPV image</em> is enabled on HTTP Request)</td></tr>
       </table>
 
       <h4>Decimal formatting</h4>
@@ -1104,6 +1117,9 @@ Content-Type: application/json
         <tr><td><span class="var">{{trigger.CO2|0}}</span></td><td><code>412</code> (no decimals)</td></tr>
         <tr><td><span class="var">{{var.avg_temp|1}}</span></td><td><code>22.5</code> (one decimal)</td></tr>
       </table>
+
+      <h4>XML escaping</h4>
+      <p>Append <code>|xml</code> to any variable to escape <code>&amp;</code> <code>&lt;</code> <code>&gt;</code> <code>"</code> <code>'</code> when building an XML body, e.g. <span class="var">{{trigger.vehicleMake|xml}}</span>.</p>
       <p>Non-numeric values pass through unchanged.</p>
 
       <h4>Named variables and counters</h4>

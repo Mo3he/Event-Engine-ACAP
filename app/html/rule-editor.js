@@ -741,6 +741,7 @@ const CONDITION_GROUPS = [
   { label: 'Data', types: [
     { value: 'counter',           label: 'Counter Compare' },
     { value: 'variable_compare',  label: 'Variable Compare' },
+    { value: 'trigger_data',      label: 'Trigger Data' },
     { value: 'aoa_occupancy',     label: 'AOA Occupancy' },
   ]},
   { label: 'External', types: [
@@ -825,6 +826,32 @@ function conditionFields(c, rowIdx) {
       <div class="form-group">
         <label>Value</label>
         <input type="number" data-k="value" value="${escHtml(c.value !== undefined ? c.value : 0)}">
+      </div>
+    </div>`;
+  if (type === 'trigger_data') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Field</label>
+        <input type="text" data-k="key" value="${escHtml(c.key || '')}" placeholder="carState">
+        <div class="form-hint">Any field of the event that fired the rule, the same names as <b>{{trigger.KEY}}</b></div>
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="eq"           ${(c.op||'eq')==='eq'         ? 'selected' : ''}>=</option>
+          <option value="ne"           ${c.op==='ne'                 ? 'selected' : ''}>≠</option>
+          <option value="contains"     ${c.op==='contains'           ? 'selected' : ''}>contains</option>
+          <option value="not_contains" ${c.op==='not_contains'       ? 'selected' : ''}>does not contain</option>
+          <option value="gt"           ${c.op==='gt'                 ? 'selected' : ''}>&gt;</option>
+          <option value="gte"          ${c.op==='gte'                ? 'selected' : ''}>&ge;</option>
+          <option value="lt"           ${c.op==='lt'                 ? 'selected' : ''}>&lt;</option>
+          <option value="lte"          ${c.op==='lte'                ? 'selected' : ''}>&le;</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(c.value || '')}" placeholder="new">
+        <div class="form-hint">Can use variables, e.g. <b>{{var.last_car}}</b></div>
       </div>
     </div>`;
   if (type === 'variable_compare') return `
@@ -1369,10 +1396,12 @@ function toggleTokenPicker(btn) {
   const hasSnapshot = actionRows.some(a =>
     ['http_request', 'email', 'mqtt_publish', 'slack_webhook', 'teams_webhook', 'telegram'].includes(a.type) && a.attach_snapshot
   );
+  const hasAlpvImage = actionRows.some(a => a.type === 'http_request' && a.attach_alpv_image);
   const groups = [
     { label: 'Time',    tokens: ['{{timestamp}}', '{{date}}', '{{time}}'] },
     { label: 'Camera',  tokens: ['{{camera.serial}}', '{{camera.model}}', '{{camera.ip}}',
-                                 ...(hasSnapshot ? ['{{trigger.snapshot_base64}}'] : [])] },
+                                 ...(hasSnapshot ? ['{{trigger.snapshot_base64}}'] : []),
+                                 ...(hasAlpvImage ? ['{{trigger.alpv_image_base64}}'] : [])] },
   ];
   if (triggerTokens.length)
     groups.push({ label: 'Trigger', tokens: triggerTokens });
@@ -1696,6 +1725,13 @@ function actionFields(a, rowIdx) {
         Attach camera snapshot
       </label>
       <div class="form-hint">Fetches a JPEG from the camera and injects it as <b>{{trigger.snapshot_base64}}</b> — use in the body to send the image as base64.</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="attach_alpv_image" ${a.attach_alpv_image ? 'checked' : ''}>
+        Attach ALPV image
+      </label>
+      <div class="form-hint">For AXIS License Plate Verifier events: fetches the image ALPV saved for the car (plate crop, vehicle crop, 480x270 or full frame, per ALPV's <b>Save full frame</b> setting) as <b>{{trigger.alpv_image_base64}}</b>.</div>
     </div></div>
     <div class="form-row"><div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
@@ -3164,6 +3200,8 @@ function normalizeCondition(c) {
     out.name = c.name; out.op = c.op || 'gt'; out.value = parseFloat(c.value) || 0;
   } else if (c.type === 'variable_compare') {
     out.name = c.name; out.op = c.op || 'eq'; out.value = c.value;
+  } else if (c.type === 'trigger_data') {
+    out.key = (c.key || '').trim(); out.op = c.op || 'eq'; out.value = c.value || '';
   } else if (c.type === 'io_state') {
     out.port = parseInt(c.port) || 1; out.state = c.state || 'active';
     { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
@@ -3361,6 +3399,7 @@ function normalizeAction(a) {
   }
   if (a.type === 'http_request') {
     out.attach_snapshot = a.attach_snapshot === true;
+    if (a.attach_alpv_image === true) out.attach_alpv_image = true;
     if (a.allow_insecure === true) out.allow_insecure = true;
     const fbType = a.on_failure_type || '';
     if (fbType === 'send_syslog') {

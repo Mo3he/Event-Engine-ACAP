@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <time.h>
 #include <syslog.h>
 #include <curl/curl.h>
@@ -8,6 +9,7 @@
 #include "conditions.h"
 #include "variables.h"
 #include "scheduler.h"
+#include "actions.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "conditions: " fmt, ## args)
@@ -824,11 +826,76 @@ static int cond_aoa_occupancy(cJSON* cfg) {
 }
 
 /*-----------------------------------------------------
+ * trigger_data
+ * Compares a field of the event that fired the rule.
+ * config: { "key": "carState", "op": "eq", "value": "new" }
+ * value may contain {{...}} templates, e.g. "{{var.last_car}}"
+ * ops: eq, ne, contains, not_contains (case-insensitive), gt, gte, lt, lte
+ *-----------------------------------------------------*/
+static int contains_nocase(const char* hay, const char* needle) {
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return 1;
+    for (; *hay; hay++) {
+        size_t i = 0;
+        while (i < nlen && hay[i] &&
+               tolower((unsigned char)hay[i]) == tolower((unsigned char)needle[i])) i++;
+        if (i == nlen) return 1;
+    }
+    return 0;
+}
+
+static int trigger_data_compare(cJSON* item, const char* op, const char* value) {
+    char buf[64];
+    const char* actual;
+    if (cJSON_IsString(item))      actual = item->valuestring;
+    else if (cJSON_IsBool(item))   actual = cJSON_IsTrue(item) ? "true" : "false";
+    else if (cJSON_IsNumber(item)) { snprintf(buf, sizeof(buf), "%g", item->valuedouble); actual = buf; }
+    else return 0;
+
+    if (strcmp(op, "contains") == 0)     return contains_nocase(actual, value);
+    if (strcmp(op, "not_contains") == 0) return !contains_nocase(actual, value);
+
+    /* Compare as numbers when both sides are numeric, otherwise as text */
+    char* end_a; char* end_v;
+    double da = strtod(actual, &end_a);
+    double dv = strtod(value, &end_v);
+    int numeric = actual[0] && value[0] && *end_a == '\0' && *end_v == '\0';
+    int cmp = numeric ? (da > dv) - (da < dv) : strcmp(actual, value);
+
+    if (strcmp(op, "eq")  == 0) return cmp == 0;
+    if (strcmp(op, "ne")  == 0) return cmp != 0;
+    if (strcmp(op, "gt")  == 0) return cmp > 0;
+    if (strcmp(op, "gte") == 0) return cmp >= 0;
+    if (strcmp(op, "lt")  == 0) return cmp < 0;
+    if (strcmp(op, "lte") == 0) return cmp <= 0;
+    LOG_WARN("trigger_data: unknown op '%s'", op);
+    return 0;
+}
+
+static int cond_trigger_data(cJSON* cfg, cJSON* trigger_data) {
+    const char* key   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "key"));
+    const char* op    = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "op"));
+    const char* value_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
+    if (!key || !key[0] || !op || !value_tmpl) return 0;
+    if (!trigger_data) return 0;
+
+    cJSON* item = cJSON_GetObjectItem(trigger_data, key);
+    if (!item) return 0;
+
+    /* The value may reference variables, e.g. {{var.last_car}}, so a rule can
+     * compare the event with state saved by an earlier firing. */
+    char* value_dyn = strstr(value_tmpl, "{{") ? Actions_Expand_Template(value_tmpl, trigger_data) : NULL;
+    const char* value = value_dyn ? value_dyn : value_tmpl;
+    int result = trigger_data_compare(item, op, value);
+    free(value_dyn);
+    return result;
+}
+
+/*-----------------------------------------------------
  * Public
  *-----------------------------------------------------*/
 
 static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSON* trigger_data, int skip_expensive) {
-    /* trigger_data is currently unused */
     if (!conditions_array || cJSON_GetArraySize(conditions_array) == 0)
         return 1; /* no conditions → always pass */
 
@@ -849,6 +916,9 @@ static int conditions_evaluate_internal(cJSON* conditions_array, int logic, cJSO
         else if (strcmp(type, "vapix_event_state")== 0) pass = skip_expensive ? 1 : cond_vapix_event_state(cond);
         else if (strcmp(type, "http_check")       == 0) pass = skip_expensive ? 1 : cond_http_check(cond);
         else if (strcmp(type, "aoa_occupancy")    == 0) pass = skip_expensive ? 1 : cond_aoa_occupancy(cond);
+        /* The lightweight check (siren keep-alive) has no event, so it can't
+         * re-check event fields; the rule already passed them when it fired. */
+        else if (strcmp(type, "trigger_data")     == 0) pass = skip_expensive ? 1 : cond_trigger_data(cond, trigger_data);
         else { LOG_WARN("unknown condition type '%s'", type); continue; }
 
         if (logic == 0) { /* AND */
