@@ -187,7 +187,8 @@ stop a siren when motion ends).
 
 | Type | Description |
 |------|-------------|
-| **I/O Output** | Set a digital output port high or low with an optional duration. Supports `while_active` auto-reset. Supports **remote device** target |
+| **I/O Output** | Set one or more digital output ports high or low in a single request, with an optional duration. Supports `while_active` auto-reset. Supports **remote device** target |
+| **I/O Flash** | Flash one or more output ports together or one after another (e.g. red/blue alternating) with millisecond timing, for a number of flashes, a time, or until the rule is disabled. Ports are left off when it stops. Supports **remote device** target |
 
 ### Logic
 
@@ -246,7 +247,7 @@ remote), Device Event State (Load button fetches event catalog from remote).
 
 **Actions:** Recording, Overlay Text, PTZ Preset, Guard Tour, IR Cut Filter,
 Privacy Mask, Wiper, Light Control, Audio Clip, Siren / Light, Speaker Display,
-I/O Output, Paging Console Execute, Paging Console Button, Device Event Query, Set
+I/O Output, I/O Flash, Paging Console Execute, Paging Console Button, Device Event Query, Set
 Device Parameter, ACAP Control.
 
 ## Rule settings

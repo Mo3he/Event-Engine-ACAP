@@ -1270,6 +1270,7 @@ const ACTION_GROUPS = [
   ]},
   { label: 'I/O', types: [
     { value: 'io_output',         label: 'I/O Output' },
+    { value: 'io_flash',          label: 'I/O Flash' },
   ]},
   { label: 'Logic', types: [
     { value: 'delay',             label: 'Delay' },
@@ -1544,7 +1545,7 @@ function renderOnFailureFields(a, hint) {
 }
 
 const REMOTE_CAPABLE_ACTIONS = new Set([
-  'recording', 'overlay_text', 'ptz_preset', 'io_output',
+  'recording', 'overlay_text', 'ptz_preset', 'io_output', 'io_flash',
   'audio_clip', 'siren_light', 'guard_tour', 'set_device_param',
   'ir_cut_filter', 'privacy_mask', 'wiper', 'light_control',
   'acap_control', 'speaker_display', 'vapix_query',
@@ -1873,31 +1874,106 @@ function actionFields(a, rowIdx) {
   }
   if (type === 'io_output') {
     const ioDur = parseInt(a.duration) || 0;
-    return `
-    <div class="form-row">
-      <div class="form-group">
-        <label>Port</label>
-        <input type="number" data-k="port" min="1" value="${escHtml(a.port || 1)}">
-      </div>
-      <div class="form-group">
-        <label>State</label>
-        <select data-k="state">
-          <option value="active"   ${(a.state||'active')==='active'   ? 'selected' : ''}>Active</option>
-          <option value="inactive" ${a.state==='inactive' ? 'selected' : ''}>Inactive</option>
+    const states = ioOutputStates(a);
+    const isRemote = a.remote_host_toggle === 'remote' || (a.remote_host && a.remote_host_toggle !== 'local');
+    const known = !isRemote && Array.isArray(ioOutputs) && ioOutputs.length;
+    const ports = known ? ioOutputs.map(o => ({ port: o.port, name: o.name })) : [1, 2, 3, 4].map(p => ({ port: p, name: '' }));
+    Object.keys(states).forEach(p => { if (!ports.some(o => o.port === +p)) ports.push({ port: +p, name: '' }); });
+    ports.sort((x, y) => x.port - y.port);
+    const cells = ports.map(o => {
+      const st = states[o.port] || '';
+      return `
+      <div class="form-group" style="flex:0 0 150px;">
+        <label>Port ${o.port}${o.name ? ' · ' + escHtml(o.name) : ''}</label>
+        <select data-k="io_p${o.port}">
+          <option value=""         ${st === ''         ? 'selected' : ''}>Leave as is</option>
+          <option value="active"   ${st === 'active'   ? 'selected' : ''}>On (active)</option>
+          <option value="inactive" ${st === 'inactive' ? 'selected' : ''}>Off (inactive)</option>
         </select>
-      </div>
-      <div class="form-group">
+      </div>`;
+    }).join('');
+    return `
+    <div class="form-row" style="flex-wrap:wrap;">${cells}</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px;">
         <label>Duration (s, 0=permanent)</label>
         <input type="number" data-k="duration" min="0" value="${ioDur}" onchange="rerenderAction(this)">
+      </div>
+      <div class="form-group">
+        <div class="form-hint" style="margin-top:22px;">All selected ports are switched together in one request. With a duration, they return to how they were before.</div>
       </div>
     </div>
     ${ioDur === 0 ? `
     <div class="form-row"><div class="form-group">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
         <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
-        Run while active - automatically reset port when the triggering condition clears
+        Run while active - automatically reset the ports when the triggering condition clears
       </label>
     </div></div>` : ''}`;
+  }
+  if (type === 'io_flash') {
+    const portsStr = Array.isArray(a.ports) ? a.ports.join(', ') : (a.ports_str ?? a.ports ?? '');
+    const mode = a.mode === 'together' ? 'together' : 'sequence';
+    const stop = ['count', 'time', 'disabled'].includes(a.stop) ? a.stop : 'count';
+    const isRemote = a.remote_host_toggle === 'remote' || (a.remote_host && a.remote_host_toggle !== 'local');
+    let outputsHint = '';
+    if (!isRemote && Array.isArray(ioOutputs)) {
+      outputsHint = ioOutputs.length
+        ? 'Outputs on this device (click to add): ' + ioOutputs.map(o =>
+            `<a href="#" onclick="ioFlashAddPort(this, ${o.port});return false;">${o.port}${o.name ? ' ' + escHtml(o.name) : ''}</a>`
+          ).join(' · ')
+        : 'No ports on this device are configured as outputs.';
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Output ports (in flash order)</label>
+        <input type="text" data-k="ports_str" value="${escHtml(portsStr)}" placeholder="e.g. 1, 3">
+        <div class="form-hint">${outputsHint || 'Comma-separated port numbers, up to 8.'}</div>
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Pattern</label>
+        <select data-k="mode">
+          <option value="sequence" ${mode==='sequence' ? 'selected' : ''}>One after another</option>
+          <option value="together" ${mode==='together' ? 'selected' : ''}>All together</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 110px;">
+        <label>On time (ms)</label>
+        <input type="number" data-k="on_ms" min="100" max="60000" value="${escHtml(a.on_ms ?? 500)}">
+      </div>
+      <div class="form-group" style="flex:0 0 110px;">
+        <label>Gap (ms)</label>
+        <input type="number" data-k="off_ms" min="0" max="60000" value="${escHtml(a.off_ms ?? '')}" placeholder="auto">
+      </div>
+      <div class="form-group" style="flex:0 0 190px;">
+        <label>Stop after</label>
+        <select data-k="stop" onchange="rerenderAction(this)">
+          <option value="count"    ${stop==='count'    ? 'selected' : ''}>Number of flashes</option>
+          <option value="time"     ${stop==='time'     ? 'selected' : ''}>Time</option>
+          <option value="disabled" ${stop==='disabled' ? 'selected' : ''}>Until rule is disabled</option>
+        </select>
+      </div>
+      ${stop === 'count' ? `
+      <div class="form-group" style="flex:0 0 90px;">
+        <label>Flashes</label>
+        <input type="number" data-k="count" min="1" max="100000" value="${escHtml(a.count ?? 10)}">
+      </div>` : ''}
+      ${stop === 'time' ? `
+      <div class="form-group" style="flex:0 0 90px;">
+        <label>Seconds</label>
+        <input type="number" data-k="duration" min="1" max="86400" value="${escHtml(a.duration ?? 60)}">
+      </div>` : ''}
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Stop early when the triggering condition clears
+      </label>
+      <div class="form-hint">Gap is the off time between flashes; blank = none for one-after-another, same as the on time for all-together. One flash = every listed port once. Ports are always left off when flashing stops. Disabling, editing or deleting the rule stops it, and so does an I/O Output action on one of its ports.</div>
+    </div></div>`;
   }
   if (type === 'audio_clip') {
     const remoteCtrl = remoteCapControl(a, rowIdx, 'audio', 'clip_name', a.clip_name || '', 'Clip name or ID');
@@ -3075,6 +3151,28 @@ function rerenderAction(sel) {
   renderActionList();
 }
 function flushActionRows() { actionRows = collectRows(actionRows, 'arow'); }
+/* Port → 'active' | 'inactive' for an io_output action, from the form fields
+ * (io_pN), the saved "ports" list, or the older single port/state form. */
+function ioOutputStates(a) {
+  const states = {};
+  const formKeys = Object.keys(a).filter(k => /^io_p\d+$/.test(k));
+  if (formKeys.length) {
+    formKeys.forEach(k => { if (a[k] === 'active' || a[k] === 'inactive') states[parseInt(k.slice(4), 10)] = a[k]; });
+  } else if (Array.isArray(a.ports)) {
+    a.ports.forEach(p => { const n = parseInt(p.port, 10); if (n >= 1 && n <= 32) states[n] = p.state === 'inactive' ? 'inactive' : 'active'; });
+  } else if (a.port !== undefined && a.port !== '') {
+    const n = parseInt(a.port, 10);
+    if (n >= 1 && n <= 32) states[n] = a.state === 'inactive' ? 'inactive' : 'active';
+  }
+  return states;
+}
+function ioFlashAddPort(link, port) {
+  const input = link.closest('.form-group').querySelector('[data-k="ports_str"]');
+  if (!input) return;
+  const ports = input.value.split(/[\s,;]+/).filter(Boolean);
+  if (!ports.includes(String(port))) ports.push(String(port));
+  input.value = ports.join(', ');
+}
 function addActionRow() { flushActionRows(); actionRows.push({ type: 'http_request' }); renderActionList(); }
 function removeActionRow(i) { flushActionRows(); actionRows.splice(i, 1); renderActionList(); }
 function changeActionType(i, type) { flushActionRows(); actionRows[i] = { type }; renderActionList(); }
@@ -3333,8 +3431,29 @@ function normalizeAction(a) {
     out.while_active = a.while_active === true;
   if (a.type === 'overlay_text' && !(parseInt(a.duration) > 0))
     out.while_active = a.while_active === true;
+  if (a.type === 'io_output') {
+    const states = ioOutputStates(a);
+    out.ports = Object.keys(states).map(Number).sort((x, y) => x - y).map(p => ({ port: p, state: states[p] }));
+    delete out.port;
+    delete out.state;
+  }
   if (a.type === 'io_output' && !(parseInt(a.duration) > 0))
     out.while_active = a.while_active === true;
+  if (a.type === 'io_flash') {
+    const src = a.ports_str !== undefined ? a.ports_str : a.ports;
+    const list = Array.isArray(src) ? src : String(src || '').split(/[\s,;]+/);
+    out.ports = [...new Set(list.map(p => parseInt(p, 10)).filter(p => p >= 1 && p <= 32))].slice(0, 8);
+    delete out.ports_str;
+    out.mode = a.mode === 'together' ? 'together' : 'sequence';
+    out.on_ms = parseInt(a.on_ms) || 500;
+    if (a.off_ms !== '' && a.off_ms !== undefined && a.off_ms !== null) out.off_ms = parseInt(a.off_ms) || 0;
+    else delete out.off_ms;
+    out.stop = ['count', 'time', 'disabled'].includes(a.stop) ? a.stop : 'count';
+    delete out.count; delete out.duration;
+    if (out.stop === 'count') out.count = parseInt(a.count) || 10;
+    if (out.stop === 'time')  out.duration = parseInt(a.duration) || 60;
+    out.while_active = a.while_active === true;
+  }
   if (a.type === 'privacy_mask')
     out.enabled = a.enabled === 'true' || a.enabled === true;
   if (a.type === 'set_rule_enabled')

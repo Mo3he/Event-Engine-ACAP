@@ -620,7 +620,7 @@ Many actions support targeting a remote Axis device. Add these fields to any sup
 
 Set `remote_https` to `true` to reach the remote device over HTTPS instead of HTTP. This is required for cameras running AXIS OS 13, which are HTTPS-only by default. The remote device's self-signed certificate is accepted (no verification). Leave it `false` (or omit it) for remote devices still served over HTTP. The same `remote_host` / `remote_user` / `remote_pass` / `remote_https` fields also work on the `io_state`, `vapix_event_state`, and `aoa_occupancy` conditions.
 
-Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_clip`, `siren_light`, `guard_tour`, `set_device_param`, `ir_cut_filter`, `privacy_mask`, `wiper`, `light_control`, `acap_control`, `speaker_display`, `paging_console_execute`, `paging_console_button`.
+Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `io_flash`, `audio_clip`, `siren_light`, `guard_tour`, `set_device_param`, `ir_cut_filter`, `privacy_mask`, `wiper`, `light_control`, `acap_control`, `speaker_display`, `paging_console_execute`, `paging_console_button`.
 
 ---
 
@@ -740,22 +740,59 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `audio_cli
 
 ### 6. `io_output` — Digital Output
 
+Sets one or more output ports in a single request. Ports turning off are switched first, so a colour change on a stack light never shows another colour on the way.
+
 ```json
 {
   "type": "io_output",
-  "port": 1,
-  "state": "active",
-  "duration": 5,
+  "ports": [
+    { "port": 1, "state": "active" },
+    { "port": 2, "state": "inactive" },
+    { "port": 3, "state": "active" }
+  ],
+  "duration": 0,
   "while_active": false
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `port` | integer | — | I/O port number (1-based) |
-| `state` | `"active"` \| `"inactive"` | — | Output state |
-| `duration` | integer | `0` | Seconds to hold, then revert (0 = permanent) |
-| `while_active` | boolean | `false` | Auto-revert when trigger goes inactive |
+| `ports` | array of `{port, state}` | — | Ports (1-based) and the state to set: `"active"` or `"inactive"`. Ports not listed are left as they are |
+| `port` | integer | — | Single-port form, used when `ports` is absent |
+| `state` | `"active"` \| `"inactive"` | `"active"` | State for the single-port form |
+| `duration` | integer | `0` | Seconds to hold, then return every listed port to its state from before the action (0 = permanent). Re-firing meanwhile restarts the time but keeps the original states |
+| `while_active` | boolean | `false` | Return every listed port to its state from before the action when the trigger goes inactive |
+
+Setting a port with `io_output` also stops any `io_flash` driving that port.
+
+### 6b. `io_flash` — Flash Output Ports
+
+Flashes one or more outputs with millisecond timing, e.g. a red lamp on port 1 and a blue lamp on port 3 alternating. All listed ports are left inactive when it stops.
+
+```json
+{
+  "type": "io_flash",
+  "ports": [1, 3],
+  "mode": "sequence",
+  "on_ms": 500,
+  "off_ms": 0,
+  "stop": "count",
+  "count": 10
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ports` | array of integer | — | Output ports (1-based) in flash order, up to 8 |
+| `mode` | `"sequence"` \| `"together"` | `"sequence"` | `sequence` lights one port at a time in list order; the camera switches ports about 20 ms apart, so at each change the previous port goes off just before the next comes on (never two at once, a ~20 ms dark moment even with `off_ms` 0); `together` switches all ports on and off at once |
+| `on_ms` | integer | `500` | On time per flash, 100–60000 ms (each switch takes the camera about 80 ms) |
+| `off_ms` | integer | `0` (sequence) / `on_ms` (together) | Off time between flashes, 0–60000 ms |
+| `stop` | `"count"` \| `"time"` \| `"disabled"` | `"count"` | Stop after `count` flashes, after `duration` seconds, or only when the rule is disabled, edited or deleted |
+| `count` | integer | `10` | Flashes for `stop: "count"`. One flash = every listed port once |
+| `duration` | integer | `60` | Seconds for `stop: "time"` |
+| `while_active` | boolean | `false` | Also stop when the trigger goes inactive |
+
+Firing the rule again while it flashes the same ports restarts the count or time limit without breaking the rhythm. A new flash on a port takes over from any other flash on that port. For flash-until-stopped, give the rule a `manual` trigger with `stop: "disabled"`; it then runs until the rule is disabled or an `io_output` action sets one of its ports.
 
 ### 7. `audio_clip` — Play Audio Clip
 

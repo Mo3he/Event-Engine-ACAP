@@ -68,6 +68,7 @@ static gboolean recording_stop_timeout_cb(gpointer user_data);
 static int   resolve_clip_id(const char* clip_name);
 static int   recording_host_uses_continuous(const char* host, const char* user, const char* pass);
 static void  recording_stop_id(const char* host, const char* user, const char* pass, const char* id);
+static void  io_flash_stop_rule(const char* rule_id);
 static int   continuous_remove_ours(const char* host, const char* user, const char* pass, const char* diskid);
 
 /* Global recording ID table — maps diskid → recording_id for active recordings.
@@ -129,13 +130,17 @@ static void active_recording_remove_by_id(const char* recording_id) {
 
 /* Generic "while_active" tracking — one entry per active rule/action pair */
 #define MAX_WHILE_ACTIVE 64
+#define IO_OUT_MAX_PORTS 16
+typedef struct { int port; int closed; } IoOutPort; /* 1-based port, 1 = closed (active) */
+static void io_output_body(char* body, size_t sz, const IoOutPort* ps, int n);
 typedef struct {
     char rule_id[64];
-    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output", "speaker_display", "audio_clip" */
+    char atype[24];        /* "siren_light", "recording", "overlay_text", "io_output", "io_flash", "speaker_display", "audio_clip" */
     char siren_profile[128];
     int  overlay_channel;
-    int  io_port;
-    char io_restore[16];   /* opposite state to restore: "open" or "closed" */
+    int  io_port;          /* first port, for logging */
+    int  io_n;             /* io_output: ports to restore and their original states */
+    IoOutPort io_restore[IO_OUT_MAX_PORTS];
     char recording_id[64]; /* legacy recording ID or continuous-recording profile number */
     char clip_name[128];   /* audio clip name for audio_clip while_active stop */
     char remote_host[128]; /* empty = local device */
@@ -194,18 +199,17 @@ static void while_active_undo(WhileActiveEntry* e) {
             LOG("while_active: cleared overlay ch%d for rule %s", ch, e->rule_id);
         }
     } else if (strcmp(e->atype, "io_output") == 0) {
-        char port_str[8], body[256];
-        snprintf(port_str, sizeof(port_str), "%d", e->io_port - 1);
-        snprintf(body, sizeof(body),
-            "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\","
-            "\"params\":{\"ports\":[{\"port\":\"%s\",\"state\":\"%s\"}]}}",
-            port_str, e->io_restore);
+        char body[1024];
+        io_output_body(body, sizeof(body), e->io_restore, e->io_n);
         char* resp = is_remote
             ? remote_vapix_post(e->remote_host, e->remote_user, e->remote_pass,
                                 "io/portmanagement.cgi", body)
             : ACAP_VAPIX_Post("io/portmanagement.cgi", body);
         if (resp) free(resp);
-        LOG("while_active: restored I/O port %d to %s for rule %s", e->io_port, e->io_restore, e->rule_id);
+        LOG("while_active: restored I/O output(s) from port %d for rule %s", e->io_port, e->rule_id);
+    } else if (strcmp(e->atype, "io_flash") == 0) {
+        io_flash_stop_rule(e->rule_id);
+        LOG("while_active: stopped I/O flash for rule %s", e->rule_id);
     } else if (strcmp(e->atype, "speaker_display") == 0) {
         char* resp = is_remote
             ? remote_vapix_post_path(e->remote_host, e->remote_user, e->remote_pass,
@@ -1712,54 +1716,717 @@ static void action_ptz_preset(cJSON* cfg) {
     }
 }
 
-/* io_output via io/portmanagement.cgi. Ports are 1-based in the UI and 0-based
- * strings in the API; UI "active" = "closed", "inactive" = "open".
- * Timed pulses use setStateSequence (auto-restores); otherwise setPorts. */
-static void action_io_output(const char* rule_id, cJSON* cfg) {
-    cJSON* port_j = cJSON_GetObjectItem(cfg, "port");
-    if (!port_j) return;
-    int port = (int)port_j->valuedouble;
-    const char* state_ui = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
-    if (!state_ui) state_ui = "active";
+/* io_flash — flash one or more output ports with millisecond timing.
+ * "sequence" lights the ports one after another (A, B, A, B, ...), "together"
+ * lights them all at once. A run ends when its flash count or time limit is
+ * reached or, with neither set, when its rule is disabled, edited or deleted;
+ * every port is left inactive when it ends. Each run is driven by its own
+ * worker thread; runs are started from the main loop or the FastCGI thread
+ * (manual fire / Test) and stopped from either, so the run table is guarded
+ * by io_flash_lock. */
+#define IO_FLASH_MAX_RUNS  16
+#define IO_FLASH_MAX_PORTS 8
+#define IO_FLASH_TEST_US   (10 * G_USEC_PER_SEC) /* cap for unlimited runs started by Test */
 
-    const char* io_state   = (strcmp(state_ui, "active") == 0) ? "closed" : "open";
-    const char* io_restore = (strcmp(io_state, "closed")  == 0) ? "open"   : "closed";
+/* No VAPIX call is ever made while holding io_flash_lock: the worker marks
+ * its run busy, copies what it needs, and unlocks for the request. Whoever
+ * ends a run waits for an in-flight request (busy) to finish, frees the slot,
+ * and sends the final all-off itself after unlocking, so that request always
+ * lands before anything the caller sets next. */
+typedef struct {
+    int     used;
+    int     busy;             /* worker has a VAPIX request in flight */
+    int     stop_req;         /* an ender is waiting: start no further request */
+    guint   gen;              /* identifies this run to its worker thread */
+    char    rule_id[64];      /* "" = started by the action Test button */
+    int     check_enabled;    /* rule was enabled at start: stop if it gets disabled */
+    char    host[192];        /* "" = local device */
+    char    user[64];
+    char    pass[128];
+    int     ports[IO_FLASH_MAX_PORTS]; /* 1-based, in flash order */
+    int     nports;
+    guint32 mask;
+    int     together;
+    int     on_ms;
+    int     off_ms;
+    int     cycles_left;      /* -1 = no count limit */
+    gint64  end_us;           /* monotonic deadline, 0 = no time limit */
+    int     idx;              /* sequence position of the port lit next / now */
+    int     lit;              /* 1 = inside an on period */
+} IoFlashRun;
 
-    char port_str[8];
-    snprintf(port_str, sizeof(port_str), "%d", port - 1);
+/* What is needed to switch a run's ports without holding the lock. */
+typedef struct {
+    char host[192];
+    char user[64];
+    char pass[128];
+    int  ports[IO_FLASH_MAX_PORTS];
+    int  nports;
+} IoFlashSnap;
 
-    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
-    char body[512];
-    if (dur && dur->valuedouble > 0) {
-        int ms = (int)(dur->valuedouble * 1000);
-        snprintf(body, sizeof(body),
-            "{\"apiVersion\":\"1.0\",\"method\":\"setStateSequence\","
-            "\"params\":{\"port\":\"%s\",\"sequence\":["
-            "{\"state\":\"%s\",\"time\":%d},"
-            "{\"state\":\"%s\",\"time\":0}]}}",
-            port_str, io_state, ms, io_restore);
+static IoFlashRun io_flash_runs[IO_FLASH_MAX_RUNS];
+static GMutex     io_flash_lock;
+static GCond      io_flash_cond;   /* broadcast whenever a run ends or a request completes */
+static guint      io_flash_gen;
+
+static void io_flash_snap(const IoFlashRun* r, IoFlashSnap* s) {
+    memcpy(s->host, r->host, sizeof(s->host));
+    memcpy(s->user, r->user, sizeof(s->user));
+    memcpy(s->pass, r->pass, sizeof(s->pass));
+    memcpy(s->ports, r->ports, sizeof(s->ports));
+    s->nports = r->nports;
+}
+
+/* One setPorts call per edge. The camera switches the listed ports in order,
+ * about 20 ms apart, so the ports turning off are listed first: at a colour
+ * change the previous output goes off just before the next comes on, so two
+ * colours are never mixed (at the cost of a ~20 ms dark moment).
+ * lit_idx: -1 = all off, -2 = all on, otherwise the single port index to light. */
+static int io_flash_apply(const IoFlashSnap* r, int lit_idx) {
+    char body[768];
+    size_t n = (size_t)snprintf(body, sizeof(body),
+        "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\",\"params\":{\"ports\":[");
+    int first = 1;
+    for (int want_on = 0; want_on < 2; want_on++) {
+        for (int i = 0; i < r->nports && n < sizeof(body); i++) {
+            int on = (lit_idx == -2 || lit_idx == i);
+            if (on != want_on) continue;
+            n += (size_t)snprintf(body + n, sizeof(body) - n,
+                "%s{\"port\":\"%d\",\"state\":\"%s\"}",
+                first ? "" : ",", r->ports[i] - 1, on ? "closed" : "open");
+            first = 0;
+        }
+    }
+    if (n < sizeof(body)) snprintf(body + n, sizeof(body) - n, "]}}");
+    char* resp = r->host[0]
+        ? remote_vapix_post(r->host, r->user, r->pass, "io/portmanagement.cgi", body)
+        : ACAP_VAPIX_Post("io/portmanagement.cgi", body);
+    int ok = resp && !strstr(resp, "\"error\"");
+    if (resp) free(resp);
+    return ok;
+}
+
+/* Caller holds io_flash_lock. Ends run r: waits for its in-flight request,
+ * frees the slot and appends its ports to offs[] for the caller to switch off
+ * (with io_flash_send_offs) after unlocking. Returns 0 if r had already ended. */
+static int io_flash_end_locked(IoFlashRun* r, const char* why, IoFlashSnap* offs, int* noffs) {
+    guint gen = r->gen;
+    if (r->used) r->stop_req = 1;
+    while (r->used && r->gen == gen && r->busy)
+        g_cond_wait(&io_flash_cond, &io_flash_lock);
+    if (!r->used || r->gen != gen) return 0;
+    io_flash_snap(r, &offs[(*noffs)++]);
+    LOG("io_flash: stopped for rule %s (%s)", r->rule_id[0] ? r->rule_id : "test", why);
+    r->used = 0;
+    g_cond_broadcast(&io_flash_cond);
+    return 1;
+}
+
+static void io_flash_send_offs(const IoFlashSnap* offs, int noffs) {
+    for (int i = 0; i < noffs; i++) io_flash_apply(&offs[i], -1);
+}
+
+/* Caller holds io_flash_lock. Sleeps until deadline_us (monotonic); returns 0
+ * if the run ended or a stop was requested in the meantime. */
+static int io_flash_wait(IoFlashRun* r, guint gen, gint64 deadline_us) {
+    while (r->used && r->gen == gen && !r->stop_req) {
+        if (g_get_monotonic_time() >= deadline_us) return 1;
+        g_cond_wait_until(&io_flash_cond, &io_flash_lock, deadline_us);
+    }
+    return 0;
+}
+
+/* Each run has a worker thread so the blocking VAPIX call of every edge (about
+ * 80 ms on the device) never stalls the main loop. Edges follow an absolute
+ * monotonic schedule so that call time does not accumulate as drift. The
+ * first on period is already lit when the thread starts. */
+typedef struct { IoFlashRun* r; guint gen; } IoFlashThreadArg;
+
+static gpointer io_flash_thread(gpointer data) {
+    IoFlashThreadArg* arg = (IoFlashThreadArg*)data;
+    IoFlashRun* r = arg->r;
+    guint gen = arg->gen;
+    free(arg);
+    g_mutex_lock(&io_flash_lock);
+    gint64 next = g_get_monotonic_time() + (gint64)r->on_ms * 1000;
+
+    for (;;) {
+        gint64 due = (r->end_us && next > r->end_us) ? r->end_us : next;
+        if (!io_flash_wait(r, gen, due)) break;
+
+        const char* why = NULL;
+        int lit_idx = -1;
+        if (r->check_enabled && !RuleEngine_IsEnabled(r->rule_id)) {
+            why = "rule disabled or removed";
+        } else if (r->end_us && g_get_monotonic_time() >= r->end_us) {
+            why = "time limit reached";
+        } else {
+            int light_now = 1;
+            if (r->lit) {
+                r->lit = 0;
+                int cycle_done = r->together || r->idx == r->nports - 1;
+                r->idx = r->together ? 0 : (r->idx + 1) % r->nports;
+                if (cycle_done && r->cycles_left > 0 && --r->cycles_left == 0) {
+                    why = "flash count reached";
+                    light_now = 0;
+                } else if (r->off_ms > 0) {
+                    next += (gint64)r->off_ms * 1000;
+                    light_now = 0;
+                }
+            }
+            if (light_now) {
+                lit_idx = r->together ? -2 : r->idx;
+                r->lit = 1;
+                next += (gint64)r->on_ms * 1000;
+            }
+        }
+
+        IoFlashSnap snap;
+        io_flash_snap(r, &snap);
+        r->busy = 1;
+        g_mutex_unlock(&io_flash_lock);
+        io_flash_apply(&snap, why ? -1 : lit_idx);
+        g_mutex_lock(&io_flash_lock);
+        r->busy = 0;
+        if (why && r->used && r->gen == gen) {
+            LOG("io_flash: stopped for rule %s (%s)", r->rule_id[0] ? r->rule_id : "test", why);
+            r->used = 0;
+        }
+        g_cond_broadcast(&io_flash_cond);
+        if (why) break;
+
+        gint64 now = g_get_monotonic_time();
+        if (next < now - G_USEC_PER_SEC) next = now; /* stalled: resync, don't burst */
+    }
+    g_mutex_unlock(&io_flash_lock);
+    return NULL;
+}
+
+/* Caller holds io_flash_lock. Ends every run on host that drives a port in mask. */
+static void io_flash_end_ports_locked(const char* host, guint32 mask, const char* why,
+                                      IoFlashSnap* offs, int* noffs) {
+    for (int i = 0; i < IO_FLASH_MAX_RUNS; i++) {
+        IoFlashRun* r = &io_flash_runs[i];
+        if (r->used && (r->mask & mask) && strcmp(r->host, host) == 0)
+            io_flash_end_locked(r, why, offs, noffs);
+    }
+}
+
+/* Ends every run on host that drives a port in mask; ports are off on return. */
+static void io_flash_end_ports(const char* host, guint32 mask, const char* why) {
+    IoFlashSnap offs[IO_FLASH_MAX_RUNS];
+    int noffs = 0;
+    g_mutex_lock(&io_flash_lock);
+    io_flash_end_ports_locked(host, mask, why, offs, &noffs);
+    g_mutex_unlock(&io_flash_lock);
+    io_flash_send_offs(offs, noffs);
+}
+
+static void io_flash_stop_rule(const char* rule_id) {
+    if (!rule_id || !rule_id[0]) return;
+    IoFlashSnap offs[IO_FLASH_MAX_RUNS];
+    int noffs = 0;
+    g_mutex_lock(&io_flash_lock);
+    for (int i = 0; i < IO_FLASH_MAX_RUNS; i++) {
+        IoFlashRun* r = &io_flash_runs[i];
+        if (r->used && strcmp(r->rule_id, rule_id) == 0)
+            io_flash_end_locked(r, "stopped", offs, &noffs);
+    }
+    g_mutex_unlock(&io_flash_lock);
+    io_flash_send_offs(offs, noffs);
+}
+
+void Actions_IoFlash_Stop_Rule(const char* rule_id) {
+    io_flash_stop_rule(rule_id);
+}
+
+void Actions_IoFlash_Stop_All(void) {
+    IoFlashSnap offs[IO_FLASH_MAX_RUNS];
+    int noffs = 0;
+    g_mutex_lock(&io_flash_lock);
+    for (int i = 0; i < IO_FLASH_MAX_RUNS; i++)
+        if (io_flash_runs[i].used)
+            io_flash_end_locked(&io_flash_runs[i], "engine stopping", offs, &noffs);
+    g_mutex_unlock(&io_flash_lock);
+    io_flash_send_offs(offs, noffs);
+}
+
+/* Accepts "ports": [1, 3] or "ports": "1,3". Returns the number of ports parsed. */
+static int io_flash_parse_ports(cJSON* ports_j, int* ports, guint32* mask) {
+    int n = 0;
+    *mask = 0;
+    char buf[128] = "";
+    if (cJSON_IsArray(ports_j)) {
+        cJSON* p;
+        size_t len = 0;
+        cJSON_ArrayForEach(p, ports_j) {
+            int v = cJSON_IsNumber(p) ? (int)p->valuedouble
+                  : (cJSON_IsString(p) ? atoi(p->valuestring) : 0);
+            len += (size_t)snprintf(buf + len, sizeof(buf) - len, "%d,", v);
+            if (len >= sizeof(buf)) break;
+        }
+    } else if (cJSON_IsString(ports_j)) {
+        snprintf(buf, sizeof(buf), "%s", ports_j->valuestring);
+    }
+    char* save = NULL;
+    for (char* tok = strtok_r(buf, ", ;", &save); tok && n < IO_FLASH_MAX_PORTS;
+         tok = strtok_r(NULL, ", ;", &save)) {
+        int v = atoi(tok);
+        if (v < 1 || v > 32 || (*mask & (1u << (v - 1)))) continue;
+        ports[n++] = v;
+        *mask |= 1u << (v - 1);
+    }
+    return n;
+}
+
+static int io_flash_clamp(cJSON* j, int def, int lo, int hi) {
+    int v = (j && cJSON_IsNumber(j)) ? (int)j->valuedouble
+          : (j && cJSON_IsString(j) && j->valuestring[0]) ? atoi(j->valuestring) : def;
+    return v < lo ? lo : (v > hi ? hi : v);
+}
+
+static void action_io_flash(const char* rule_id, cJSON* cfg) {
+    IoFlashRun nr;
+    memset(&nr, 0, sizeof(nr));
+    nr.nports = io_flash_parse_ports(cJSON_GetObjectItem(cfg, "ports"), nr.ports, &nr.mask);
+    if (nr.nports == 0) { LOG_ACTION_ERR("io_flash: no valid output ports (1-32) selected"); return; }
+
+    const char* mode = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "mode"));
+    nr.together = (mode && strcmp(mode, "together") == 0) || nr.nports == 1;
+    nr.on_ms  = io_flash_clamp(cJSON_GetObjectItem(cfg, "on_ms"), 500, 100, 60000);
+    nr.off_ms = io_flash_clamp(cJSON_GetObjectItem(cfg, "off_ms"),
+                               nr.together ? nr.on_ms : 0, 0, 60000);
+
+    gint64 now = g_get_monotonic_time();
+    const char* stop = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "stop"));
+    if (!stop) stop = "count";
+    nr.cycles_left = -1;
+    if (strcmp(stop, "time") == 0) {
+        int secs = io_flash_clamp(cJSON_GetObjectItem(cfg, "duration"), 60, 1, 86400);
+        nr.end_us = now + (gint64)secs * G_USEC_PER_SEC;
+    } else if (strcmp(stop, "disabled") != 0) {
+        nr.cycles_left = io_flash_clamp(cJSON_GetObjectItem(cfg, "count"), 10, 1, 100000);
+    }
+    if (!rule_id && nr.cycles_left < 0 && !nr.end_us)
+        nr.end_us = now + IO_FLASH_TEST_US;
+
+    char hb[sizeof(nr.host)];
+    const char* rh = remote_host_scheme(cfg, hb, sizeof(hb));
+    const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+    if (rh) snprintf(nr.host, sizeof(nr.host), "%s", rh);
+    if (ru) snprintf(nr.user, sizeof(nr.user), "%s", ru);
+    if (rp) snprintf(nr.pass, sizeof(nr.pass), "%s", rp);
+    snprintf(nr.rule_id, sizeof(nr.rule_id), "%s", rule_id ? rule_id : "");
+    /* A disabled rule can still be fired by hand; only a change to disabled
+     * during the run stops it (edits and deletes stop runs explicitly). */
+    nr.check_enabled = rule_id && RuleEngine_IsEnabled(rule_id);
+
+    IoFlashSnap offs[IO_FLASH_MAX_RUNS];
+    int noffs = 0;
+    g_mutex_lock(&io_flash_lock);
+
+    /* Re-firing the same rule on the same ports refreshes the limits of the
+     * running flash without restarting it, so a repeating trigger (e.g. a
+     * schedule interval) keeps an unbroken rhythm. */
+    int refreshed = 0;
+    for (int i = 0; i < IO_FLASH_MAX_RUNS && !refreshed; i++) {
+        IoFlashRun* r = &io_flash_runs[i];
+        if (!r->used || !rule_id || strcmp(r->rule_id, rule_id) != 0 ||
+            r->mask != nr.mask || strcmp(r->host, nr.host) != 0) continue;
+        memcpy(r->ports, nr.ports, sizeof(r->ports));
+        r->together      = nr.together;
+        r->on_ms         = nr.on_ms;
+        r->off_ms        = nr.off_ms;
+        r->cycles_left   = nr.cycles_left;
+        r->end_us        = nr.end_us;
+        r->check_enabled = nr.check_enabled;
+        refreshed = 1;
+    }
+    if (refreshed) {
+        g_mutex_unlock(&io_flash_lock);
     } else {
-        snprintf(body, sizeof(body),
-            "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\","
-            "\"params\":{\"ports\":[{\"port\":\"%s\",\"state\":\"%s\"}]}}",
-            port_str, io_state);
+        /* A new flash takes over its ports from any other flash driving them. */
+        io_flash_end_ports_locked(nr.host, nr.mask, "ports taken over by another flash", offs, &noffs);
+
+        IoFlashRun* slot = NULL;
+        for (int i = 0; i < IO_FLASH_MAX_RUNS && !slot; i++)
+            if (!io_flash_runs[i].used) slot = &io_flash_runs[i];
+        if (!slot) {
+            g_mutex_unlock(&io_flash_lock);
+            io_flash_send_offs(offs, noffs);
+            LOG_ACTION_ERR("io_flash: too many flashes running (max %d)", IO_FLASH_MAX_RUNS);
+            return;
+        }
+        *slot = nr;
+        slot->used = 1;
+        slot->busy = 1;  /* first edge below is sent without the lock */
+        slot->gen  = ++io_flash_gen;
+        slot->lit  = 1;
+        guint gen = slot->gen;
+        IoFlashSnap snap;
+        io_flash_snap(slot, &snap);
+        g_mutex_unlock(&io_flash_lock);
+
+        io_flash_send_offs(offs, noffs);
+        int ok = io_flash_apply(&snap, nr.together ? -2 : 0);
+
+        g_mutex_lock(&io_flash_lock);
+        slot->busy = 0;
+        g_cond_broadcast(&io_flash_cond);
+        const char* err = NULL;
+        if (!slot->used || slot->gen != gen || slot->stop_req) {
+            /* Stopped while the first edge was in flight; whoever stopped it switches it off. */
+        } else if (!ok) {
+            err = "io_flash: could not set output ports — check they exist and are configured as outputs";
+        } else {
+            IoFlashThreadArg* targ = malloc(sizeof(*targ));
+            GThread* th = NULL;
+            if (targ) {
+                targ->r   = slot;
+                targ->gen = gen;
+                th = g_thread_try_new("io_flash", io_flash_thread, targ, NULL);
+            }
+            if (th) {
+                g_thread_unref(th);
+                LOG("io_flash: started for rule %s (%d port%s, %s, %d/%d ms)",
+                    rule_id ? rule_id : "test", nr.nports, nr.nports == 1 ? "" : "s",
+                    nr.together ? "together" : "sequence", nr.on_ms, nr.off_ms);
+            } else {
+                free(targ);
+                err = "io_flash: could not start worker thread";
+            }
+        }
+        IoFlashSnap fail_off[1];
+        int nfail = 0;
+        if (err) io_flash_end_locked(slot, "start failed", fail_off, &nfail);
+        g_mutex_unlock(&io_flash_lock);
+        if (err) {
+            io_flash_send_offs(fail_off, nfail);
+            LOG_ACTION_ERR("%s", err);
+            return;
+        }
     }
 
-    char* resp = VAPIX_POST(cfg, "io/portmanagement.cgi", body);
-    if (resp) free(resp);
-
-    /* Register while_active only when no duration (timed pulse auto-restores) */
-    if ((!dur || dur->valuedouble == 0) && rule_id) {
+    if (rule_id) {
         cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
         if (wa && cJSON_IsTrue(wa)) {
             WhileActiveEntry e = {0};
-            snprintf(e.rule_id,    sizeof(e.rule_id),    "%s", rule_id);
-            snprintf(e.atype,      sizeof(e.atype),      "io_output");
-            e.io_port = port;
-            snprintf(e.io_restore, sizeof(e.io_restore), "%s", io_restore);
+            snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+            snprintf(e.atype,   sizeof(e.atype),   "io_flash");
             WA_SET_REMOTE(e, cfg);
             while_active_register(&e);
         }
+    }
+}
+
+/* io_output via io/portmanagement.cgi. Ports are 1-based in the UI and 0-based
+ * strings in the API; UI "active" = "closed", "inactive" = "open".
+ * Takes one port ("port" + "state") or several ("ports": [{"port":1,"state":
+ * "active"}, ...]). All ports are set by one setPorts call with the inactive
+ * ones listed first: the camera switches listed ports in order, so a colour
+ * change never shows a wrong colour on the way. With a duration or
+ * while_active the ports return to the states they had before the action; a
+ * single timed port uses setStateSequence so the camera restores it, several
+ * are restored together by one setPorts call from a timer. */
+static int io_output_parse(cJSON* cfg, IoOutPort* out) {
+    int n = 0;
+    cJSON* arr = cJSON_GetObjectItem(cfg, "ports");
+    cJSON* single = NULL;
+    if (!cJSON_IsArray(arr)) {
+        single = cJSON_CreateArray();
+        cJSON* one = cJSON_CreateObject();
+        cJSON* p = cJSON_GetObjectItem(cfg, "port");
+        cJSON_AddNumberToObject(one, "port", p ? p->valuedouble : 0);
+        const char* st = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
+        cJSON_AddStringToObject(one, "state", st ? st : "active");
+        cJSON_AddItemToArray(single, one);
+        arr = single;
+    }
+    cJSON* it;
+    cJSON_ArrayForEach(it, arr) {
+        cJSON* p = cJSON_GetObjectItem(it, "port");
+        int port = !p ? 0 : cJSON_IsNumber(p) ? (int)p->valuedouble
+                 : cJSON_IsString(p) ? atoi(p->valuestring) : 0;
+        if (port < 1 || port > 32) continue;
+        const char* st = cJSON_GetStringValue(cJSON_GetObjectItem(it, "state"));
+        int closed = !st || strcmp(st, "inactive") != 0;
+        int k = 0;
+        while (k < n && out[k].port != port) k++;
+        if (k == n) {
+            if (n == IO_OUT_MAX_PORTS) break;
+            out[n++].port = port;
+        }
+        out[k].closed = closed;
+    }
+    if (single) cJSON_Delete(single);
+    return n;
+}
+
+/* setPorts body for ps, ports turning off listed first. */
+static void io_output_body(char* body, size_t sz, const IoOutPort* ps, int n) {
+    size_t len = (size_t)snprintf(body, sz,
+        "{\"apiVersion\":\"1.0\",\"method\":\"setPorts\",\"params\":{\"ports\":[");
+    int first = 1;
+    for (int want_closed = 0; want_closed < 2; want_closed++) {
+        for (int i = 0; i < n && len < sz; i++) {
+            if (ps[i].closed != want_closed) continue;
+            len += (size_t)snprintf(body + len, sz - len,
+                "%s{\"port\":\"%d\",\"state\":\"%s\"}",
+                first ? "" : ",", ps[i].port - 1, ps[i].closed ? "closed" : "open");
+            first = 0;
+        }
+    }
+    if (len < sz) snprintf(body + len, sz - len, "]}}");
+}
+
+/* Fills restore[k] with port k's current state for every port not yet known. */
+static void io_output_current_states(cJSON* cfg, const IoOutPort* ps, int n,
+                                     IoOutPort* restore, int* known) {
+    char* resp = VAPIX_POST(cfg, "io/portmanagement.cgi", "{\"apiVersion\":\"1.0\",\"method\":\"getPorts\"}");
+    cJSON* root = resp ? cJSON_Parse(resp) : NULL;
+    free(resp);
+    cJSON* item;
+    cJSON_ArrayForEach(item, cJSON_GetObjectItem(cJSON_GetObjectItem(root, "data"), "items")) {
+        const char* p  = cJSON_GetStringValue(cJSON_GetObjectItem(item, "port"));
+        const char* st = cJSON_GetStringValue(cJSON_GetObjectItem(item, "state"));
+        if (!p || !st) continue;
+        for (int k = 0; k < n; k++)
+            if (!known[k] && atoi(p) == ps[k].port - 1) {
+                restore[k].closed = strcmp(st, "closed") == 0;
+                known[k] = 1;
+            }
+    }
+    cJSON_Delete(root);
+}
+
+/* Restore bookkeeping. A port changed by a timed or while_active io_output
+ * returns to the state it had before the first of any overlapping actions,
+ * whichever rules they belong to; reading the port again during another
+ * action's pulse would record that pulse as the state to return to and leave
+ * the port stuck. Pending timed restores are tracked per device and port. */
+#define IO_OUT_MAX_PENDING 32
+
+typedef struct {
+    int       used;
+    guint     source;
+    int       restore_by_timer; /* 0 = the camera restores (single-port setStateSequence) */
+    char      host[192];
+    char      user[64];
+    char      pass[128];
+    int       n;
+    IoOutPort restore[IO_OUT_MAX_PORTS];
+} IoOutPending;
+
+static IoOutPending io_out_pending[IO_OUT_MAX_PENDING];
+static GMutex       io_out_lock;
+
+static void io_output_post_restore(const char* host, const char* user, const char* pass,
+                                   const IoOutPort* restore, int n) {
+    char body[1024];
+    io_output_body(body, sizeof(body), restore, n);
+    char* resp = host[0]
+        ? remote_vapix_post(host, user, pass, "io/portmanagement.cgi", body)
+        : ACAP_VAPIX_Post("io/portmanagement.cgi", body);
+    if (resp) free(resp);
+}
+
+static gboolean io_out_pending_cb(gpointer data) {
+    IoOutPending* p = (IoOutPending*)data;
+    guint me = g_source_get_id(g_main_current_source());
+    IoOutPending copy;
+    int fire = 0;
+    g_mutex_lock(&io_out_lock);
+    if (p->used && p->source == me) {
+        fire = p->restore_by_timer && p->n > 0;
+        copy = *p;
+        p->used = 0;
+    }
+    g_mutex_unlock(&io_out_lock);
+    if (fire) io_output_post_restore(copy.host, copy.user, copy.pass, copy.restore, copy.n);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean io_out_lone_cb(gpointer data) {
+    IoOutPending* p = (IoOutPending*)data;
+    io_output_post_restore(p->host, p->user, p->pass, p->restore, p->n);
+    free(p);
+    return G_SOURCE_REMOVE;
+}
+
+/* Fills restore[k] for each port another action on host is still holding (a
+ * pending timed restore or an active while_active) and sets known[k]. */
+static void io_output_held_states(const char* host, const IoOutPort* ps, int n,
+                                  IoOutPort* restore, int* known) {
+    g_mutex_lock(&io_out_lock);
+    for (int i = 0; i < IO_OUT_MAX_PENDING; i++) {
+        IoOutPending* p = &io_out_pending[i];
+        if (!p->used || strcmp(p->host, host) != 0) continue;
+        for (int j = 0; j < p->n; j++)
+            for (int k = 0; k < n; k++)
+                if (!known[k] && p->restore[j].port == ps[k].port) {
+                    restore[k].closed = p->restore[j].closed;
+                    known[k] = 1;
+                }
+    }
+    g_mutex_unlock(&io_out_lock);
+    for (int i = 0; i < while_active_count; i++) {
+        WhileActiveEntry* e = &while_active_entries[i];
+        if (strcmp(e->atype, "io_output") != 0 || strcmp(e->remote_host, host) != 0) continue;
+        for (int j = 0; j < e->io_n; j++)
+            for (int k = 0; k < n; k++)
+                if (!known[k] && e->io_restore[j].port == ps[k].port) {
+                    restore[k].closed = e->io_restore[j].closed;
+                    known[k] = 1;
+                }
+    }
+}
+
+/* Removes ps' ports from every other pending timed restore on host, so this
+ * action alone restores them. Ports a running camera sequence would still
+ * restore are written to seq_ports[]; returns how many. */
+static int io_out_pending_claim(const char* host, const IoOutPort* ps, int n, int* seq_ports) {
+    int ns = 0;
+    g_mutex_lock(&io_out_lock);
+    for (int i = 0; i < IO_OUT_MAX_PENDING; i++) {
+        IoOutPending* p = &io_out_pending[i];
+        if (!p->used || strcmp(p->host, host) != 0) continue;
+        int w = 0;
+        for (int j = 0; j < p->n; j++) {
+            int taken = 0;
+            for (int k = 0; k < n; k++) if (p->restore[j].port == ps[k].port) taken = 1;
+            if (!taken) p->restore[w++] = p->restore[j];
+            else if (!p->restore_by_timer && ns < IO_OUT_MAX_PORTS) seq_ports[ns++] = p->restore[j].port;
+        }
+        p->n = w;
+        if (w == 0) {
+            if (p->source) g_source_remove(p->source);
+            p->used = 0;
+        }
+    }
+    g_mutex_unlock(&io_out_lock);
+    return ns;
+}
+
+static void io_out_pending_add(const char* host, const char* user, const char* pass,
+                               const IoOutPort* restore, int n, int restore_by_timer, guint ms) {
+    g_mutex_lock(&io_out_lock);
+    IoOutPending* p = NULL;
+    for (int i = 0; i < IO_OUT_MAX_PENDING && !p; i++)
+        if (!io_out_pending[i].used) p = &io_out_pending[i];
+    if (!p) {
+        g_mutex_unlock(&io_out_lock);
+        LOG_WARN("io_output: too many timed outputs pending (%d)", IO_OUT_MAX_PENDING);
+        /* Still restore, just without overlap tracking. */
+        if (restore_by_timer) {
+            IoOutPending* lone = calloc(1, sizeof(*lone));
+            if (!lone) return;
+            lone->n = n;
+            snprintf(lone->host, sizeof(lone->host), "%s", host);
+            snprintf(lone->user, sizeof(lone->user), "%s", user);
+            snprintf(lone->pass, sizeof(lone->pass), "%s", pass);
+            memcpy(lone->restore, restore, sizeof(IoOutPort) * (size_t)n);
+            g_timeout_add(ms, io_out_lone_cb, lone);
+        }
+        return;
+    }
+    memset(p, 0, sizeof(*p));
+    p->used = 1;
+    p->restore_by_timer = restore_by_timer;
+    snprintf(p->host, sizeof(p->host), "%s", host);
+    snprintf(p->user, sizeof(p->user), "%s", user);
+    snprintf(p->pass, sizeof(p->pass), "%s", pass);
+    p->n = n;
+    memcpy(p->restore, restore, sizeof(IoOutPort) * (size_t)n);
+    p->source = g_timeout_add(ms, io_out_pending_cb, p);
+    g_mutex_unlock(&io_out_lock);
+}
+
+static void action_io_output(const char* rule_id, cJSON* cfg) {
+    IoOutPort ps[IO_OUT_MAX_PORTS];
+    int n = io_output_parse(cfg, ps);
+    if (n == 0) { LOG_ACTION_ERR("io_output: no valid port (1-32) selected"); return; }
+
+    char hb[192];
+    const char* rh = remote_host_scheme(cfg, hb, sizeof(hb));
+    const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
+    const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
+    const char* host = rh ? rh : "";
+
+    /* Setting a port directly takes it over from any flash driving it. */
+    guint32 mask = 0;
+    for (int i = 0; i < n; i++) mask |= 1u << (ps[i].port - 1);
+    io_flash_end_ports(host, mask, "port set by an I/O Output action");
+
+    cJSON* dur = cJSON_GetObjectItem(cfg, "duration");
+    int timed = dur && cJSON_IsNumber(dur) && dur->valuedouble > 0;
+    guint ms = timed ? (guint)(dur->valuedouble * 1000) : 0;
+    cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
+    int want_wa = !timed && rule_id && wa && cJSON_IsTrue(wa);
+
+    /* States to return to: those from before the first of any overlapping
+     * actions, else the current ones, else the opposite of what is set now. */
+    IoOutPort restore[IO_OUT_MAX_PORTS];
+    int known[IO_OUT_MAX_PORTS] = {0};
+    if (timed || want_wa) {
+        int all = 1;
+        for (int k = 0; k < n; k++) { restore[k].port = ps[k].port; restore[k].closed = !ps[k].closed; }
+        io_output_held_states(host, ps, n, restore, known);
+        for (int k = 0; k < n; k++) all &= known[k];
+        if (!all) io_output_current_states(cfg, ps, n, restore, known);
+    }
+
+    if (timed) {
+        int seq_ports[IO_OUT_MAX_PORTS];
+        int ns = io_out_pending_claim(host, ps, n, seq_ports);
+        /* A camera-timed pulse from another action would override setPorts
+         * when it ends; replace it (a single port is replaced by its own
+         * sequence below). */
+        for (int i = 0; i < ns && n > 1; i++) {
+            int closed = 0;
+            for (int k = 0; k < n; k++) if (ps[k].port == seq_ports[i]) closed = ps[k].closed;
+            char cancel[256];
+            snprintf(cancel, sizeof(cancel),
+                "{\"apiVersion\":\"1.0\",\"method\":\"setStateSequence\",\"params\":{\"port\":\"%d\","
+                "\"sequence\":[{\"state\":\"%s\",\"time\":0}]}}",
+                seq_ports[i] - 1, closed ? "closed" : "open");
+            char* r = VAPIX_POST(cfg, "io/portmanagement.cgi", cancel);
+            if (r) free(r);
+        }
+    }
+
+    char body[1024];
+    if (timed && n == 1) {
+        snprintf(body, sizeof(body),
+            "{\"apiVersion\":\"1.0\",\"method\":\"setStateSequence\","
+            "\"params\":{\"port\":\"%d\",\"sequence\":["
+            "{\"state\":\"%s\",\"time\":%u},"
+            "{\"state\":\"%s\",\"time\":0}]}}",
+            ps[0].port - 1, ps[0].closed ? "closed" : "open", ms,
+            restore[0].closed ? "closed" : "open");
+    } else {
+        io_output_body(body, sizeof(body), ps, n);
+    }
+    char* resp = VAPIX_POST(cfg, "io/portmanagement.cgi", body);
+    int ok = resp && !strstr(resp, "\"error\"");
+    if (resp) free(resp);
+    if (!ok) {
+        LOG_ACTION_ERR("io_output: could not set port(s) — check they exist and are configured as outputs");
+        return;
+    }
+
+    if (timed)
+        io_out_pending_add(host, ru ? ru : "", rp ? rp : "", restore, n, n > 1, ms);
+
+    if (want_wa) {
+        WhileActiveEntry e = {0};
+        snprintf(e.rule_id, sizeof(e.rule_id), "%s", rule_id);
+        snprintf(e.atype,   sizeof(e.atype),   "io_output");
+        e.io_port = ps[0].port;
+        e.io_n = n;
+        memcpy(e.io_restore, restore, sizeof(IoOutPort) * (size_t)n);
+        WA_SET_REMOTE(e, cfg);
+        while_active_register(&e);
     }
 }
 
@@ -3464,6 +4131,7 @@ static void execute_from_ex(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "overlay_text")      == 0) action_overlay_text(rule_id, action, trigger_data);
         else if (strcmp(type, "ptz_preset")        == 0) action_ptz_preset(action);
         else if (strcmp(type, "io_output")         == 0) action_io_output(rule_id, action);
+        else if (strcmp(type, "io_flash")          == 0) action_io_flash(rule_id, action);
         else if (strcmp(type, "audio_clip")              == 0) action_audio_clip(rule_id, action);
         else if (strcmp(type, "paging_console_execute")    == 0) action_paging_console_execute(action);
         else if (strcmp(type, "paging_console_button")     == 0) action_paging_console_button(action);

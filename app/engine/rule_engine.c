@@ -547,6 +547,7 @@ int RuleEngine_Update(const char* id, cJSON* rule_json) {
             if (enabled) schedule_subscribe(id, triggers_dup);
             else         schedule_unsubscribe(id);
             cJSON_Delete(triggers_dup);
+            Actions_IoFlash_Stop_Rule(id);
             return 1;
         }
     }
@@ -566,6 +567,7 @@ int RuleEngine_Delete(const char* id) {
             rules_save_locked();
             pthread_mutex_unlock(&store_lock);
             schedule_unsubscribe(id);
+            Actions_IoFlash_Stop_Rule(id);
             return 1;
         }
     }
@@ -600,6 +602,7 @@ int RuleEngine_SetEnabled(const char* id, int enabled) {
             if (enabled) schedule_subscribe(id, triggers_dup);
             else         schedule_unsubscribe(id);
             cJSON_Delete(triggers_dup);
+            if (!enabled) Actions_IoFlash_Stop_Rule(id);
             return 1;
         }
     }

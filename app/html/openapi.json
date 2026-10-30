@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`\n",
-    "version": "1.9.19",
+    "version": "1.9.20",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -570,7 +570,7 @@
             "enum": [
               "http_request", "mqtt_publish", "recording", "overlay_text", "ptz_preset",
               "http_request", "mqtt_publish", "recording", "overlay_text", "ptz_preset",
-              "io_output", "audio_clip", "siren_light", "vapix_query",
+              "io_output", "io_flash", "audio_clip", "siren_light", "vapix_query",
               "set_variable", "increment_counter", "fire_rule",
               "fire_vapix_event", "send_syslog", "delay",
               "guard_tour", "set_device_param", "snapshot_upload",
@@ -580,7 +580,7 @@
           },
           "remote_host": {
             "type": "string",
-            "description": "IP address or hostname of a remote Axis device to execute this action on. When set, the action targets the remote device via VAPIX over HTTP using digest authentication. Supported by: recording, overlay_text, ptz_preset, io_output, audio_clip, siren_light, guard_tour, set_device_param, ir_cut_filter, privacy_mask, wiper, light_control, acap_control, speaker_display.",
+            "description": "IP address or hostname of a remote Axis device to execute this action on. When set, the action targets the remote device via VAPIX over HTTP using digest authentication. Supported by: recording, overlay_text, ptz_preset, io_output, io_flash, audio_clip, siren_light, guard_tour, set_device_param, ir_cut_filter, privacy_mask, wiper, light_control, acap_control, speaker_display.",
             "example": "192.168.1.100"
           },
           "remote_user": {
@@ -764,10 +764,32 @@
             "type": "object",
             "properties": {
               "type":         { "type": "string", "enum": ["io_output"] },
-              "port":         { "type": "integer", "minimum": 1, "example": 1 },
-              "state":        { "type": "string", "enum": ["active", "inactive"], "description": "Output state to set" },
-              "duration":     { "type": "integer", "default": 0, "description": "Seconds to hold the state, then revert (0 = hold until changed)" },
+              "ports":        { "type": "array", "description": "Ports to set in one request (ports turning off are switched first). Takes precedence over port/state.", "items": { "type": "object", "properties": { "port": { "type": "integer", "minimum": 1, "maximum": 32 }, "state": { "type": "string", "enum": ["active", "inactive"] } } }, "example": [{ "port": 1, "state": "active" }, { "port": 2, "state": "inactive" }, { "port": 3, "state": "active" }] },
+              "port":         { "type": "integer", "minimum": 1, "example": 1, "description": "Single-port form, used when ports is absent" },
+              "state":        { "type": "string", "enum": ["active", "inactive"], "description": "Output state for the single-port form" },
+              "duration":     { "type": "integer", "default": 0, "description": "Seconds to hold the states, then return every port to its state from before the action (0 = hold until changed)" },
               "while_active": { "type": "boolean", "default": false }
+            }
+          }
+        ]
+      },
+
+      "ActionIoFlash": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "required": ["ports"],
+            "properties": {
+              "type":         { "type": "string", "enum": ["io_flash"] },
+              "ports":        { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 32 }, "maxItems": 8, "description": "Output ports (1-based) in flash order", "example": [1, 3] },
+              "mode":         { "type": "string", "enum": ["sequence", "together"], "default": "sequence", "description": "sequence = one port at a time in list order; together = all ports at once" },
+              "on_ms":        { "type": "integer", "minimum": 100, "maximum": 60000, "default": 500, "description": "On time per flash in milliseconds" },
+              "off_ms":       { "type": "integer", "minimum": 0, "maximum": 60000, "description": "Off time between flashes in milliseconds. Default 0 for sequence, on_ms for together." },
+              "stop":         { "type": "string", "enum": ["count", "time", "disabled"], "default": "count", "description": "When to stop: after count flashes, after duration seconds, or when the rule is disabled, edited or deleted" },
+              "count":        { "type": "integer", "minimum": 1, "maximum": 100000, "default": 10, "description": "Flashes when stop = count. One flash = every listed port once." },
+              "duration":     { "type": "integer", "minimum": 1, "maximum": 86400, "default": 60, "description": "Seconds when stop = time" },
+              "while_active": { "type": "boolean", "default": false, "description": "Also stop when the triggering condition clears" }
             }
           }
         ]

@@ -1,5 +1,50 @@
 # Release Notes
 
+## v1.9.20 - I/O Flash
+
+Adds an I/O Flash action that flashes output ports, for example a red and a
+blue lamp alternating, and lets one I/O Output action set several ports at
+once, so a stack light changes colour in one step.
+
+### Upgrading to 1.9.20
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.20
+
+- **I/O Flash action.** Pick output ports in order (the editor lists the
+  camera's outputs by name) and flash them *one after another* (1, 3, 1, 3, …;
+  colours never mix) or *all together*. On time and gap are in milliseconds,
+  with a 100 ms minimum on time because each switch takes the camera about
+  80 ms. Stop after a number of flashes, after a time, or only when the rule is
+  disabled. Ports are always left off when it stops. Disabling, editing or
+  deleting the rule stops it straight away, and so does an I/O Output action
+  on one of its ports, so manual "colour" and "all off" rules take over from a
+  flashing rule. Firing the rule again while it flashes restarts the count or
+  time limit without breaking the rhythm. Also supports *Stop early when the
+  triggering condition clears* and remote devices. Each flash runs in its own
+  thread, so other rules are never held up, even when a remote device is slow
+  or offline. Verified on a P5686-LE with lamps on ports 1–3.
+- **I/O Output sets several ports at once.** Choose *On*, *Off* or *Leave as
+  is* for each output (listed by name) in one action. All ports are set in one
+  request, those turning off first. The camera switches the ports about 20 ms
+  apart, so a colour change on a stack light (e.g. green to purple = ports 1
+  and 3 on, 2 off) completes within about 40 ms instead of one action at a
+  time. Existing single-port actions keep working.
+
+### Changes in 1.9.20
+
+- **I/O Output duration and *Run while active* restore the previous state.**
+  The ports return to the states they had before the action, instead of being
+  flipped to the opposite of what the action set (which turned "off" ports on
+  afterwards). When actions overlap on a port, from the same rule or different
+  rules, it returns to its state from before the first of them, so a pulse
+  that is re-triggered or overlapped can no longer leave a port stuck on.
+- **I/O Output reports errors.** A port that does not exist or is not
+  configured as an output is now logged and shown in the rule's event log and
+  the action Test result; before, the request failed silently.
+
 ## v1.9.19 - ALPV to Milestone
 
 Sends AXIS License Plate Verifier block-list plates to Milestone XProtect as

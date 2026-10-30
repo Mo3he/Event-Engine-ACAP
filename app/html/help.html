@@ -384,6 +384,7 @@
       <a href="#act-siren" class="sub">Siren / Light</a>
       <a href="#act-speaker-display" class="sub">Speaker Display</a>
       <a href="#act-io-output" class="sub">I/O Output</a>
+      <a href="#act-io-flash" class="sub">I/O Flash</a>
       <a href="#act-digest" class="sub">Notification Digest</a>
       <a href="#act-delay" class="sub">Delay</a>
       <a href="#act-set-var" class="sub">Set Variable</a>
@@ -912,11 +913,23 @@ Content-Type: application/json
       <h3 id="act-io-output">I/O Output</h3>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
-        <tr><td><strong>Port</strong></td><td>Output port number.</td></tr>
-        <tr><td><strong>State</strong></td><td><em>High</em> or <em>Low</em>.</td></tr>
-        <tr><td><strong>Duration</strong></td><td>Optional. Automatically reset to the opposite state after N seconds.</td></tr>
-        <tr><td><strong>While active</strong></td><td>Automatically reset the output when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+        <tr><td><strong>Ports</strong></td><td>One setting per output port: <em>On (active)</em>, <em>Off (inactive)</em> or <em>Leave as is</em>. The camera's outputs are listed by name. All selected ports are switched in one request, those turning off first, so e.g. changing a stack light from green to purple (ports 1 and 3 on, 2 off) never shows another colour on the way.</td></tr>
+        <tr><td><strong>Duration</strong></td><td>Optional. After N seconds, return every selected port to the state it had before the action. Firing the rule again meanwhile restarts the time but still returns to the original states.</td></tr>
+        <tr><td><strong>While active</strong></td><td>Return the ports to the states they had before the action when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
       </table>
+
+      <h3 id="act-io-flash">I/O Flash</h3>
+      <p>Flash one or more output ports, for example a red and a blue lamp alternating. Timing is in milliseconds and every port is left off when flashing stops.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Output ports</strong></td><td>Port numbers in flash order, e.g. <code>1, 3</code>, up to 8. Ports configured as outputs on the camera are listed by name under the field; click one to add it.</td></tr>
+        <tr><td><strong>Pattern</strong></td><td><em>One after another</em> lights each port in turn (1, 3, 1, 3, …). Colours never mix: the camera switches ports about 20&nbsp;ms apart, so at each change the previous port goes off just before the next comes on, leaving a barely visible dark moment even with no gap. <em>All together</em> switches every port on and off at the same time.</td></tr>
+        <tr><td><strong>On time</strong></td><td>How long each flash stays on, 100–60000 ms. Each switch takes the camera about 80&nbsp;ms, so this is the practical minimum.</td></tr>
+        <tr><td><strong>Gap</strong></td><td>Off time between flashes, 0–60000 ms. Blank means no gap for <em>One after another</em> and the same as the on time for <em>All together</em>.</td></tr>
+        <tr><td><strong>Stop after</strong></td><td><em>Number of flashes</em> (one flash = every listed port once), <em>Time</em> in seconds, or <em>Until rule is disabled</em>.</td></tr>
+        <tr><td><strong>Stop early</strong></td><td>Also stop when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+      <p>Flashing also stops when the rule is disabled, edited or deleted, and when an <a href="#act-io-output">I/O Output</a> action sets one of its ports, so buttons such as <em>Red</em> or <em>All off</em> built from I/O Output take over straight away. Firing the rule again while it flashes restarts the count or time limit without breaking the rhythm. A <strong>Test</strong> run that would never stop is cut off after 10 seconds.</p>
 
       <h3 id="act-digest">Notification Digest</h3>
       <p>Buffer events and send a batched summary on a configurable interval. Useful for sending hourly summaries instead of individual alerts.</p>
@@ -1027,7 +1040,7 @@ Content-Type: application/json
       <!-- ═══════════════════════════════════════════ REMOTE DEVICE -->
       <hr class="section-rule">
       <h2 id="remote-device">Remote Device Actions</h2>
-      <p>Many camera actions (Recording, PTZ Preset, Siren / Light, Speaker Display, I/O Output, Audio Clip, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, ACAP Control, Overlay Text, Set Device Param) can target a <strong>remote Axis device</strong> instead of the camera running Event Engine.</p>
+      <p>Many camera actions (Recording, PTZ Preset, Siren / Light, Speaker Display, I/O Output, I/O Flash, Audio Clip, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, ACAP Control, Overlay Text, Set Device Param) can target a <strong>remote Axis device</strong> instead of the camera running Event Engine.</p>
       <p>This enables cross-device automation — for example, triggering a Speaker Display on an Axis C1710 when motion is detected by a Q3538 running Area Object Analytics.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
@@ -1046,7 +1059,7 @@ Content-Type: application/json
       <!-- ═══════════════════════════════════════════ WHILE-ACTIVE -->
       <hr class="section-rule">
       <h2 id="while-active">While-Active Actions</h2>
-      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, I/O Output, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops the display) when the triggering condition clears. While-active works correctly even when the action targets a <strong>remote device</strong>.</p>
+      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, I/O Output, I/O Flash, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops flashing, stops the display) when the triggering condition clears. While-active works correctly even when the action targets a <strong>remote device</strong>.</p>
       <p>This is useful for scenarios like "record while motion is detected" or "activate siren while I/O port 1 is high". The rule must use a stateful trigger (e.g. a Device Event that has active/inactive states) for while-active to function correctly.</p>
       <div class="callout tip">
         <span class="callout-icon">💡</span>

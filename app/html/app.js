@@ -18,6 +18,7 @@ let privacyMasks = null;      /* null=loading, []=none,   [{name},...] */
 let deviceParams = null;      /* null=loading, []=none,   ['root.X.Y.Z',...] */
 let guardTours = null;        /* null=loading, []=none,   [{id,name},...] */
 let aoaScenarios = null;      /* null=loading, []=none or not available, [{id,name,type},...] */
+let ioOutputs = null;         /* null=loading, []=none, [{port,name},...] (1-based output ports) */
 let acapEvents = null;        /* null=loading, []=none, [{id,name,state,system},...] */
 let pagingActions = null;     /* null=loading, []=none or not a paging device, [{id,label},...] */
 let pagingPages   = null;     /* null=loading, []=none, [{id,name},...] */
@@ -165,7 +166,7 @@ const RULE_TYPE_LABELS = {
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
     sparkplug_publish: 'Sparkplug',
-    overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output',
+    overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output', io_flash: 'I/O Flash',
     audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
     set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',
     delay: 'Delay', fire_vapix_event: 'ACAP Event', send_syslog: 'Syslog',
@@ -1636,6 +1637,7 @@ window.addEventListener('DOMContentLoaded', () => {
       loadDeviceParams(),
       loadGuardTours(),
       loadAoaScenarios(),
+      loadIoOutputs(),
       loadPagingConsoleData()
     ]).then(() => renderDeviceCapabilities()).catch(() => {});
 

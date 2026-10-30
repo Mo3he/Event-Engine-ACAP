@@ -241,6 +241,26 @@ async function loadAudioClips() {
   renderDeviceCapabilities();
 }
 
+async function loadIoOutputs() {
+  try {
+    const resp = await fetch('/axis-cgi/io/portmanagement.cgi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiVersion: '1.0', method: 'getPorts' })
+    });
+    if (!resp.ok) { ioOutputs = []; return; }
+    const data = await resp.json();
+    const items = (data && data.data && data.data.items) || [];
+    ioOutputs = items
+      .filter(p => p.direction === 'output')
+      .map(p => ({ port: parseInt(p.port, 10) + 1, name: p.name || '' }));
+  } catch(e) { ioOutputs = []; }
+  if (actionRows.some(a => a.type === 'io_flash' || a.type === 'io_output')) {
+    flushActionRows();
+    renderActionList();
+  }
+}
+
 async function loadSirenProfiles() {
   try {
     const resp = await fetch('/axis-cgi/siren_and_light.cgi', {

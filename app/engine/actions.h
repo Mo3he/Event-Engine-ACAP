@@ -19,6 +19,8 @@ void  Actions_Execute(const char* rule_id, cJSON* actions_array, cJSON* trigger_
 char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data); /* caller must free() */
 void  Actions_Stop_Active_Siren(const char* rule_id); /* undo every while_active action of this rule */
 void  Actions_ForEach_Active_Siren(int (*cb)(const char* rule_id, void* userdata), void* userdata);
+void  Actions_IoFlash_Stop_Rule(const char* rule_id); /* end this rule's io_flash runs (ports left off); any thread */
+void  Actions_IoFlash_Stop_All(void);                 /* end every io_flash run; call on shutdown */
 void  Actions_Set_Proxy(const char* proxy); /* set SOCKS5 proxy for outbound HTTP (e.g. "socks5h://localhost:1055") */
 void  Actions_Digest_Tick(void);           /* call from 1s timer to flush digest buffers */
 int         Actions_Test(const char* type, cJSON* config); /* test a single action without a rule */

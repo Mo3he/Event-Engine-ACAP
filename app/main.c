@@ -85,7 +85,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         "http_request", "mqtt_publish", "slack_webhook", "teams_webhook", "telegram",
         "email", "snapshot_upload", "ftp_upload", "send_syslog", "recording",
         "overlay_text", "ptz_preset", "guard_tour", "ir_cut_filter", "privacy_mask",
-        "wiper", "light_control", "audio_clip", "siren_light", "io_output", "digest",
+        "wiper", "light_control", "audio_clip", "siren_light", "io_output", "io_flash", "digest",
         "delay", "set_variable", "increment_counter", "run_rule", "set_rule_enabled",
         "fire_vapix_event", "vapix_query", "set_device_param", "acap_control",
         "influxdb_write", "aoa_get_counts", "speaker_display",
@@ -744,7 +744,8 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         {"light_control",     "Light Control",     "Control an Axis illuminator"},
         {"audio_clip",        "Audio Clip",        "Play an audio clip on the camera speaker"},
         {"siren_light",       "Siren / Light",     "Start or stop a siren/LED profile"},
-        {"io_output",         "I/O Output",        "Activate or deactivate a digital output port"},
+        {"io_output",         "I/O Output",        "Activate or deactivate one or more digital output ports at once"},
+        {"io_flash",          "I/O Flash",         "Flash output ports together or one after another, for a count, a time, or until the rule is disabled"},
         {"digest",            "Notification Digest","Buffer events and send a batched summary at an interval"},
         {"delay",             "Delay",             "Wait N seconds before continuing action sequence"},
         {"set_variable",      "Set Variable",      "Store a named variable value"},
@@ -1771,6 +1772,7 @@ int main(void) {
 
     LOG("Shutting down %s", APP_PACKAGE);
     ACAP_EVENTS_Fire_State("EngineReady", 0);
+    Actions_IoFlash_Stop_All();
     AlertStream_Cleanup();
     RuleEngine_Cleanup();
     Sparkplug_Cleanup();
