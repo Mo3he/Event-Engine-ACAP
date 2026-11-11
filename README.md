@@ -373,9 +373,9 @@ Every metric is declared centrally so the birth certificate is stable and aliase
 are consistent for the life of a session. Each metric has a name, a datatype, and
 one of two sources:
 
-- **Bound to a device event** — published automatically whenever the value
+- **Bound to a device event:** published automatically whenever the value
   changes (report by exception). Pick the event and the field to read.
-- **Unbound** — driven by a **Sparkplug B Publish** rule action, which lets you
+- **Unbound:** driven by a **Sparkplug B Publish** rule action, which lets you
   attach conditions, schedules, templates and any other engine feature.
 
 Changing the metric list or the node identity forces a new birth certificate.
