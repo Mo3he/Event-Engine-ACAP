@@ -444,6 +444,25 @@ int ACAP_EVENTS_Fire(const char* Id);
 int ACAP_EVENTS_Fire_JSON(const char* Id, cJSON* data);
 
 /**
+ * @brief Number of data fields an event was declared with (0 if none or unknown).
+ */
+int ACAP_EVENTS_Data_Field_Count(const char* Id);
+
+/**
+ * @brief Fire an event declared with data fields, converting each value to
+ * the field's declared type (string, int, double, bool).
+ *
+ * @param Id The event identifier
+ * @param values JSON object of field name -> string value. Missing or empty
+ *        values send the type's zero value ("" / 0 / false).
+ * @param state For stateful events: 1 high, 0 low, -1 keep the current state.
+ *        Ignored for stateless events.
+ * @param err Receives a reason on failure (may be NULL)
+ * @return 1 on success, 0 on failure (unknown event, value not valid for its type)
+ */
+int ACAP_EVENTS_Fire_Values(const char* Id, cJSON* values, int state, char* err, size_t err_size);
+
+/**
  * @brief Set the global event callback for subscribed events.
  * @param callback Function to call when subscribed events occur
  * @return 1 on success

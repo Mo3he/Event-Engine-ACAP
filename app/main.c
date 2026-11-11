@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <syslog.h>
 #include <time.h>
 #include <glib.h>
@@ -869,6 +870,39 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
             }
         }
 
+        cJSON* data_in = cJSON_GetObjectItem(body, "data");
+        if (data_in && !cJSON_IsArray(data_in)) {
+            cJSON_Delete(events); cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, "'data' must be an array of {\"name\",\"type\"}");
+            return;
+        }
+        if (cJSON_GetArraySize(data_in) > 10) {
+            cJSON_Delete(events); cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, "An event can have at most 10 data fields");
+            return;
+        }
+        {
+            cJSON* f;
+            cJSON_ArrayForEach(f, data_in) {
+                const char* fname = cJSON_GetStringValue(cJSON_GetObjectItem(f, "name"));
+                const char* ftype = cJSON_GetStringValue(cJSON_GetObjectItem(f, "type"));
+                int name_ok = fname && *fname && strlen(fname) < 64 &&
+                              strcmp(fname, "state") != 0 && strcmp(fname, "value") != 0;
+                for (const char* p = fname; name_ok && *p; p++)
+                    if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                          (*p >= '0' && *p <= '9') || *p == '_')) name_ok = 0;
+                int type_ok = ftype && (!strcasecmp(ftype, "string") || !strcasecmp(ftype, "int") ||
+                                        !strcasecmp(ftype, "double") || !strcasecmp(ftype, "bool"));
+                if (!name_ok || !type_ok) {
+                    cJSON_Delete(events); cJSON_Delete(body);
+                    ACAP_HTTP_Respond_Error(resp, 400,
+                        "Each data field needs a name (letters, digits, underscores; not 'state' or 'value') "
+                        "and a type of string, int, double or bool");
+                    return;
+                }
+            }
+        }
+
         /* Build event entry — always prefix the display name */
         int is_stateful = cJSON_IsTrue(cJSON_GetObjectItem(body, "state"));
         cJSON* entry = cJSON_CreateObject();
@@ -886,7 +920,6 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
         cJSON_AddBoolToObject(entry, "state", is_stateful);
         cJSON_AddBoolToObject(entry, "show",  1);
 
-        cJSON* data_in = cJSON_GetObjectItem(body, "data");
         if (data_in && cJSON_IsArray(data_in))
             cJSON_AddItemToObject(entry, "data", cJSON_Duplicate(data_in, 1));
         else
@@ -1595,9 +1628,12 @@ static void HTTP_RemoteCaps(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
 static void HTTP_AOA(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     (void)req;
     const char* body = "{\"apiVersion\":\"1.0\",\"method\":\"getConfiguration\"}";
-    char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
-    if (!raw) {
-        /* AOA not installed — return empty list, not an error */
+    /* Only fills the editor's scenario list, so AOA being absent (404) or
+     * stopped is not worth a log line every time the editor opens. */
+    long code = 0;
+    char* raw = ACAP_VAPIX_Post_Path_Raw("/local/objectanalytics/control.cgi", body, &code);
+    if (!raw || code < 200 || code >= 300) {
+        free(raw);
         ACAP_HTTP_Respond_JSON(resp, cJSON_CreateArray());
         return;
     }

@@ -11,6 +11,7 @@
 #include <syslog.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
 #include <glib.h>
 #include <time.h>
 #include <math.h>
@@ -1542,6 +1543,9 @@ static ACAP_EVENTS_Callback EVENT_USER_CALLBACK = NULL;
 static void ACAP_EVENTS_Main_Callback(guint subscription, AXEvent* event, gpointer user_data);
 static cJSON* ACAP_EVENTS_SUBSCRIPTIONS = NULL;
 static cJSON* ACAP_EVENTS_DECLARATIONS = NULL;
+/* id -> {"state": bool, "data": [{"name","type"}]}, kept so events can be
+ * fired with values of the types they were declared with. */
+static cJSON* ACAP_EVENTS_FIELDS = NULL;
 static AXEventHandler* ACAP_EVENTS_HANDLER = NULL;
 
 static char ACAP_EVENTS_PACKAGE[64];
@@ -1594,6 +1598,7 @@ cJSON* ACAP_EVENTS(void) {
 
     ACAP_EVENTS_SUBSCRIPTIONS = cJSON_CreateArray();
     ACAP_EVENTS_DECLARATIONS = cJSON_CreateObject();
+    ACAP_EVENTS_FIELDS = cJSON_CreateObject();
     ACAP_EVENTS_HANDLER = ax_event_handler_new();
 
     cJSON* events = ACAP_FILE_Read("settings/events.json");
@@ -1855,6 +1860,7 @@ int ACAP_EVENTS_Remove_Event(const char* id) {
         return 0;
     }
 
+    if (ACAP_EVENTS_FIELDS) cJSON_DeleteItemFromObject(ACAP_EVENTS_FIELDS, id);
     cJSON* event = cJSON_DetachItemFromObject(ACAP_EVENTS_DECLARATIONS, id);
     if (!event) {
         LOG_WARN("Error removing event %s. Event not found\n", id);
@@ -2122,7 +2128,128 @@ int ACAP_EVENTS_Add_Event_JSON(cJSON* event) {
     }
     cJSON_AddNumberToObject(ACAP_EVENTS_DECLARATIONS, eventID, declarationID);
     ax_event_key_value_set_free(set);
+
+    if (ACAP_EVENTS_FIELDS) {
+        cJSON* info = cJSON_CreateObject();
+        cJSON_AddBoolToObject(info, "state", cJSON_IsTrue(cJSON_GetObjectItem(event, "state")));
+        cJSON* fields = cJSON_AddArrayToObject(info, "data");
+        cJSON* d = cJSON_GetObjectItem(event, "data") ? cJSON_GetObjectItem(event, "data")->child : NULL;
+        for (; d; d = d->next) {
+            const char* key_name = NULL;
+            const char* key_type = NULL;
+            if (!event_extract_name_type(d, &key_name, &key_type)) continue;
+            cJSON* f = cJSON_CreateObject();
+            cJSON_AddStringToObject(f, "name", key_name);
+            cJSON_AddStringToObject(f, "type", key_type);
+            cJSON_AddItemToArray(fields, f);
+        }
+        cJSON_DeleteItemFromObject(ACAP_EVENTS_FIELDS, eventID);
+        cJSON_AddItemToObject(ACAP_EVENTS_FIELDS, eventID, info);
+    }
     return declarationID;
+}
+
+int ACAP_EVENTS_Data_Field_Count(const char* id) {
+    cJSON* info = (ACAP_EVENTS_FIELDS && id) ? cJSON_GetObjectItem(ACAP_EVENTS_FIELDS, id) : NULL;
+    return info ? cJSON_GetArraySize(cJSON_GetObjectItem(info, "data")) : 0;
+}
+
+/* Parses s as the declared type. Empty means the type's zero value. */
+static int event_parse_value(const char* type, const char* s, int* iv, double* dv, int* bv) {
+    while (*s == ' ' || *s == '\t') s++;
+    char trimmed[256];
+    snprintf(trimmed, sizeof(trimmed), "%s", s);
+    size_t len = strlen(trimmed);
+    while (len && (trimmed[len - 1] == ' ' || trimmed[len - 1] == '\t' ||
+                   trimmed[len - 1] == '\n' || trimmed[len - 1] == '\r'))
+        trimmed[--len] = '\0';
+    char* end = NULL;
+
+    if (g_ascii_strcasecmp(type, "int") == 0) {
+        if (!len) { *iv = 0; return 1; }
+        errno = 0;
+        long v = strtol(trimmed, &end, 10);
+        if (*end) {
+            /* Accept a whole number written as a decimal, e.g. "42.0". */
+            double d = strtod(trimmed, &end);
+            if (*end || d != (double)(long)d) return 0;
+            v = (long)d;
+        }
+        if (errno == ERANGE || v < INT_MIN || v > INT_MAX) return 0;
+        *iv = (int)v;
+        return 1;
+    }
+    if (g_ascii_strcasecmp(type, "double") == 0) {
+        if (!len) { *dv = 0; return 1; }
+        *dv = strtod(trimmed, &end);
+        return *end == '\0';
+    }
+    if (g_ascii_strcasecmp(type, "bool") == 0) {
+        if (!len || !g_ascii_strcasecmp(trimmed, "false") || !strcmp(trimmed, "0") ||
+            !g_ascii_strcasecmp(trimmed, "no") || !g_ascii_strcasecmp(trimmed, "off")) { *bv = 0; return 1; }
+        if (!g_ascii_strcasecmp(trimmed, "true") || !strcmp(trimmed, "1") ||
+            !g_ascii_strcasecmp(trimmed, "yes") || !g_ascii_strcasecmp(trimmed, "on")) { *bv = 1; return 1; }
+        return 0;
+    }
+    return 0;
+}
+
+int ACAP_EVENTS_Fire_Values(const char* id, cJSON* values, int state, char* err, size_t err_size) {
+    if (err && err_size) err[0] = '\0';
+    cJSON* decl = (ACAP_EVENTS_DECLARATIONS && id) ? cJSON_GetObjectItem(ACAP_EVENTS_DECLARATIONS, id) : NULL;
+    cJSON* info = (ACAP_EVENTS_FIELDS && id) ? cJSON_GetObjectItem(ACAP_EVENTS_FIELDS, id) : NULL;
+    if (!decl || !info) {
+        if (err) snprintf(err, err_size, "event '%s' is not declared", id ? id : "");
+        return 0;
+    }
+    int stateful = cJSON_IsTrue(cJSON_GetObjectItem(info, "state"));
+
+    AXEventKeyValueSet* set = ax_event_key_value_set_new();
+    cJSON* f;
+    cJSON_ArrayForEach(f, cJSON_GetObjectItem(info, "data")) {
+        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(f, "name"));
+        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(f, "type"));
+        const char* raw = values ? cJSON_GetStringValue(cJSON_GetObjectItem(values, name)) : NULL;
+        if (!raw) raw = "";
+        int ok, iv = 0, bv = 0;
+        double dv = 0;
+        if (g_ascii_strcasecmp(type, "string") == 0) {
+            ok = ax_event_key_value_set_add_key_value(set, name, NULL, raw, AX_VALUE_TYPE_STRING, NULL);
+        } else if (!event_parse_value(type, raw, &iv, &dv, &bv)) {
+            if (err) snprintf(err, err_size, "'%s' is not a valid %s for field %s", raw, type, name);
+            ax_event_key_value_set_free(set);
+            return 0;
+        } else if (g_ascii_strcasecmp(type, "int") == 0) {
+            ok = ax_event_key_value_set_add_key_value(set, name, NULL, &iv, AX_VALUE_TYPE_INT, NULL);
+        } else if (g_ascii_strcasecmp(type, "double") == 0) {
+            ok = ax_event_key_value_set_add_key_value(set, name, NULL, &dv, AX_VALUE_TYPE_DOUBLE, NULL);
+        } else {
+            ok = ax_event_key_value_set_add_key_value(set, name, NULL, &bv, AX_VALUE_TYPE_BOOL, NULL);
+        }
+        if (!ok) {
+            if (err) snprintf(err, err_size, "could not set field %s", name);
+            ax_event_key_value_set_free(set);
+            return 0;
+        }
+    }
+    if (stateful) {
+        int st = state >= 0 ? (state ? 1 : 0) : ACAP_STATUS_Bool("events", id);
+        ax_event_key_value_set_add_key_value(set, "state", NULL, &st, AX_VALUE_TYPE_BOOL, NULL);
+        state = st;
+    }
+
+    GError* error = NULL;
+    AXEvent* axEvent = ax_event_new2(set, NULL);
+    ax_event_key_value_set_free(set);
+    int sent = ax_event_handler_send_event(ACAP_EVENTS_HANDLER, decl->valueint, axEvent, &error);
+    ax_event_free(axEvent);
+    if (!sent) {
+        if (err) snprintf(err, err_size, "could not send event %s: %s", id, error ? error->message : "unknown error");
+        if (error) g_error_free(error);
+        return 0;
+    }
+    if (stateful) ACAP_STATUS_SetBool("events", id, state);
+    return 1;
 }
 
 /*=====================================================
@@ -2298,6 +2425,8 @@ char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
     curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &response);
 
     CURLcode res = curl_easy_perform(VAPIX_CURL);
+    long response_code = 0;
+    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
     pthread_mutex_unlock(&vapix_mutex);
     curl_slist_free_all(json_hdr);
@@ -2309,8 +2438,6 @@ char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
         return NULL;
     }
 
-    long response_code;
-    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     if (response_code >= 300) {
         if (response_code == 404)
             syslog(LOG_INFO, "%s: %s returned 404 (not installed)\n", __func__, endpoint);
@@ -2437,25 +2564,25 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body) {
     curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &response);
 
     CURLcode res = curl_easy_perform(VAPIX_CURL);
+    long response_code = 0;
+    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
     pthread_mutex_unlock(&vapix_mutex);
     curl_slist_free_all(headers);
     free(url);
 
     if (res != CURLE_OK) {
-        LOG_WARN("%s: %d: %s", __func__, res, curl_easy_strerror(res));
+        LOG_WARN("%s: %s: %d: %s", __func__, path, res, curl_easy_strerror(res));
         free(response);
         return NULL;
     }
 
-    long response_code;
-    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     if (response_code >= 300) {
         /* 404 = app/CGI not installed — expected, log at INFO not WARNING */
         if (response_code == 404)
-            syslog(LOG_INFO, "%s: Code %ld (not installed)\n", __func__, response_code);
+            syslog(LOG_INFO, "%s: %s returned 404 (not installed)\n", __func__, path);
         else
-            LOG_WARN("%s: Code %ld\n", __func__, response_code);
+            LOG_WARN("%s: %s returned HTTP %ld\n", __func__, path, response_code);
         free(response);
         return NULL;
     }
@@ -2493,6 +2620,8 @@ char* ACAP_VAPIX_Put_Path(const char* path, const char* body) {
     curl_easy_setopt(VAPIX_CURL, CURLOPT_WRITEDATA, &response);
 
     CURLcode res = curl_easy_perform(VAPIX_CURL);
+    long response_code = 0;
+    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_CUSTOMREQUEST, NULL);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
@@ -2501,15 +2630,13 @@ char* ACAP_VAPIX_Put_Path(const char* path, const char* body) {
     free(url);
 
     if (res != CURLE_OK) {
-        LOG_WARN("%s: %d: %s", __func__, res, curl_easy_strerror(res));
+        LOG_WARN("%s: %s: %d: %s", __func__, path, res, curl_easy_strerror(res));
         free(response);
         return NULL;
     }
 
-    long response_code;
-    curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
     if (response_code >= 300) {
-        LOG_WARN("%s: Code %ld\n", __func__, response_code);
+        LOG_WARN("%s: %s returned HTTP %ld\n", __func__, path, response_code);
         free(response);
         return NULL;
     }

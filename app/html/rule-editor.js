@@ -2151,6 +2151,9 @@ function actionFields(a, rowIdx) {
     const selId = a.event_id || '';
     const selEvent = selId ? events.find(e => e.id === selId) || null : null;
     const isStateful = selEvent ? !!selEvent.state : false;
+    const evFields = selEvent && Array.isArray(selEvent.data) ? selEvent.data.filter(f => f && f.name) : [];
+    const evFieldVal = n => a['evd_' + n] !== undefined ? a['evd_' + n]
+      : (a.data && a.data[n] !== undefined ? a.data[n] : '');
     const isAdding = a._adding === 'true';
     return `
     <div class="form-row">
@@ -2163,7 +2166,7 @@ function actionFields(a, rowIdx) {
           </select>
           <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventStartAdd(this)" title="Create a new custom ACAP event">＋ New</button>
         </div>
-        ${selEvent ? `<div class="form-hint">${escHtml(selEvent.name || selEvent.id)} · ${selEvent.system ? 'System event' : 'Custom event'} · ${selEvent.state ? 'Stateful (High/Low)' : 'Stateless (pulse)'}</div>` : '<div class="form-hint">No events available — use ＋ New to create one.</div>'}
+        ${selEvent ? `<div class="form-hint">${escHtml(selEvent.name || selEvent.id)} · ${selEvent.system ? 'System event' : 'Custom event'} · ${selEvent.state ? 'Stateful (High/Low)' : 'Stateless (pulse)'}${evFields.length ? ' · ' + evFields.map(f => `${escHtml(f.name)} (${escHtml(String(f.type).toLowerCase())})`).join(', ') : ''}</div>` : '<div class="form-hint">No events available — use ＋ New to create one.</div>'}
         ${selEvent && !selEvent.system ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--danger,#e05252);" onclick="acapEventDelete(${escJsArg(selId)})">Remove Event</button>` : ''}
       </div>
     </div>
@@ -2177,6 +2180,15 @@ function actionFields(a, rowIdx) {
         </select>
       </div>
     </div>` : ''}
+    ${evFields.length ? `
+    <div class="form-row" style="flex-wrap:wrap;">
+      ${evFields.map(f => `
+      <div class="form-group" style="min-width:160px;">
+        <label>${escHtml(f.name)} <span style="color:var(--text-muted);font-weight:400;">(${escHtml(String(f.type).toLowerCase())})</span></label>
+        <input type="text" data-k="evd_${escHtml(f.name)}" value="${escHtml(evFieldVal(f.name))}" placeholder="{{trigger.${escHtml(f.name)}}}" autocomplete="off">
+      </div>`).join('')}
+    </div>
+    <div class="form-hint">Text or templates such as <code>{{trigger.KEY}}</code>, <code>{{trigger.payload}}</code> or <code>{{var.NAME}}</code>; the result is sent as the field's type. Empty sends "" / 0 / false.</div>` : ''}
     ${isAdding ? `
     <div class="form-row" style="background:var(--bg-2,#1e2230);border-radius:6px;padding:12px;gap:8px;flex-wrap:wrap;">
       <div class="form-group" style="min-width:140px;">
@@ -2187,6 +2199,11 @@ function actionFields(a, rowIdx) {
       <div class="form-group" style="min-width:160px;">
         <label>Display Name</label>
         <input type="text" data-k="_new_name" value="${escHtml(a._new_name !== undefined ? a._new_name : 'Event Engine: ')}" placeholder="e.g. Event Engine: Door Open" autocomplete="off">
+      </div>
+      <div class="form-group" style="min-width:200px;">
+        <label>Data fields <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="_new_fields" value="${escHtml(a._new_fields || '')}" placeholder="e.g. plate:string, count:int" autocomplete="off">
+        <div class="form-hint">name:type, comma-separated; types string, int, double, bool.</div>
       </div>
       <div class="form-group" style="flex:0 0 160px;">
         <label>Type</label>
@@ -3380,11 +3397,20 @@ function normalizeAction(a) {
     if (selEvent && selEvent.state) {
       out.state = a.state === 'true' || a.state === true;
     }
+    const evFields = selEvent && Array.isArray(selEvent.data) ? selEvent.data.filter(f => f && f.name) : [];
+    if (evFields.length) {
+      out.data = {};
+      evFields.forEach(f => {
+        const v = a['evd_' + f.name] !== undefined ? a['evd_' + f.name] : (a.data ? a.data[f.name] : undefined);
+        if (v !== undefined && v !== '') out.data[f.name] = String(v);
+      });
+    }
     /* Drop internal UI-only keys */
     delete out._adding;
     delete out._new_id;
     delete out._new_name;
     delete out._new_stateful;
+    delete out._new_fields;
   }
   if (a.type === 'mqtt_publish') {
     out.retain = a.retain === 'true' || a.retain === true;
@@ -3645,6 +3671,7 @@ function acapEventCancelAdd(btn) {
   delete a._new_id;
   delete a._new_name;
   delete a._new_stateful;
+  delete a._new_fields;
   renderActionList();
 }
 
@@ -3653,6 +3680,9 @@ async function acapEventSaveNew(btn) {
   if (i < 0) return;
   _acapEventSyncRow(i);
   const a = actionRows[i];
+  /* Syncing rebuilds the row from its inputs; keep the form open so a
+   * validation error does not throw away what was typed. */
+  a._adding = 'true';
 
   const id   = (a._new_id   || '').trim();
   const name = (a._new_name || '').trim();
@@ -3663,17 +3693,32 @@ async function acapEventSaveNew(btn) {
     return;
   }
 
+  const data = [];
+  for (const part of (a._new_fields || '').split(',').map(p => p.trim()).filter(Boolean)) {
+    const [fname, ftype] = part.split(':').map(p => (p || '').trim());
+    const type = (ftype || '').toLowerCase();
+    if (!/^[A-Za-z0-9_]+$/.test(fname || '') || fname === 'state' || fname === 'value' ||
+        !['string', 'int', 'double', 'bool'].includes(type)) {
+      toast(`Invalid data field "${part}": use name:type with type string, int, double or bool`, 'error');
+      return;
+    }
+    if (data.some(f => f.name === fname)) { toast(`Data field "${fname}" is listed twice`, 'error'); return; }
+    data.push({ name: fname, type });
+  }
+
   try {
     const created = await API.addAcapEvent({
       id,
       name: name || id,
       state: a._new_stateful === 'true',
+      data,
     });
     await loadAcapEvents();
     delete a._adding;
     delete a._new_id;
     delete a._new_name;
     delete a._new_stateful;
+    delete a._new_fields;
     a.event_id = created.id;
     renderActionList();
     toast(`Event "${created.id}" created`, 'success');

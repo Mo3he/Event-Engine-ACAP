@@ -708,6 +708,17 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
         cJSON_AddStringToObject(tdata, "type",    "mqtt_message");
         cJSON_AddStringToObject(tdata, "topic",   topic);
         cJSON_AddStringToObject(tdata, "payload", payload ? payload : "");
+        /* A JSON object payload also exposes its top-level fields as
+         * {{trigger.KEY}}; they never replace type, topic or payload. */
+        cJSON* json = payload ? cJSON_Parse(payload) : NULL;
+        if (cJSON_IsObject(json)) {
+            cJSON* f;
+            cJSON_ArrayForEach(f, json) {
+                if (!f->string || cJSON_GetObjectItem(tdata, f->string)) continue;
+                cJSON_AddItemToObject(tdata, f->string, cJSON_Duplicate(f, 1));
+            }
+        }
+        cJSON_Delete(json);
         fire_fn(s->rule_id, s->trigger_index, tdata);
         cJSON_Delete(tdata);
     }

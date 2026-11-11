@@ -1,5 +1,52 @@
 # Release Notes
 
+## v1.9.24 - Axis events with values
+
+The *Fire ACAP Event* action can now send values with an event, for example a
+plate number and a count from an MQTT message, so a VMS or another
+application receives them as a typed Axis event
+([#13](https://github.com/Mo3he/Event-Engine-ACAP/issues/13)). Also stops a
+log line appearing every time the rule editor opens on devices without AXIS
+Object Analytics ([#14](https://github.com/Mo3he/Event-Engine-ACAP/issues/14)).
+
+### Upgrading to 1.9.24
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.24
+
+- **Events with data fields.** When creating a custom event (*＋ New* in the
+  *Fire ACAP Event* action), list its data fields as `name:type`, for example
+  `plate:string, count:int`; types are `string`, `int`, `double` and `bool`.
+  The action then shows one input per field, taking text or templates such as
+  `{{trigger.KEY}}`, `{{trigger.payload}}` or `{{var.NAME}}`, and sends each
+  value as its declared type. A value that is not a valid number or boolean
+  fails the action with an error in the event log instead of sending a wrong
+  value. In the API, the action takes a `data` object (field name → value).
+
+### Changes in 1.9.24
+
+- **JSON fields of an MQTT message are available as `{{trigger.KEY}}`.** For
+  a payload such as `{"plate":"ABC123","count":3}`, `{{trigger.plate}}` and
+  `{{trigger.count}}` now work in actions and trigger-data conditions, as the
+  rule guide already described. `{{trigger.topic}}` and `{{trigger.payload}}`
+  are unchanged.
+- **Firing a system event that has data fields** (*Rule Fired*, *Rule Error*)
+  from the action now sends its declared fields (empty unless filled in)
+  instead of an undeclared `value` key.
+
+### Fixes in 1.9.24
+
+- **No log line each time the rule editor opens without AXIS Object
+  Analytics.** The editor looks up AOA scenarios to fill a list; when AOA is
+  not installed or not running, that lookup is now silent. Other device API
+  errors in the log now name the path that failed, e.g.
+  `/local/objectanalytics/control.cgi returned HTTP 500`.
+- **Device API status codes could be mixed up between concurrent requests**,
+  because the code was read from the shared connection after it was released
+  to other threads.
+
 ## v1.9.23 - MQTT over TLS stays connected
 
 Fixes MQTT over TLS, which has not worked properly since TLS support was added

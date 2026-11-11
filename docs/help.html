@@ -519,7 +519,7 @@
         <tr><td><strong>Topic</strong></td><td>MQTT topic to subscribe to. Wildcards <code>+</code> (single level) and <code>#</code> (multi-level) are supported.</td></tr>
         <tr><td><strong>Payload filter</strong></td><td>Optional. Only fire if the payload contains this string.</td></tr>
       </table>
-      <p>Available variables injected by this trigger: <span class="var">{{trigger.topic}}</span>, <span class="var">{{trigger.payload}}</span>.</p>
+      <p>Available variables injected by this trigger: <span class="var">{{trigger.topic}}</span>, <span class="var">{{trigger.payload}}</span>. When the payload is a JSON object, its top-level fields are available too, e.g. <span class="var">{{trigger.temperature}}</span> for <code>{"temperature": 21.5}</code>.</p>
 
       <h3 id="trig-webhook">HTTP Webhook</h3>
       <p>Fires when an external system sends an HTTP POST request to the camera with a matching token. Each webhook trigger has its own unique secret token (up to 120 characters).</p>
@@ -973,8 +973,10 @@ Content-Type: application/json
         <tr><td><strong>＋ New</strong></td><td>Opens the inline event creator. Fill in an ID, display name, and type, then click <em>Create</em> to register the event immediately and select it.</td></tr>
         <tr><td><strong>Event ID</strong></td><td>(New event) Unique identifier — letters, digits, and underscores only (e.g. <code>DoorOpenAlert</code>).</td></tr>
         <tr><td><strong>Display Name</strong></td><td>(New event) Human-readable label shown in the Axis event system.</td></tr>
+        <tr><td><strong>Data fields</strong></td><td>(New event, optional) Values the event carries, as <code>name:type</code> pairs separated by commas, e.g. <code>plate:string, count:int</code>. Types: <code>string</code>, <code>int</code>, <code>double</code>, <code>bool</code>. A VMS or another app subscribing to the event receives them with these types.</td></tr>
         <tr><td><strong>Type</strong></td><td>(New event) <em>Stateless</em> fires a one-shot pulse. <em>Stateful</em> maintains a High/Low state that other apps and built-in rules can subscribe to.</td></tr>
         <tr><td><strong>State</strong></td><td>(Stateful events only) Set the event <em>High</em> (active) or <em>Low</em> (inactive).</td></tr>
+        <tr><td><strong>Field values</strong></td><td>(Events with data fields) One input per field. Plain text or templates such as <span class="var">{{trigger.KEY}}</span>, <span class="var">{{trigger.payload}}</span> or <span class="var">{{var.NAME}}</span>, so values from an MQTT message, a webhook or a variable can be passed on as an Axis event. The result is converted to the field's type; a value that is not a valid number or boolean fails the action with an error in the event log. Empty sends <code>""</code>, <code>0</code> or <code>false</code>.</td></tr>
         <tr><td><strong>Remove Event</strong></td><td>Permanently removes a custom event. System events cannot be removed. Rules that fire the deleted event must be updated manually.</td></tr>
       </table>
       <div class="callout info">

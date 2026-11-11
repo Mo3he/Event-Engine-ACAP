@@ -333,7 +333,7 @@ Fires when a matching MQTT message is received (requires MQTT to be configured a
 | `topic_filter` | string | MQTT topic filter. Supports `+` (single-level) and `#` (multi-level) wildcards. |
 | `payload_filter` | string | Optional substring that must appear in the payload |
 
-The entire MQTT payload is available as trigger data. If the payload is JSON, individual fields are accessible as `{{trigger.KEY}}`.
+The message is available as `{{trigger.topic}}` and `{{trigger.payload}}`. If the payload is a JSON object, its top-level fields are also accessible as `{{trigger.KEY}}` (they never replace `type`, `topic` or `payload`).
 
 ### 5. `io_input` — I/O Input
 
@@ -863,6 +863,33 @@ For supported devices (e.g. Axis siren-strobe units).
 |-------|------|-------------|
 | `event_id` | string | Event ID: `"RuleFired"`, `"RuleError"`, `"EngineReady"`, or custom |
 | `state` | boolean | For stateful events: `true` = High, `false` = Low. Omit for pulse events. |
+| `data` | object | For events declared with data fields: field name → value. Values are text or templates (`{{trigger.KEY}}`, `{{var.NAME}}`, ...) and are converted to the field's declared type (`string`, `int`, `double`, `bool`). Missing or empty values send `""` / `0` / `false`; a value that is not valid for its type fails the action. |
+
+Custom events with data fields are created with `POST /local/acap_event_engine/acapevents`:
+
+```json
+{
+  "id": "PlateSeen",
+  "name": "Plate seen",
+  "state": false,
+  "data": [
+    { "name": "plate", "type": "string" },
+    { "name": "count", "type": "int" }
+  ]
+}
+```
+
+Then pass values on, e.g. from an MQTT message `{"plate":"ABC123","count":3}`:
+
+```json
+{
+  "type": "fire_vapix_event",
+  "event_id": "PlateSeen",
+  "data": { "plate": "{{trigger.plate}}", "count": "{{trigger.count}}" }
+}
+```
+
+A VMS or another ACAP application subscribed to `CameraApplicationPlatform/acap_event_engine/PlateSeen` receives `plate` as a string and `count` as an integer.
 
 ### 11. `delay` — Pause
 

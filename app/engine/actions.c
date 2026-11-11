@@ -2631,11 +2631,29 @@ static void action_paging_console_button(cJSON* cfg) {
 }
 
 /* fire_vapix_event */
-static void action_fire_vapix_event(cJSON* cfg) {
+static void action_fire_vapix_event(cJSON* cfg, cJSON* trigger_data) {
     const char* id = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "event_id"));
     if (!id || !*id) { LOG_ACTION_ERR("fire_vapix_event: no event_id specified"); return; }
     cJSON* state = cJSON_GetObjectItem(cfg, "state");
     int ok;
+    if (ACAP_EVENTS_Data_Field_Count(id) > 0) {
+        /* Event declared with data fields: expand each field's template and
+         * send it as the field's declared type. */
+        cJSON* values = cJSON_CreateObject();
+        cJSON* item;
+        cJSON_ArrayForEach(item, cJSON_GetObjectItem(cfg, "data")) {
+            const char* tmpl = cJSON_GetStringValue(item);
+            if (!item->string || !tmpl) continue;
+            char* v = Actions_Expand_Template(tmpl, trigger_data);
+            cJSON_AddStringToObject(values, item->string, v ? v : "");
+            free(v);
+        }
+        char err[256];
+        ok = ACAP_EVENTS_Fire_Values(id, values, state ? (cJSON_IsTrue(state) ? 1 : 0) : -1, err, sizeof(err));
+        cJSON_Delete(values);
+        if (!ok) LOG_ACTION_ERR("fire_vapix_event: %s", err);
+        return;
+    }
     if (state) {
         ok = ACAP_EVENTS_Fire_State(id, cJSON_IsTrue(state) ? 1 : 0);
     } else {
@@ -4137,7 +4155,7 @@ static void execute_from_ex(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "paging_console_button")     == 0) action_paging_console_button(action);
         else if (strcmp(type, "siren_light")               == 0) action_siren_light(rule_id, action);
         else if (strcmp(type, "send_syslog")       == 0) action_send_syslog(action, trigger_data);
-        else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action);
+        else if (strcmp(type, "fire_vapix_event")  == 0) action_fire_vapix_event(action, trigger_data);
         else if (strcmp(type, "set_variable")      == 0) action_set_variable(action, trigger_data);
         else if (strcmp(type, "increment_counter") == 0) action_increment_counter(action);
         else if (strcmp(type, "mqtt_publish")      == 0) action_mqtt_publish(rule_id, action, trigger_data);
