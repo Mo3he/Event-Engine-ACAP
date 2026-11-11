@@ -22,6 +22,13 @@ in-place upgrade. Rules, settings and variables are kept.
 
 ## v1.9.21 - MQTT self-signed certificates
 
+> [!WARNING]
+> **Known issue, fixed in v1.9.22:** after upgrading, a browser that had opened
+> the app before can keep using the previous version's settings script, so
+> *Save MQTT Settings* does not save *Skip certificate verification*. Install
+> 1.9.22 instead, or do a hard refresh of the app page (Ctrl+Shift+R, or
+> Cmd+Shift+R on a Mac) before saving.
+
 Adds an option to connect to an MQTT broker over TLS without verifying its
 certificate, for brokers with self-signed or private-CA certificates
 ([#11](https://github.com/Mo3he/Event-Engine-ACAP/issues/11)).
