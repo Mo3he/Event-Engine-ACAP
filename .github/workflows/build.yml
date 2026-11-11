@@ -18,6 +18,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Check docs/help.html matches the in-app manual
         run: ./tools/sync-docs.sh --check
+      - name: Check UI assets are cache-busted with the app version
+        run: ./tools/check-cache-bust.sh
 
   sparkplug_codec:
     name: Sparkplug B codec tests

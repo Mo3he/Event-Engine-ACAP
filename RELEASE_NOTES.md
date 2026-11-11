@@ -1,5 +1,25 @@
 # Release Notes
 
+## v1.9.22 - MQTT settings fix
+
+Fixes the *Skip certificate verification* switch added in 1.9.21 not being
+saved ([#11](https://github.com/Mo3he/Event-Engine-ACAP/issues/11)).
+
+### Upgrading to 1.9.22
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### Fixes in 1.9.22
+
+- **Skip certificate verification is saved.** After upgrading to 1.9.21, a
+  browser that had opened the app before could keep running the previous
+  version's settings script, which does not know about the switch, so *Save
+  MQTT Settings* dropped it. All of the app's scripts and styles are now
+  versioned with the app version, so every upgrade loads the new ones, and CI
+  checks this. If you are on 1.9.21, a hard refresh (Ctrl+Shift+R, or
+  Cmd+Shift+R on a Mac) also works around it.
+
 ## v1.9.21 - MQTT self-signed certificates
 
 Adds an option to connect to an MQTT broker over TLS without verifying its
