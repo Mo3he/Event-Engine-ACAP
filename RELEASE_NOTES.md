@@ -1,5 +1,36 @@
 # Release Notes
 
+## v1.9.23 - MQTT over TLS stays connected
+
+Fixes MQTT over TLS, which has not worked properly since TLS support was added
+in v1.8.0: the connection dropped about five seconds after connecting and
+messages from the broker were never received
+([#11](https://github.com/Mo3he/Event-Engine-ACAP/issues/11)). Plain MQTT
+(without TLS) was not affected.
+
+### Upgrading to 1.9.23
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### Fixes in 1.9.23
+
+- **MQTT over TLS stays connected and receives messages.** OpenSSL decrypts a
+  whole TLS record at a time, so after the first byte of a packet the rest was
+  already in memory, but the client waited for more data on the network
+  instead, gave up after five seconds and reconnected. The subscription
+  acknowledgements sent right after connecting triggered this every time, so
+  *MQTT Message* triggers never fired over TLS and publishing only worked
+  between reconnects.
+- **The log says why the MQTT connection dropped**, for example
+  `disconnected from broker.example.com: connection closed by broker`.
+
+Verified on a P3288-LV against Mosquitto, over TLS and plain TCP: messages in
+both directions (single, a burst of 20, 3.5 KB, and an oversized message
+followed by a normal one), QoS 1 acknowledgements, keepalives, reconnecting
+after a broker restart and an app restart, and the Sparkplug birth. The same
+test fails on 1.9.22 over TLS.
+
 ## v1.9.22 - MQTT settings fix
 
 Fixes the *Skip certificate verification* switch added in 1.9.21 not being

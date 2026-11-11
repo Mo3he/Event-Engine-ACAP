@@ -402,19 +402,53 @@ static int send_all(int fd, SSL* ssl, const uint8_t* data, int len) {
     return sent;
 }
 
+/* Why the last recv_exact() failed; only the worker thread receives. */
+static char recv_err[128] = "";
+
 /* recv exactly n bytes with timeout — returns n on success, -1 on error/timeout */
 static int recv_exact(int fd, SSL* ssl, uint8_t* buf, int n, int timeout_sec) {
     int received = 0;
     while (received < n) {
-        fd_set fds;
-        FD_ZERO(&fds); FD_SET(fd, &fds);
-        struct timeval tv = { timeout_sec, 0 };
-        int r = select(fd + 1, &fds, NULL, NULL, &tv);
-        if (r <= 0) return -1;
-        int got = ssl
-            ? SSL_read(ssl, buf + received, n - received)
-            : (int)recv(fd, buf + received, (size_t)(n - received), 0);
-        if (got <= 0) return -1;
+        /* OpenSSL reads whole TLS records, so the rest of a packet may already
+         * be buffered in ssl with nothing left on the socket for select(). */
+        if (!ssl || SSL_pending(ssl) <= 0) {
+            fd_set fds;
+            FD_ZERO(&fds); FD_SET(fd, &fds);
+            struct timeval tv = { timeout_sec, 0 };
+            int r = select(fd + 1, &fds, NULL, NULL, &tv);
+            if (r <= 0) {
+                if (r == 0) snprintf(recv_err, sizeof(recv_err), "no data for %ds mid-packet", timeout_sec);
+                else snprintf(recv_err, sizeof(recv_err), "select failed: %s", strerror(errno));
+                return -1;
+            }
+        }
+        int got;
+        if (ssl) {
+            ERR_clear_error();
+            errno = 0;
+            got = SSL_read(ssl, buf + received, n - received);
+            if (got <= 0) {
+                int e = SSL_get_error(ssl, got);
+                unsigned long q = ERR_peek_error();
+                char detail[96] = "";
+                if (q) ERR_error_string_n(q, detail, sizeof(detail));
+                if (e == SSL_ERROR_ZERO_RETURN)
+                    snprintf(recv_err, sizeof(recv_err), "broker closed the TLS session");
+                else if (e == SSL_ERROR_SYSCALL && !q)
+                    snprintf(recv_err, sizeof(recv_err), "connection closed by broker (%s)",
+                             errno ? strerror(errno) : "EOF");
+                else
+                    snprintf(recv_err, sizeof(recv_err), "TLS read error %d %s", e, detail);
+                return -1;
+            }
+        } else {
+            got = (int)recv(fd, buf + received, (size_t)(n - received), 0);
+            if (got <= 0) {
+                if (got == 0) snprintf(recv_err, sizeof(recv_err), "connection closed by broker");
+                else snprintf(recv_err, sizeof(recv_err), "read error: %s", strerror(errno));
+                return -1;
+            }
+        }
         received += got;
     }
     return received;
@@ -826,6 +860,7 @@ static void* worker_fn(void* arg) {
         time_t last_ping = time(NULL);
         int keepalive = active.keepalive > 0 ? active.keepalive : 60;
         int forced_reconnect = 0;
+        recv_err[0] = '\0';
 
         /* Receive loop */
         while (1) {
@@ -835,7 +870,10 @@ static void* worker_fn(void* arg) {
             if (wake_pipe[0] >= 0) FD_SET(wake_pipe[0], &rfds);
             int maxfd = fd > shutdown_pipe[0] ? fd : shutdown_pipe[0];
             if (wake_pipe[0] > maxfd) maxfd = wake_pipe[0];
-            struct timeval tv = { 1, 0 };
+            /* Packets already decrypted into ssl's buffer never show up on the
+             * socket, so don't wait for it and read them straight away. */
+            int ssl_buffered = ssl && SSL_pending(ssl) > 0;
+            struct timeval tv = { ssl_buffered ? 0 : 1, 0 };
             int r = select(maxfd + 1, &rfds, NULL, NULL, &tv);
 
             if (FD_ISSET(shutdown_pipe[0], &rfds)) goto cleanup;
@@ -858,7 +896,7 @@ static void* worker_fn(void* arg) {
             inflight_retransmit(fd, ssl);
             pthread_mutex_unlock(&send_lock);
 
-            if (r <= 0 || !FD_ISSET(fd, &rfds)) continue;
+            if (!ssl_buffered && (r <= 0 || !FD_ISSET(fd, &rfds))) continue;
 
             uint8_t fhdr;
             if (recv_exact(fd, ssl, &fhdr, 1, RECV_TIMEOUT_SEC) != 1) break;
@@ -911,7 +949,7 @@ static void* worker_fn(void* arg) {
             break;
         }
 
-        LOG_WARN("disconnected from %s", active_host);
+        LOG_WARN("disconnected from %s%s%s", active_host, recv_err[0] ? ": " : "", recv_err);
         pthread_mutex_lock(&send_lock);
         if (sockfd == fd) {
             sockfd = -1;
