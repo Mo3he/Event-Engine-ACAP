@@ -1268,24 +1268,31 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
 
       <!-- ═══════════════════════════════════════════ EVENT LOG -->
       <h2 id="event-log">Event Log</h2>
-      <p>The <strong>Event Log</strong> tab shows the most recent rule firings. Each entry includes:</p>
+      <p>The <strong>Event Log</strong> tab shows the most recent rule firings and Event Engine's own system messages. Each entry includes:</p>
       <ul>
-        <li><strong>Time</strong> — exact timestamp of firing</li>
-        <li><strong>Rule</strong> — which rule fired</li>
-        <li><strong>Result</strong> — success or error code</li>
-        <li><strong>Details</strong> — additional context (trigger data, error message)</li>
+        <li><strong>Time</strong> — local time with milliseconds</li>
+        <li><strong>Rule / Source</strong> — which rule fired, or for a system message where it came from (e.g. <em>MQTT</em>, <em>Engine</em>, <em>Variables</em>, <em>Device API</em>)</li>
+        <li><strong>Result</strong> — fired or why it was blocked; for system messages <em>Info</em>, <em>Warning</em> or <em>Error</em></li>
+        <li><strong>Details</strong> — trigger data and action errors, or the system message</li>
       </ul>
-      <p>Use the rule filter dropdown to scope the log to a single rule. Click <strong>Refresh</strong> to reload. Click <strong>Clear</strong> to empty the log.</p>
+      <p><strong>System messages</strong> include:</p>
+      <ul>
+        <li>Event Engine's own MQTT connection: <em>Connected to broker:8883 with TLS</em>, and disconnects with the reason (e.g. <em>connection closed by broker</em>). This is Event Engine's client, separate from the device's built-in MQTT client.</li>
+        <li>Startup: the Event Engine version, and the variables loaded from file (and those reset because they are volatile).</li>
+        <li>Warnings and errors that previously only appeared in the app log, such as TLS errors (<em>SSL_connect failed: ... certificate verify failed</em>).</li>
+      </ul>
+      <p>A message that repeats within 10 minutes is shown once with a count (×N) and the time of the latest repeat, and at most 20 new system messages are added per minute, so a failing connection cannot push everything else out of the log. The app log (<em>System → Logs</em> on the device) still has every line.</p>
+      <p>Use the filter dropdown to show <em>Everything</em>, <em>Rules only</em>, <em>System messages</em> or a single rule. Click <strong>Refresh</strong> to reload. Click <strong>Clear</strong> to empty the log.</p>
 
       <!-- ═══════════════════════════════════════════ VARIABLES TAB -->
       <h2 id="variables-tab">Variables Tab</h2>
       <p>The <strong>Variables</strong> tab shows all named variables and counters currently stored on the camera. You can:</p>
       <ul>
         <li>View the current value of any variable or counter</li>
-        <li>Edit a variable value directly</li>
+        <li>Choose what happens on restart: <strong>Keep value</strong> (the default) or <strong>Reset to</strong> a value you enter</li>
         <li>Delete a variable or counter</li>
       </ul>
-      <p>Variables are persistent — they survive ACAP restarts and in-place updates.</p>
+      <p>By default variables are persistent: they keep their value across restarts and in-place updates. A variable set to <strong>Reset to</strong> is volatile: every time Event Engine starts it begins at that value (empty, or 0 for a counter, if left blank), which suits states such as "door open" that should not survive a restart. The Event Log lists the values loaded at startup.</p>
 
       <!-- ═══════════════════════════════════════════ BACKUP -->
       <h2 id="backup-restore">Backup &amp; Restore</h2>

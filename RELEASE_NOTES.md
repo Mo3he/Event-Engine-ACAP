@@ -1,11 +1,14 @@
 # Release Notes
 
-## v1.9.24 - Axis events with values
+## v1.9.24 - Axis events with values, system messages in the Event Log
 
 The *Fire ACAP Event* action can now send values with an event, for example a
 plate number and a count from an MQTT message, so a VMS or another
 application receives them as a typed Axis event
-([#13](https://github.com/Mo3he/Event-Engine-ACAP/issues/13)). Also stops a
+([#13](https://github.com/Mo3he/Event-Engine-ACAP/issues/13)). The Event Log
+now also shows Event Engine's own MQTT connection, startup and warnings, with
+millisecond timestamps, and variables can be set to reset on restart
+([#12](https://github.com/Mo3he/Event-Engine-ACAP/issues/12)). Also stops a
 log line appearing every time the rule editor opens on devices without AXIS
 Object Analytics ([#14](https://github.com/Mo3he/Event-Engine-ACAP/issues/14)).
 
@@ -24,6 +27,24 @@ in-place upgrade. Rules, settings and variables are kept.
   value as its declared type. A value that is not a valid number or boolean
   fails the action with an error in the event log instead of sending a wrong
   value. In the API, the action takes a `data` object (field name → value).
+- **System messages in the Event Log.** Besides rule entries, the Event Log
+  shows Event Engine's own status: its MQTT connection (*Connected to
+  broker:8883 with TLS*, and disconnects with the reason; this is Event
+  Engine's client, not the device's built-in MQTT client), the version at
+  startup with the variables loaded from file, and warnings and errors that
+  were only in the app log before, such as TLS errors. A message repeated
+  within 10 minutes is shown once with a count, and at most 20 new system
+  messages are added per minute, so they never crowd out rule entries (they
+  are kept separately, 200 of them). Filter with *Everything*, *Rules only*
+  or *System messages*. In the API: `GET /events?system=1` or `?system=only`;
+  without it, `/events` returns rule entries as before.
+- **Millisecond timestamps** in the Event Log and its CSV export. API
+  timestamps stay epoch seconds, now with three decimals.
+- **Volatile variables.** In the *Variables* tab, choose *Keep value* (the
+  default, as before) or *Reset to* a value for each variable. A volatile
+  variable starts at that value every time Event Engine starts. In the API:
+  `"persistent": false` and `"initial"` on `POST /variables`, and
+  `GET /variables?detail=1`.
 
 ### Changes in 1.9.24
 

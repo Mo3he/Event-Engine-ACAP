@@ -92,10 +92,12 @@ if (typeof API === 'undefined') {
     fireRule:      id      => API.post('fire', { id }),
     testAction:    (type, config) => API.post('actions', { type, config }),
 
-    getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + encodeURIComponent(rule) : ''}`),
+    getEvents:     (limit, rule, system) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + encodeURIComponent(rule) : ''}${system ? '&system=' + system : ''}`),
     clearEvents:   ()      => API.delete('events'),
     getStatus:     ()      => API.get('engine'),
     getVariables:  ()      => API.get('variables'),
+    getVariablesDetail: () => API.get('variables?detail=1'),
+    setVariableOptions: (name, opts) => API.post('variables', { name, ...opts }),
     setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
     deleteVariable: name   => API.delete(`variables?name=${encodeURIComponent(name)}`),
 
@@ -1280,7 +1282,12 @@ async function loadEvents() {
   const timeEl = document.getElementById('log-time-filter');
   const since = timeEl && timeEl.value ? Math.floor(Date.now() / 1000) - parseInt(timeEl.value) : 0;
   try {
-    let events = await API.getEvents(500, rule);
+    /* "" = everything, "__rules__" = rule entries only, "__system__" = system
+     * messages only, otherwise one rule's entries. */
+    let events = rule === '__system__' ? await API.getEvents(500, '', 'only')
+               : rule === '__rules__'  ? await API.getEvents(500, '')
+               : rule                  ? await API.getEvents(500, rule)
+               :                         await API.getEvents(500, '', '1');
     if (since) events = events.filter(e => e.timestamp >= since);
     lastLoadedEvents = events;
     renderEventLog(events);
@@ -1298,18 +1305,32 @@ function toggleLiveTail(on) {
   }
 }
 
+/* Local time with milliseconds, e.g. "14:03:07.215 Nov 11". */
+function fmtLogTime(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleTimeString([], { hour12: false }) + '.' + String(d.getMilliseconds()).padStart(3, '0') + ' ' +
+         d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+const LOG_SOURCE_NAMES = { mqtt: 'MQTT', engine: 'Engine', variables: 'Variables', acap: 'Device API', system: 'Event Log',
+  actions: 'Actions', conditions: 'Conditions', triggers: 'Triggers', rule_engine: 'Rule engine', scheduler: 'Scheduler',
+  sparkplug: 'Sparkplug', modbus_pool: 'Modbus', alert_stream: 'Alert stream' };
+
 /* ===== CSV Export ===== */
 function exportLogCSV() {
   if (!lastLoadedEvents.length) { toast('No events to export', 'warning'); return; }
-  const rows = [['Time', 'Rule', 'Fired', 'Error', 'Details']];
+  const rows = [['Time', 'Kind', 'Rule / Source', 'Result', 'Error', 'Details']];
   for (const e of lastLoadedEvents) {
-    const d = new Date(e.timestamp * 1000);
-    const time = d.toISOString();
+    const time = new Date(e.timestamp * 1000).toISOString();
+    if (e.kind === 'system') {
+      rows.push([time, 'system', e.source || '', e.level || '', '',
+                 e.message + (e.repeats > 1 ? ` (x${e.repeats}, last ${new Date(e.last_timestamp * 1000).toISOString()})` : '')]);
+      continue;
+    }
     const ruleName = e.rule_name || e.rule_id || '';
-    const fired = e.fired ? 'Yes' : 'No';
+    const fired = e.fired ? 'Fired' : (e.block_reason || 'Blocked');
     const error = e.action_error || '';
     const details = e.trigger_data ? JSON.stringify(e.trigger_data) : '';
-    rows.push([time, ruleName, fired, error, details]);
+    rows.push([time, 'rule', ruleName, fired, error, details]);
   }
   const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
@@ -1345,9 +1366,18 @@ function renderEventLog(events) {
 
   events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
   tbody.innerHTML = events.map((e) => {
-    const d = new Date(e.timestamp * 1000);
-    const time = d.toLocaleTimeString([], { hour12: false }) + ' ' +
-                 d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    const time = fmtLogTime(e.timestamp);
+    if (e.kind === 'system') {
+      const lvl = ['error', 'warning'].includes(e.level) ? e.level : 'info';
+      const label = { error: 'Error', warning: 'Warning', info: 'Info' }[lvl];
+      const repeats = e.repeats > 1 ? ` <span style="color:var(--text-muted)">×${e.repeats}, last ${escHtml(fmtLogTime(e.last_timestamp))}</span>` : '';
+      return `<tr class="log-system-row">
+        <td style="white-space:nowrap;color:var(--text-muted)">${time}</td>
+        <td><span style="color:var(--text-muted)">${escHtml(LOG_SOURCE_NAMES[e.source] || e.source || 'System')}</span></td>
+        <td><span class="badge event-badge-${lvl}">${label}</span></td>
+        <td><code style="font-size:11px;white-space:pre-wrap;word-break:break-word;color:${lvl === 'info' ? 'var(--text-muted)' : 'var(--error,#f87171)'}">${escHtml(e.message || '')}</code>${repeats}</td>
+      </tr>`;
+    }
     const badge = e.fired
       ? '<span class="badge event-badge-fired">Fired</span>'
       : `<span class="badge event-badge-blocked">${escHtml(e.block_reason || 'Blocked')}</span>`;
@@ -1392,7 +1422,9 @@ function updateLogFilter() {
   const sel = document.getElementById('log-rule-filter');
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = '<option value="">All Rules</option>' +
+  sel.innerHTML = '<option value="">Everything</option>' +
+    `<option value="__rules__" ${cur === '__rules__' ? 'selected' : ''}>Rules only</option>` +
+    `<option value="__system__" ${cur === '__system__' ? 'selected' : ''}>System messages</option>` +
     allRules.map(r => `<option value="${escHtml(r.id)}" ${cur === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('');
 }
 
@@ -1401,7 +1433,7 @@ function updateLogFilter() {
  * =================================================== */
 async function loadVariables() {
   try {
-    const vars = await API.getVariables();
+    const vars = await API.getVariablesDetail();
     renderVariables(vars);
   } catch(e) {
     toast('Failed to load variables', 'error');
@@ -1410,20 +1442,49 @@ async function loadVariables() {
 
 function renderVariables(vars) {
   const tbody = document.getElementById('variables-body');
-  const keys = Object.keys(vars);
-  if (!keys.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;padding:30px;color:var(--text-muted);">No variables set</td></tr>';
+  if (!Array.isArray(vars) || !vars.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted);">No variables set</td></tr>';
     return;
   }
-  tbody.innerHTML = keys.map(k => `
-    <tr>
-      <td><code>${escHtml(k)}</code></td>
-      <td class="var-value-cell">${escHtml(String(vars[k]))}</td>
+  tbody.innerHTML = vars.map(v => `
+    <tr data-var="${escHtml(v.name)}">
+      <td><code>${escHtml(v.name)}</code>${v.is_counter ? ' <span style="color:var(--text-muted);font-size:11px;">counter</span>' : ''}</td>
+      <td class="var-value-cell">${escHtml(String(v.value))}</td>
+      <td style="white-space:nowrap;">
+        <select class="var-persist" onchange="setVariablePersistence(${escJsArg(v.name)}, this)" title="What happens to this value when Event Engine restarts">
+          <option value="keep" ${v.persistent ? 'selected' : ''}>Keep value</option>
+          <option value="reset" ${v.persistent ? '' : 'selected'}>Reset to</option>
+        </select>
+        <input type="text" class="var-initial" value="${escHtml(v.initial || '')}" placeholder="${v.is_counter ? '0' : 'empty'}"
+               style="width:90px;${v.persistent ? 'display:none;' : ''}"
+               onchange="setVariableInitial(${escJsArg(v.name)}, this.value)" title="Value after a restart">
+      </td>
       <td style="text-align:right;">
-        <button class="btn btn-ghost btn-sm" onclick="deleteVariable(${escJsArg(k)})">Delete</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteVariable(${escJsArg(v.name)})">Delete</button>
       </td>
     </tr>
   `).join('');
+}
+
+async function setVariablePersistence(name, sel) {
+  const persistent = sel.value === 'keep';
+  const input = sel.parentElement.querySelector('.var-initial');
+  if (input) input.style.display = persistent ? 'none' : '';
+  try {
+    await API.setVariableOptions(name, persistent ? { persistent } : { persistent, initial: input ? input.value : '' });
+    toast(persistent ? `"${name}" keeps its value on restart` : `"${name}" resets on restart`, 'success');
+  } catch(e) {
+    toast('Failed: ' + e.message, 'error');
+  }
+}
+
+async function setVariableInitial(name, initial) {
+  try {
+    await API.setVariableOptions(name, { initial });
+    toast(`"${name}" resets to "${initial}" on restart`, 'success');
+  } catch(e) {
+    toast('Failed: ' + e.message, 'error');
+  }
 }
 
 async function deleteVariable(name) {

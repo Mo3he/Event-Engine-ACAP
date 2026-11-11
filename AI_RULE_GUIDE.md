@@ -57,9 +57,9 @@ HTTP Digest Auth (admin credentials). With curl, use `-u root:pass --anyauth`.
 | `GET` | `/rules?action=export` | Export all rules as JSON |
 | `POST` | `/fire` | Fire a rule: `{"id":"UUID"}` or webhook: `{"token":"...", "payload":{...}}` |
 | `GET` | `/engine` | Get engine status (uptime, rule counts, MQTT status, device info) |
-| `GET` | `/events` | Get event log (optional `?limit=N&rule=UUID`) |
-| `GET` | `/variables` | List all variables and counters |
-| `POST` | `/variables` | Set a variable: `{"name":"x","value":"y"}` or counter: `{"name":"x","value":"0","is_counter":true}` |
+| `GET` | `/events` | Get event log (optional `?limit=N&rule=UUID`; `&system=1` adds system messages, `&system=only` returns only them). Timestamps are epoch seconds with milliseconds |
+| `GET` | `/variables` | List all variables and counters (`?detail=1`: array with `persistent` and `initial` per variable) |
+| `POST` | `/variables` | Set a variable: `{"name":"x","value":"y"}` or counter: `{"name":"x","value":"0","is_counter":true}`. Optional `"persistent": false` makes it volatile (reset to `"initial"` at every start); `{"name":"x","persistent":false,"initial":"0"}` changes only that |
 | `DELETE` | `/variables?name=x` | Delete a variable/counter |
 | `GET` | `/settings` | Get current settings |
 | `POST` | `/settings` | Update settings (partial update supported) |

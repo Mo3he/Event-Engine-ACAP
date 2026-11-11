@@ -37,10 +37,12 @@ const API = {
   fireRule:      id      => API.post('fire', { id }),
   testAction:    (type, config) => API.post('actions', { type, config }),
 
-  getEvents:     (limit, rule) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + rule : ''}`),
+  getEvents:     (limit, rule, system) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + encodeURIComponent(rule) : ''}${system ? '&system=' + system : ''}`),
   clearEvents:   ()      => API.delete('events'),
   getStatus:     ()      => API.get('engine'),
   getVariables:  ()      => API.get('variables'),
+  getVariablesDetail: () => API.get('variables?detail=1'),
+  setVariableOptions: (name, opts) => API.post('variables', { name, ...opts }),
   setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
   deleteVariable: name   => API.delete(`variables?name=${encodeURIComponent(name)}`),
 

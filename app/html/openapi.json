@@ -1272,15 +1272,22 @@
 
       "EventLogEntry": {
         "type": "object",
+        "description": "A rule entry (kind=rule) or a system message (kind=system).",
         "properties": {
-          "ts":        { "type": "string", "format": "date-time" },
-          "rule_id":   { "type": "string", "format": "uuid" },
-          "rule_name": { "type": "string" },
-          "result": {
-            "type": "string",
-            "enum": ["ok", "condition_failed", "error", "cooldown", "max_executions", "trigger_and_pending"]
-          },
-          "detail": { "type": "string" }
+          "kind":           { "type": "string", "enum": ["rule", "system"] },
+          "timestamp":      { "type": "number", "description": "Epoch seconds with millisecond resolution", "example": 1794408099.123 },
+          "rule_id":        { "type": "string", "description": "kind=rule" },
+          "rule_name":      { "type": "string", "description": "kind=rule" },
+          "fired":          { "type": "boolean", "description": "kind=rule" },
+          "block_reason":   { "type": "string", "description": "kind=rule, when not fired: condition, cooldown, max_executions, trigger_and_pending, manual" },
+          "trigger_data":   { "type": "object", "description": "kind=rule" },
+          "actions_failed": { "type": "integer", "description": "kind=rule" },
+          "action_error":   { "type": "string", "description": "kind=rule" },
+          "source":         { "type": "string", "description": "kind=system: mqtt, engine, variables, acap, actions, ...", "example": "mqtt" },
+          "level":          { "type": "string", "enum": ["info", "warning", "error"], "description": "kind=system" },
+          "message":        { "type": "string", "description": "kind=system", "example": "Connected to broker.example.com:8883 with TLS" },
+          "repeats":        { "type": "integer", "description": "kind=system: how often the message occurred within 10 minutes (only when > 1)" },
+          "last_timestamp": { "type": "number", "description": "kind=system: time of the latest repeat (only when repeats > 1)" }
         }
       },
 
@@ -1677,6 +1684,14 @@
         "summary": "List all variables and counters",
         "operationId": "listVariables",
         "tags": ["Variables"],
+        "parameters": [
+          {
+            "name": "detail",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["1"] },
+            "description": "Return an array of {name, value, is_counter, persistent, initial} instead of a name-to-value map"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Map of variable/counter names to their objects",
@@ -1705,7 +1720,9 @@
                 "properties": {
                   "name":       { "type": "string", "example": "system.armed" },
                   "value":      { "type": "string", "example": "true" },
-                  "is_counter": { "type": "boolean", "default": false }
+                  "is_counter": { "type": "boolean", "default": false },
+                  "persistent": { "type": "boolean", "default": true, "description": "false: volatile, reset to 'initial' every time Event Engine starts" },
+                  "initial":    { "type": "string", "description": "Value a volatile variable starts at (empty, or 0 for a counter, if omitted)" }
                 }
               }
             }
@@ -1752,6 +1769,12 @@
             "in": "query",
             "schema": { "type": "string", "format": "uuid" },
             "description": "Filter entries to a specific rule ID"
+          },
+          {
+            "name": "system",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["1", "only"] },
+            "description": "1: include system messages (MQTT connection, startup, warnings) with the rule entries; only: return only system messages. Omitted: rule entries only."
           }
         ],
         "responses": {

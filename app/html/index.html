@@ -95,7 +95,9 @@
         <h2 style="font-size:15px;">Event Log</h2>
         <div style="display:flex;gap:8px;align-items:center;">
           <select id="log-rule-filter" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
-            <option value="">All Rules</option>
+            <option value="">Everything</option>
+            <option value="__rules__">Rules only</option>
+            <option value="__system__">System messages</option>
           </select>
           <select id="log-time-filter" onchange="loadEvents()" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
             <option value="" selected>All Time</option>
@@ -116,7 +118,7 @@
           <thead>
             <tr>
               <th>Time</th>
-              <th>Rule</th>
+              <th>Rule / Source</th>
               <th>Result</th>
               <th>Details</th>
             </tr>
@@ -139,10 +141,10 @@
       <div class="card" style="padding:0;overflow:hidden;">
         <table class="var-table">
           <thead>
-            <tr><th>Name</th><th>Value</th><th></th></tr>
+            <tr><th>Name</th><th>Value</th><th>On restart</th><th></th></tr>
           </thead>
           <tbody id="variables-body">
-            <tr><td colspan="3" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
+            <tr><td colspan="4" style="text-align:center;padding:30px;color:var(--text-muted);">Loading...</td></tr>
           </tbody>
         </table>
       </div>

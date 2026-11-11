@@ -33,7 +33,8 @@
  * Logging macros
  *-----------------------------------------------------*/
 #define LOG(fmt, args...)       { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args); }
-#define LOG_WARN(fmt, args...)  { syslog(LOG_WARNING, fmt, ## args); printf(fmt, ## args); }
+static void acap_warning_hook(const char* fmt, ...) __attribute__((format(__printf__, 1, 2)));
+#define LOG_WARN(fmt, args...)  { syslog(LOG_WARNING, fmt, ## args); printf(fmt, ## args); acap_warning_hook(fmt, ## args); }
 //#define LOG_TRACE(fmt, args...) { syslog(LOG_INFO, fmt, ## args); printf(fmt, ## args); }
 #define LOG_TRACE(fmt, args...) {}
 
@@ -1538,6 +1539,22 @@ int ACAP_FILE_Exists(const char* filepath) {
 /*=====================================================
  * Events System
  *=====================================================*/
+
+static void (*ACAP_WARNING_HOOK)(const char* message) = NULL;
+
+void ACAP_Set_Warning_Hook(void (*hook)(const char* message)) {
+    ACAP_WARNING_HOOK = hook;
+}
+
+static void acap_warning_hook(const char* fmt, ...) {
+    if (!ACAP_WARNING_HOOK) return;
+    char msg[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    ACAP_WARNING_HOOK(msg);
+}
 
 static ACAP_EVENTS_Callback EVENT_USER_CALLBACK = NULL;
 static void ACAP_EVENTS_Main_Callback(guint subscription, AXEvent* event, gpointer user_data);

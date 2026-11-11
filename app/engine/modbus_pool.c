@@ -32,10 +32,11 @@ __asm__(".symver cfsetispeed,cfsetispeed@GLIBC_2.4");
 __asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.4");
 #endif
 
+#include "event_log.h"
 #include "modbus_pool.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "modbus_pool: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "modbus_pool: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "modbus_pool", fmt, ## args)
 
 #define POOL_MAX        16
 #define MB_TIMEOUT_S     2   /* TCP socket timeout */

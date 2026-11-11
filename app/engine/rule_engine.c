@@ -18,7 +18,7 @@
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "rule_engine: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "rule_engine: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "rule_engine", fmt, ## args)
 
 #define MAX_RULES 256
 #define MAX_TRIGGERS_PER_RULE 16

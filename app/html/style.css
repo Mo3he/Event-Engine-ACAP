@@ -264,6 +264,11 @@ header .subtitle {
 .event-blocked { color: var(--text-muted); }
 .event-badge-fired   { background: #1e3928; color: var(--accent-success); }
 .event-badge-blocked { background: #f3f4f6; color: var(--text-muted); border-color: #e5e7eb; }
+.event-badge-info    { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.event-badge-warning { background: #3a2f12; color: #f5b942; border-color: #5a4a1c; }
+.event-badge-error   { background: #3a1616; color: #f87171; border-color: #5c2222; }
+[data-theme="light"] .event-badge-warning { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+[data-theme="light"] .event-badge-error   { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
 [data-theme="light"] .event-badge-fired { background: #eaf6ef; color: #1f6a3f; border-color: #d4ebdd; }
 [data-theme="light"] .event-badge-fired { background: #dcfce7; }
 [data-theme="dark"] .event-badge-fired { background: #1f3d2b; color: #9ee5b5; border-color: #2f5c42; }

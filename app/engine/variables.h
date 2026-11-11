@@ -21,6 +21,14 @@ char*         Variables_Get(const char* name);          /* caller must free() th
 int           Variables_Delete(const char* name);
 int           Variables_Compare(const char* name, const char* op, const char* value);
 cJSON*        Variables_List(void);                     /* caller must cJSON_Delete */
+/* [{name, value, is_counter, persistent, initial}] — caller must cJSON_Delete */
+cJSON*        Variables_List_Detail(void);
+/* persistent: 1 keep across restarts, 0 volatile (reset to initial at startup),
+ * -1 unchanged. initial: value a volatile variable resets to (NULL unchanged).
+ * Creates the variable at its initial value if it does not exist. */
+int           Variables_Set_Options(const char* name, int persistent, const char* initial);
+/* One-line description of what was loaded (and reset) at startup. */
+void          Variables_Startup_Summary(char* buf, size_t size);
 
 /* Numeric counters */
 int           Counter_Set(const char* name, double value);

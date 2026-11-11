@@ -5,11 +5,12 @@
 #include <math.h>
 #include <syslog.h>
 
+#include "event_log.h"
 #include "scheduler.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "scheduler: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "scheduler: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "scheduler", fmt, ## args)
 
 #define MAX_SCHEDULES 256
 #define SCHED_CRON          0

@@ -23,7 +23,7 @@
 #define APP_PACKAGE "acap_event_engine"
 
 #define LOG(fmt, args...)      { syslog(LOG_INFO,    fmt, ## args); printf(fmt "\n", ## args); }
-#define LOG_WARN(fmt, args...) { syslog(LOG_WARNING, fmt, ## args); printf("WARN: " fmt "\n", ## args); }
+#define LOG_WARN(fmt, args...) { EventLog_Syslog(LOG_WARNING, "", fmt, ## args); printf("WARN: " fmt "\n", ## args); }
 
 static GMainLoop* main_loop = NULL;
 
@@ -377,6 +377,10 @@ static void apply_smtp_config(cJSON* smtp_json) {
     }
     /* Reload so in-memory config has the password for action_email() */
     load_smtp_password();
+}
+
+static void acap_warning_to_log(const char* message) {
+    EventLog_System("acap", "warning", "%s", message);
 }
 
 static void Settings_Updated(const char* service, cJSON* data) {
@@ -991,8 +995,29 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
     ACAP_HTTP_Respond_Error(resp, 405, "Method not allowed");
 }
 
+/* Merge two newest-first arrays into one newest-first array of at most limit
+ * entries. Takes ownership of both. */
+static cJSON* merge_newest_first(cJSON* a, cJSON* b, int limit) {
+    cJSON* out = cJSON_CreateArray();
+    cJSON* x = a ? a->child : NULL;
+    cJSON* y = b ? b->child : NULL;
+    for (int n = 0; (x || y) && n < limit; n++) {
+        double tx = x ? cJSON_GetObjectItem(x, "timestamp")->valuedouble : -1;
+        double ty = y ? cJSON_GetObjectItem(y, "timestamp")->valuedouble : -1;
+        cJSON* pick = (x && (!y || tx >= ty)) ? x : y;
+        if (pick == x) x = x->next; else y = y->next;
+        cJSON_AddItemToArray(out, cJSON_Duplicate(pick, 1));
+    }
+    cJSON_Delete(a);
+    cJSON_Delete(b);
+    return out;
+}
+
 /*=====================================================
  * GET/DELETE /local/acap_event_engine/events
+ *   ?rule=ID      entries of one rule
+ *   ?system=1     rule and system entries, newest first
+ *   ?system=only  system entries only
  *=====================================================*/
 static void HTTP_Events(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     const char* method = get_method(req);
@@ -1013,9 +1038,17 @@ static void HTTP_Events(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     if (limit <= 0 || limit > EVENT_LOG_SIZE) limit = 50;
 
     char* rule_id = ACAP_HTTP_Request_Param(req, "rule");
+    char* system = ACAP_HTTP_Request_Param(req, "system");
+    int with_system = system && *system && strcmp(system, "0") != 0;
+    int system_only = system && strcmp(system, "only") == 0;
+    free(system);
     cJSON* result;
     if (rule_id && *rule_id) {
         result = EventLog_Get_For_Rule(rule_id, limit);
+    } else if (system_only) {
+        result = EventLog_Get_System(limit);
+    } else if (with_system) {
+        result = merge_newest_first(EventLog_Get_Recent(limit), EventLog_Get_System(limit), limit);
     } else {
         result = EventLog_Get_Recent(limit);
     }
@@ -1673,7 +1706,9 @@ static void HTTP_Variables(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req)
     const char* method = get_method(req);
 
     if (strcmp(method, "GET") == 0) {
-        cJSON* vars = Variables_List();
+        char* detail = ACAP_HTTP_Request_Param(req, "detail");
+        cJSON* vars = (detail && *detail && strcmp(detail, "0") != 0) ? Variables_List_Detail() : Variables_List();
+        free(detail);
         ACAP_HTTP_Respond_JSON(resp, vars);
         cJSON_Delete(vars);
 
@@ -1683,7 +1718,22 @@ static void HTTP_Variables(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req)
         const char* name  = cJSON_GetStringValue(cJSON_GetObjectItem(body, "name"));
         const char* value = cJSON_GetStringValue(cJSON_GetObjectItem(body, "value"));
         cJSON* is_counter = cJSON_GetObjectItem(body, "is_counter");
-        if (!name) { cJSON_Delete(body); ACAP_HTTP_Respond_Error(resp, 400, "Missing name"); return; }
+        cJSON* persistent = cJSON_GetObjectItem(body, "persistent");
+        cJSON* initial_j  = cJSON_GetObjectItem(body, "initial");
+        if (!name || !*name) { cJSON_Delete(body); ACAP_HTTP_Respond_Error(resp, 400, "Missing name"); return; }
+        if (persistent && !cJSON_IsBool(persistent)) {
+            cJSON_Delete(body); ACAP_HTTP_Respond_Error(resp, 400, "'persistent' must be true or false"); return;
+        }
+        char initial_buf[64];
+        const char* initial = NULL;
+        if (cJSON_IsString(initial_j)) initial = initial_j->valuestring;
+        else if (cJSON_IsNumber(initial_j)) { snprintf(initial_buf, sizeof(initial_buf), "%g", initial_j->valuedouble); initial = initial_buf; }
+        else if (initial_j && !cJSON_IsNull(initial_j)) {
+            cJSON_Delete(body); ACAP_HTTP_Respond_Error(resp, 400, "'initial' must be a string or number"); return;
+        }
+        /* Options first, so a new variable created with a value keeps that value. */
+        if (persistent || initial)
+            Variables_Set_Options(name, persistent ? (cJSON_IsTrue(persistent) ? 1 : 0) : -1, initial);
         if (is_counter && cJSON_IsTrue(is_counter)) {
             double v = value ? atof(value) : 0.0;
             Counter_Set(name, v);
@@ -1735,14 +1785,24 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    /* Before anything else can log a warning, so this boot's entries follow
+     * the saved ones. */
+    EventLog_Init();
+    EventLog_Load();
+    ACAP_Set_Warning_Hook(acap_warning_to_log);
+    EventLog_System("engine", "info", "Event Engine %s started", app_version());
+
     cJSON* eng_cfg = cJSON_GetObjectItem(settings, "engine");
     if (eng_cfg) apply_proxy_config(eng_cfg);
 
     ACAP_EVENTS_SetCallback(Event_Callback);
 
     Variables_Init();
-    EventLog_Init();
-    EventLog_Load();
+    {
+        char summary[1024];
+        Variables_Startup_Summary(summary, sizeof(summary));
+        EventLog_System("variables", "info", "%s", summary);
+    }
 
     /* Sparkplug B edge node — registers the MQTT state callback that publishes
      * the birth certificate, so it must exist before the worker thread starts. */

@@ -5,6 +5,7 @@
 #include <time.h>
 #include <errno.h>
 
+#include "event_log.h"
 #include "triggers.h"
 #include "scheduler.h"
 #include "variables.h"
@@ -33,7 +34,7 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 }
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "triggers: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "triggers: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "triggers", fmt, ## args)
 
 #define MAX_SUBS 512
 #define TRIG_VAPIX_EVENT       0

@@ -6,6 +6,7 @@
 #include <syslog.h>
 #include <curl/curl.h>
 
+#include "event_log.h"
 #include "conditions.h"
 #include "variables.h"
 #include "scheduler.h"
@@ -13,7 +14,7 @@
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "conditions: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "conditions: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "conditions", fmt, ## args)
 
 static char g_socks5_proxy[256] = "";
 

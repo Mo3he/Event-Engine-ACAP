@@ -5,11 +5,12 @@
 #include <syslog.h>
 #include <math.h>
 
+#include "event_log.h"
 #include "variables.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "variables: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "variables: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "variables", fmt, ## args)
 
 #define MAX_VARS 256
 #define VAR_NAME_LEN  64
@@ -20,11 +21,14 @@ typedef struct {
     char   value[VAR_VALUE_LEN];
     double numeric;
     int    is_counter;
+    int    persistent;              /* 0 = volatile: reset to initial at startup */
+    char   initial[VAR_VALUE_LEN];
 } Variable;
 
 static Variable    store[MAX_VARS];
 static int         store_count = 0;
 static int         dirty = 0;
+static char        startup_summary[1024] = "";
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 static Variable* find_var(const char* name) {
@@ -45,6 +49,7 @@ static Variable* find_or_create(const char* name) {
     v = &store[store_count++];
     memset(v, 0, sizeof(Variable));
     snprintf(v->name, VAR_NAME_LEN, "%s", name);
+    v->persistent = 1;
     return v;
 }
 
@@ -65,11 +70,45 @@ static void load(void) {
         if (v && v->valuestring)
             snprintf(var->value, VAR_VALUE_LEN, "%s", v->valuestring);
         var->is_counter = (c && cJSON_IsTrue(c)) ? 1 : 0;
+        cJSON* p = cJSON_GetObjectItem(item, "persistent");
+        var->persistent = p ? cJSON_IsTrue(p) : 1;
+        const char* init = cJSON_GetStringValue(cJSON_GetObjectItem(item, "initial"));
+        snprintf(var->initial, VAR_VALUE_LEN, "%s", init ? init : "");
+        if (!var->persistent) {
+            if (var->is_counter && !var->initial[0]) snprintf(var->value, VAR_VALUE_LEN, "0");
+            else snprintf(var->value, VAR_VALUE_LEN, "%s", var->initial);
+        }
         if (var->is_counter)
             var->numeric = atof(var->value);
     }
     cJSON_Delete(json);
-    LOG("loaded %d variables", store_count);
+
+    /* One line for the event log: what was loaded, and what was reset. */
+    int kept = 0, reset = 0;
+    for (int i = 0; i < store_count; i++) {
+        if (store[i].persistent) kept++;
+        else reset++;
+    }
+    char* o = startup_summary;
+    size_t left = sizeof(startup_summary);
+    int w = snprintf(o, left, "Loaded %d variable(s)", store_count);
+    for (int pass = 0; pass < 2 && w > 0 && (size_t)w < left; pass++) {
+        int want_persistent = pass == 0;
+        if (!(want_persistent ? kept : reset)) continue;
+        o += w; left -= (size_t)w;
+        w = snprintf(o, left, want_persistent ? ": " : "%sreset volatile: ", kept ? "; " : ": ");
+        int first = 1;
+        for (int i = 0; i < store_count && w > 0 && (size_t)w < left; i++) {
+            if (store[i].persistent != want_persistent) continue;
+            o += w; left -= (size_t)w;
+            w = snprintf(o, left, "%s%s=%.40s", first ? "" : ", ", store[i].name, store[i].value);
+            first = 0;
+        }
+    }
+    if (w > 0 && (size_t)w >= left && sizeof(startup_summary) > 4)
+        snprintf(startup_summary + sizeof(startup_summary) - 4, 4, "...");
+    LOG("%s", startup_summary);
+    if (reset) dirty = 1;
 }
 
 static void save_locked(void) {
@@ -79,6 +118,9 @@ static void save_locked(void) {
         cJSON_AddStringToObject(obj, "name",  store[i].name);
         cJSON_AddStringToObject(obj, "value", store[i].value);
         cJSON_AddBoolToObject(obj,   "is_counter", store[i].is_counter);
+        cJSON_AddBoolToObject(obj,   "persistent", store[i].persistent);
+        if (!store[i].persistent || store[i].initial[0])
+            cJSON_AddStringToObject(obj, "initial", store[i].initial);
         cJSON_AddItemToArray(arr, obj);
     }
     ACAP_FILE_Write("localdata/variables.json", arr);
@@ -95,6 +137,47 @@ int Variables_Init(void) {
     load();
     pthread_mutex_unlock(&lock);
     return 1;
+}
+
+void Variables_Startup_Summary(char* buf, size_t size) {
+    if (!buf || !size) return;
+    pthread_mutex_lock(&lock);
+    snprintf(buf, size, "%s", startup_summary[0] ? startup_summary : "Loaded 0 variable(s)");
+    pthread_mutex_unlock(&lock);
+}
+
+int Variables_Set_Options(const char* name, int persistent, const char* initial) {
+    if (!name || !*name) return 0;
+    pthread_mutex_lock(&lock);
+    Variable* existing = find_var(name);
+    Variable* v = existing ? existing : find_or_create(name);
+    if (!v) { pthread_mutex_unlock(&lock); return 0; }
+    if (initial) snprintf(v->initial, VAR_VALUE_LEN, "%s", initial);
+    if (persistent >= 0) v->persistent = persistent ? 1 : 0;
+    if (!existing) {
+        /* A new variable starts at its initial value. */
+        snprintf(v->value, VAR_VALUE_LEN, "%s", v->initial);
+    }
+    dirty = 1;
+    pthread_mutex_unlock(&lock);
+    return 1;
+}
+
+cJSON* Variables_List_Detail(void) {
+    pthread_mutex_lock(&lock);
+    cJSON* arr = cJSON_CreateArray();
+    for (int i = 0; i < store_count; i++) {
+        cJSON* o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", store[i].name);
+        if (store[i].is_counter) cJSON_AddNumberToObject(o, "value", store[i].numeric);
+        else cJSON_AddStringToObject(o, "value", store[i].value);
+        cJSON_AddBoolToObject(o, "is_counter", store[i].is_counter);
+        cJSON_AddBoolToObject(o, "persistent", store[i].persistent);
+        cJSON_AddStringToObject(o, "initial", store[i].initial);
+        cJSON_AddItemToArray(arr, o);
+    }
+    pthread_mutex_unlock(&lock);
+    return arr;
 }
 
 void Variables_Cleanup(void) {

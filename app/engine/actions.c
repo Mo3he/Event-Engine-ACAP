@@ -19,7 +19,7 @@
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "actions: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "actions", fmt, ## args)
 
 /* LOG_ACTION_ERR: logs to syslog, writes to event log for the current rule, and
  * captures into g_action_error so the test endpoint can return it to the UI. */

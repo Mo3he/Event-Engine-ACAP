@@ -449,6 +449,12 @@ int ACAP_EVENTS_Fire_JSON(const char* Id, cJSON* data);
 int ACAP_EVENTS_Data_Field_Count(const char* Id);
 
 /**
+ * @brief Also pass every LOG_WARN message of this library to hook (e.g. to
+ * show it in the application's own log view). NULL removes the hook.
+ */
+void ACAP_Set_Warning_Hook(void (*hook)(const char* message));
+
+/**
  * @brief Fire an event declared with data fields, converting each value to
  * the field's declared type (string, int, double, bool).
  *

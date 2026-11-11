@@ -18,10 +18,11 @@
 #include <openssl/x509v3.h>
 #include <glib.h>
 
+#include "event_log.h"
 #include "mqtt_client.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "mqtt: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "mqtt: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "mqtt", fmt, ## args)
 
 /* =====================================================
  * MQTT 3.1.1 packet constants
@@ -758,6 +759,7 @@ static void* worker_fn(void* arg) {
     (void)arg;
     int reconnect_delay = RECONNECT_DELAY_MIN;
     uint8_t recv_buf[MQTT_BUF_SIZE];
+    int was_active = 0;   /* tried to connect since the last "stopped" entry */
 
     while (1) {
         fd_set check; FD_ZERO(&check); FD_SET(shutdown_pipe[0], &check);
@@ -772,9 +774,15 @@ static void* worker_fn(void* arg) {
         pthread_mutex_unlock(&cfg_lock);
 
         if (!active.enabled || !active.host[0]) {
+            if (was_active) {
+                EventLog_System("mqtt", "info", "MQTT client stopped (%s)",
+                                active.enabled ? "no broker configured" : "disabled in settings");
+                was_active = 0;
+            }
             wait_before_retry(2);
             continue;
         }
+        was_active = 1;
 
         /* Pick the broker to try. Entry 0 is the primary; the list wraps. */
         int count = active.server_count > 0 ? active.server_count : 1;
@@ -844,6 +852,7 @@ static void* worker_fn(void* arg) {
         }
 
         LOG("connected to %s:%d", cur_host, cur_port);
+        EventLog_System("mqtt", "info", "Connected to %s:%d%s", cur_host, cur_port, tls_note);
         pthread_mutex_lock(&send_lock);
         sockfd    = fd;
         ssl_conn  = ssl;
@@ -949,7 +958,12 @@ static void* worker_fn(void* arg) {
             break;
         }
 
-        LOG_WARN("disconnected from %s%s%s", active_host, recv_err[0] ? ": " : "", recv_err);
+        if (forced_reconnect) {
+            LOG("disconnected from %s: settings changed, reconnecting", active_host);
+            EventLog_System("mqtt", "info", "Disconnected from %s: settings changed, reconnecting", active_host);
+        } else {
+            LOG_WARN("disconnected from %s%s%s", active_host, recv_err[0] ? ": " : "", recv_err);
+        }
         pthread_mutex_lock(&send_lock);
         if (sockfd == fd) {
             sockfd = -1;

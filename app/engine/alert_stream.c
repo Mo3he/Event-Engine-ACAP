@@ -10,11 +10,12 @@
 #include <netinet/in.h>
 #include <signal.h>
 
+#include "event_log.h"
 #include "alert_stream.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "alert_stream: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "alert_stream: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "alert_stream", fmt, ## args)
 
 #define MAX_STREAM_CLIENTS 8
 #define BOUNDARY "----AxisEventBoundary"

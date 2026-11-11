@@ -8,13 +8,14 @@
 #include <time.h>
 #include <glib.h>
 
+#include "event_log.h"
 #include "sparkplug.h"
 #include "sparkplug_pb.h"
 #include "mqtt_client.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "sparkplug: " fmt, ## args)
-#define LOG_WARN(fmt, args...) syslog(LOG_WARNING, "sparkplug: " fmt, ## args)
+#define LOG_WARN(fmt, args...) EventLog_Syslog(LOG_WARNING, "sparkplug", fmt, ## args)
 
 #define SPB_NAMESPACE       "spBv1.0"
 #define SPB_MAX_METRICS     128
