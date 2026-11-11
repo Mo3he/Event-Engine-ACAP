@@ -995,6 +995,15 @@ static void HTTP_AcapEvents(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req
     ACAP_HTTP_Respond_Error(resp, 405, "Method not allowed");
 }
 
+/* When an entry last happened: a repeated system message counts from its
+ * latest repeat. */
+static double latest_ts(cJSON* e) {
+    cJSON* last = cJSON_GetObjectItem(e, "last_timestamp");
+    if (cJSON_IsNumber(last)) return last->valuedouble;
+    cJSON* ts = cJSON_GetObjectItem(e, "timestamp");
+    return cJSON_IsNumber(ts) ? ts->valuedouble : 0;
+}
+
 /* Merge two newest-first arrays into one newest-first array of at most limit
  * entries. Takes ownership of both. */
 static cJSON* merge_newest_first(cJSON* a, cJSON* b, int limit) {
@@ -1002,8 +1011,8 @@ static cJSON* merge_newest_first(cJSON* a, cJSON* b, int limit) {
     cJSON* x = a ? a->child : NULL;
     cJSON* y = b ? b->child : NULL;
     for (int n = 0; (x || y) && n < limit; n++) {
-        double tx = x ? cJSON_GetObjectItem(x, "timestamp")->valuedouble : -1;
-        double ty = y ? cJSON_GetObjectItem(y, "timestamp")->valuedouble : -1;
+        double tx = x ? latest_ts(x) : -1;
+        double ty = y ? latest_ts(y) : -1;
         cJSON* pick = (x && (!y || tx >= ty)) ? x : y;
         if (pick == x) x = x->next; else y = y->next;
         cJSON_AddItemToArray(out, cJSON_Duplicate(pick, 1));

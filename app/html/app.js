@@ -1288,7 +1288,7 @@ async function loadEvents() {
                : rule === '__rules__'  ? await API.getEvents(500, '')
                : rule                  ? await API.getEvents(500, rule)
                :                         await API.getEvents(500, '', '1');
-    if (since) events = events.filter(e => e.timestamp >= since);
+    if (since) events = events.filter(e => logLatest(e) >= since);
     lastLoadedEvents = events;
     renderEventLog(events);
   } catch(e) {
@@ -1305,6 +1305,9 @@ function toggleLiveTail(on) {
   }
 }
 
+/* When an entry last happened: a repeated system message counts from its latest repeat. */
+function logLatest(e) { return e.last_timestamp || e.timestamp || 0; }
+
 /* Local time with milliseconds, e.g. "14:03:07.215 Nov 11". */
 function fmtLogTime(ts) {
   const d = new Date(ts * 1000);
@@ -1320,10 +1323,10 @@ function exportLogCSV() {
   if (!lastLoadedEvents.length) { toast('No events to export', 'warning'); return; }
   const rows = [['Time', 'Kind', 'Rule / Source', 'Result', 'Error', 'Details']];
   for (const e of lastLoadedEvents) {
-    const time = new Date(e.timestamp * 1000).toISOString();
+    const time = new Date(logLatest(e) * 1000).toISOString();
     if (e.kind === 'system') {
       rows.push([time, 'system', e.source || '', e.level || '', '',
-                 e.message + (e.repeats > 1 ? ` (x${e.repeats}, last ${new Date(e.last_timestamp * 1000).toISOString()})` : '')]);
+                 e.message + (e.repeats > 1 ? ` (x${e.repeats} since ${new Date(e.timestamp * 1000).toISOString()})` : '')]);
       continue;
     }
     const ruleName = e.rule_name || e.rule_id || '';
@@ -1364,13 +1367,13 @@ function renderEventLog(events) {
     if (tr.style.display !== 'none') openIds.add(tr.id);
   });
 
-  events.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  events.sort((a, b) => logLatest(b) - logLatest(a));
   tbody.innerHTML = events.map((e) => {
-    const time = fmtLogTime(e.timestamp);
+    const time = fmtLogTime(logLatest(e));
     if (e.kind === 'system') {
       const lvl = ['error', 'warning'].includes(e.level) ? e.level : 'info';
       const label = { error: 'Error', warning: 'Warning', info: 'Info' }[lvl];
-      const repeats = e.repeats > 1 ? ` <span style="color:var(--text-muted)">×${e.repeats}, last ${escHtml(fmtLogTime(e.last_timestamp))}</span>` : '';
+      const repeats = e.repeats > 1 ? ` <span style="color:var(--text-muted)">×${e.repeats} since ${escHtml(fmtLogTime(e.timestamp))}</span>` : '';
       return `<tr class="log-system-row">
         <td style="white-space:nowrap;color:var(--text-muted)">${time}</td>
         <td><span style="color:var(--text-muted)">${escHtml(LOG_SOURCE_NAMES[e.source] || e.source || 'System')}</span></td>

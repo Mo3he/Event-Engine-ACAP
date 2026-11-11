@@ -33,7 +33,8 @@ in-place upgrade. Rules, settings and variables are kept.
   Engine's client, not the device's built-in MQTT client), the version at
   startup with the variables loaded from file, and warnings and errors that
   were only in the app log before, such as TLS errors. A message repeated
-  within 10 minutes is shown once with a count, and at most 20 new system
+  within 10 minutes is shown once, at its latest time, with a count (rejected
+  API requests stay in the app log only), and at most 20 new system
   messages are added per minute, so they never crowd out rule entries (they
   are kept separately, 200 of them). Filter with *Everything*, *Rules only*
   or *System messages*. In the API: `GET /events?system=1` or `?system=only`;

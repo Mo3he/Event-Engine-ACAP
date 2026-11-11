@@ -737,7 +737,13 @@ int ACAP_HTTP_Respond_Error(ACAP_HTTP_Response response, int code, const char* m
         "%s",
         code, error_type, message);
 
-    LOG_WARN("HTTP Error %d: %s\n", code, message);
+    /* A rejected request is the client's problem, not the application's:
+     * app log only. Server errors also reach the warning hook. */
+    if (code >= 500) {
+        LOG_WARN("HTTP Error %d: %s\n", code, message);
+    } else {
+        syslog(LOG_WARNING, "HTTP Error %d: %s\n", code, message);
+    }
     return 1;
 }
 

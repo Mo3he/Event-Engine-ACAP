@@ -265,6 +265,10 @@ header .subtitle {
 .event-badge-fired   { background: #1e3928; color: var(--accent-success); }
 .event-badge-blocked { background: #f3f4f6; color: var(--text-muted); border-color: #e5e7eb; }
 .event-badge-info    { background: transparent; color: var(--text-muted); border-color: var(--border); }
+.var-persist, .var-initial {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  padding: 4px 8px; border-radius: 6px; font-size: 12px;
+}
 .event-badge-warning { background: #3a2f12; color: #f5b942; border-color: #5a4a1c; }
 .event-badge-error   { background: #3a1616; color: #f87171; border-color: #5c2222; }
 [data-theme="light"] .event-badge-warning { background: #fef3c7; color: #92400e; border-color: #fde68a; }

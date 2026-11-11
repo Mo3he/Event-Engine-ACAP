@@ -169,12 +169,24 @@ static cJSON* sys_to_json(const SysEntry* e) {
     return obj;
 }
 
+static int sys_latest_first(const void* a, const void* b) {
+    double x = (*(const SysEntry* const*)a)->last_timestamp;
+    double y = (*(const SysEntry* const*)b)->last_timestamp;
+    return x < y ? 1 : x > y ? -1 : 0;
+}
+
+/* Newest first by latest occurrence, so a message that keeps repeating
+ * stays at the top. */
 cJSON* EventLog_Get_System(int limit) {
+    const SysEntry* order[SYSTEM_LOG_SIZE];
     pthread_mutex_lock(&sys_lock);
+    for (int i = 0; i < sys_count; i++)
+        order[i] = &sys_entries[(sys_head - 1 - i + SYSTEM_LOG_SIZE) % SYSTEM_LOG_SIZE];
+    qsort(order, (size_t)sys_count, sizeof(order[0]), sys_latest_first);
     if (limit <= 0 || limit > sys_count) limit = sys_count;
     cJSON* arr = cJSON_CreateArray();
     for (int i = 0; i < limit; i++)
-        cJSON_AddItemToArray(arr, sys_to_json(&sys_entries[(sys_head - 1 - i + SYSTEM_LOG_SIZE) % SYSTEM_LOG_SIZE]));
+        cJSON_AddItemToArray(arr, sys_to_json(order[i]));
     pthread_mutex_unlock(&sys_lock);
     return arr;
 }

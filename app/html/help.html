@@ -1279,9 +1279,9 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
       <ul>
         <li>Event Engine's own MQTT connection: <em>Connected to broker:8883 with TLS</em>, and disconnects with the reason (e.g. <em>connection closed by broker</em>). This is Event Engine's client, separate from the device's built-in MQTT client.</li>
         <li>Startup: the Event Engine version, and the variables loaded from file (and those reset because they are volatile).</li>
-        <li>Warnings and errors that previously only appeared in the app log, such as TLS errors (<em>SSL_connect failed: ... certificate verify failed</em>).</li>
+        <li>Warnings and errors that previously only appeared in the app log, such as TLS errors (<em>SSL_connect failed: ... certificate verify failed</em>) or a device API that failed (<em>/local/objectanalytics/control.cgi returned HTTP 500</em>).</li>
       </ul>
-      <p>A message that repeats within 10 minutes is shown once with a count (×N) and the time of the latest repeat, and at most 20 new system messages are added per minute, so a failing connection cannot push everything else out of the log. The app log (<em>System → Logs</em> on the device) still has every line.</p>
+      <p>A message that repeats within 10 minutes is shown once, at the time of its latest repeat, with a count (×N since the first one). At most 20 new system messages are added per minute, so a failing connection cannot push everything else out of the log. The app log (<em>System → Logs</em> on the device) still has every line, including rejected API requests, which are not shown here.</p>
       <p>Use the filter dropdown to show <em>Everything</em>, <em>Rules only</em>, <em>System messages</em> or a single rule. Click <strong>Refresh</strong> to reload. Click <strong>Clear</strong> to empty the log.</p>
 
       <!-- ═══════════════════════════════════════════ VARIABLES TAB -->

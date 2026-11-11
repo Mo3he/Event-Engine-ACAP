@@ -1774,7 +1774,7 @@
             "name": "system",
             "in": "query",
             "schema": { "type": "string", "enum": ["1", "only"] },
-            "description": "1: include system messages (MQTT connection, startup, warnings) with the rule entries; only: return only system messages. Omitted: rule entries only."
+            "description": "1: include system messages (MQTT connection, startup, warnings) with the rule entries; only: return only system messages. Omitted: rule entries only. A repeated system message is ordered by its latest occurrence (last_timestamp)."
           }
         ],
         "responses": {
