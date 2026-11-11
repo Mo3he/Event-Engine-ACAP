@@ -114,7 +114,7 @@ function updateMqttStatusBadge(mq) {
   const dot  = document.getElementById('mqtt-dot');
   const text = document.getElementById('mqtt-status-text');
   if (!dot || !text) return;
-  const suffix = mq.use_tls ? ' · TLS' : '';
+  const suffix = mq.use_tls ? (mq.tls_insecure ? ' · TLS (unverified)' : ' · TLS') : '';
   if (mq.connected) {
     dot.style.background = 'var(--accent-success)';
     text.textContent = `Connected — ${mq.host || ''}:${mq.port || 1883}${suffix}`;
@@ -329,6 +329,7 @@ async function loadMqttSettings(settings) {
     form.querySelector('[name="username"]').value  = mq.username  || '';
     form.querySelector('[name="keepalive"]').value = mq.keepalive || 60;
     form.querySelector('[name="use_tls"]').checked = !!mq.use_tls;
+    form.querySelector('[name="tls_insecure"]').checked = !!mq.tls_insecure;
     form.querySelector('[name="enabled"]').checked = !!mq.enabled;
     form.querySelector('[name="servers"]').value = (mq.servers || []).join('\n');
     /* Don't pre-fill password — leave placeholder "(unchanged)" */
@@ -353,6 +354,7 @@ async function saveMqttSettings(event) {
       username:  form.querySelector('[name="username"]').value.trim(),
       keepalive: parseInt(form.querySelector('[name="keepalive"]').value, 10) || 60,
       use_tls:   form.querySelector('[name="use_tls"]').checked,
+      tls_insecure: form.querySelector('[name="tls_insecure"]').checked,
       servers:   form.querySelector('[name="servers"]').value
                      .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 7)
     }

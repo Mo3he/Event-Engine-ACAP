@@ -20,7 +20,8 @@ extern "C" {
  *   - Automatic reconnection with exponential backoff
  *   - Keepalive PINGREQ/PINGRESP
  *   - Multiple topic subscriptions with wildcard support (+ and #)
- *   - Optional TLS transport with hostname verification
+ *   - Optional TLS transport with hostname verification (can be disabled for
+ *     self-signed brokers)
  *   - Incoming message dispatch via callback (on GMainLoop thread)
  *   - Thread-safe publish (mutex protected)
  *   - Binary-safe publish and Last Will & Testament (required by Sparkplug B)
@@ -65,6 +66,7 @@ typedef struct {
     char password[128];
     int  keepalive;       /* seconds, 0 = default (60) */
     int  use_tls;         /* 1 = TLS transport, 0 = plain TCP */
+    int  tls_insecure;    /* 1 = skip certificate and hostname verification */
     int  enabled;
 } MQTT_Config;
 

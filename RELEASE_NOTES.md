@@ -1,5 +1,28 @@
 # Release Notes
 
+## v1.9.21 - MQTT self-signed certificates
+
+Adds an option to connect to an MQTT broker over TLS without verifying its
+certificate, for brokers with self-signed or private-CA certificates
+([#11](https://github.com/Mo3he/Event-Engine-ACAP/issues/11)).
+
+### Upgrading to 1.9.21
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.21
+
+- **Skip certificate verification for the MQTT broker.** A new *Skip
+  certificate verification* switch next to *Use TLS* in the MQTT settings
+  (`mqtt.tls_insecure` in the API) accepts the broker's certificate without
+  checking who issued it or that it matches the host name. The connection is
+  still encrypted, but the broker's identity is not checked, so use it only on
+  networks you trust. It is off by default and only applies with TLS on. The
+  connect log line and the status badge (*TLS (unverified)*) show when it is
+  in use. Verified on a P3288-LV against a broker with a self-signed
+  certificate.
+
 ## v1.9.20 - I/O Flash
 
 Adds an I/O Flash action that flashes output ports, for example a red and a

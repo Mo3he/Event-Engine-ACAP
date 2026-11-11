@@ -262,6 +262,7 @@ static void fill_mqtt_config(cJSON* cfg, MQTT_Config* mc) {
     cJSON* ka = cJSON_GetObjectItem(cfg, "keepalive");
     if (ka) mc->keepalive = (int)ka->valuedouble;
     mc->use_tls = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "use_tls")) ? 1 : 0;
+    mc->tls_insecure = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "tls_insecure")) ? 1 : 0;
     mc->enabled = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "enabled")) ? 1 : 0;
 
     /* Broker list for Sparkplug-style failover: entry 0 is always the primary

@@ -311,7 +311,8 @@ The built-in MQTT client supports MQTT 3.1.1 with the following features:
 - Wildcard topic subscriptions (`+` and `#`)
 - Automatic reconnect with exponential backoff
 - Keepalive with PINGREQ/PINGRESP
-- **TLS/SSL encryption** for secure broker connections
+- **TLS/SSL encryption** for secure broker connections, with an option to skip
+  certificate verification for brokers with self-signed certificates
 - **SOCKS5 proxy** support for broker connections behind a proxy
 - Thread-safe publish (mutex protected)
 - Password stored separately from the API response and never exposed via GET

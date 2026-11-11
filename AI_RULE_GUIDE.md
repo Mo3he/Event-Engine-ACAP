@@ -1385,6 +1385,10 @@ curl -s -k -u root:pass --anyauth \
   "https://CAMERA_IP/local/acap_event_engine/settings"
 ```
 
+For a broker with a self-signed certificate, set `"use_tls": true` and
+`"tls_insecure": true` (default `false`). This skips certificate and host name
+verification, so the broker's identity is not checked.
+
 ### Configure SMTP (for email actions)
 
 ```bash

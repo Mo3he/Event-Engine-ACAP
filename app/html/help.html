@@ -1167,6 +1167,7 @@ Content-Type: application/json
         <tr><td><strong>Keepalive</strong></td><td>MQTT keepalive interval in seconds. Default: 60.</td></tr>
         <tr><td><strong>Backup Brokers</strong></td><td>Optional. One <code>host</code> or <code>host:port</code> per line, up to seven. Tried in order, one second apart, whenever the broker above cannot be reached. Saving settings always restarts from the primary.</td></tr>
         <tr><td><strong>Use TLS</strong></td><td>Enable TLS/SSL encryption for secure broker connections.</td></tr>
+        <tr><td><strong>Skip certificate verification</strong></td><td>Only with TLS. Accept self-signed or otherwise untrusted broker certificates and skip hostname checks. Traffic stays encrypted, but the broker identity is not verified, so use it only on trusted networks.</td></tr>
         <tr><td><strong>Enabled</strong></td><td>Toggle MQTT on or off without clearing settings.</td></tr>
       </table>
       <p>Features:</p>
