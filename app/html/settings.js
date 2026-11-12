@@ -114,7 +114,9 @@ function updateMqttStatusBadge(mq) {
   const dot  = document.getElementById('mqtt-dot');
   const text = document.getElementById('mqtt-status-text');
   if (!dot || !text) return;
-  const suffix = mq.use_tls ? (mq.tls_insecure ? ' · TLS (unverified)' : ' · TLS') : '';
+  const suffix = mq.use_tls
+    ? (mq.tls_insecure ? ' · TLS (unverified)' : mq.tls_profile ? ` · TLS (${mq.tls_profile})` : ' · TLS')
+    : '';
   if (mq.connected) {
     dot.style.background = 'var(--accent-success)';
     text.textContent = `Connected — ${mq.host || ''}:${mq.port || 1883}${suffix}`;
@@ -294,6 +296,11 @@ async function loadSmtpSettings(settings) {
     if (el('smtp-pass'))   el('smtp-pass').value   = '';  /* never show stored pw */
     if (el('smtp-from'))   el('smtp-from').value   = smtp.from || '';
       if (el('smtp-tls'))    el('smtp-tls').checked   = smtp.use_tls !== false;
+    if (el('smtp-tls-insecure')) el('smtp-tls-insecure').checked = !!smtp.tls_insecure;
+    if (el('smtp-tls-profile')) {
+      el('smtp-tls-profile').dataset.value = smtp.tls_profile || '';
+      fillTlsProfileSelect(el('smtp-tls-profile'));
+    }
   } catch(e) { /* non-fatal */ }
 }
 
@@ -305,6 +312,8 @@ async function saveSmtpSettings(event) {
     username: el('smtp-user')   ? el('smtp-user').value.trim()   : '',
     from:     el('smtp-from')   ? el('smtp-from').value.trim()   : '',
       use_tls:  el('smtp-tls')    ? !!el('smtp-tls').checked : true,
+    tls_insecure: el('smtp-tls-insecure') ? !!el('smtp-tls-insecure').checked : false,
+    tls_profile:  el('smtp-tls-profile') ? el('smtp-tls-profile').value : '',
   };
   const pw = el('smtp-pass') ? el('smtp-pass').value : '';
   if (pw) data.password = pw;
@@ -312,6 +321,8 @@ async function saveSmtpSettings(event) {
     const r = await API.post('settings', { smtp: data });
     toast('SMTP settings saved');
     if (el('smtp-pass')) el('smtp-pass').value = '';
+    if (el('smtp-tls-profile')) el('smtp-tls-profile').dataset.value = data.tls_profile;
+    loadTlsProfiles();
   } catch(e) {
     toast('Failed to save: ' + e.message, 'error');
   }
@@ -330,6 +341,9 @@ async function loadMqttSettings(settings) {
     form.querySelector('[name="keepalive"]').value = mq.keepalive || 60;
     form.querySelector('[name="use_tls"]').checked = !!mq.use_tls;
     form.querySelector('[name="tls_insecure"]').checked = !!mq.tls_insecure;
+    form.querySelector('[name="tls_profile"]').dataset.value = mq.tls_profile || '';
+    fillSettingsTlsSelects();
+    mqttTlsRowVisibility();
     form.querySelector('[name="enabled"]').checked = !!mq.enabled;
     form.querySelector('[name="servers"]').value = (mq.servers || []).join('\n');
     /* Don't pre-fill password — leave placeholder "(unchanged)" */
@@ -355,6 +369,7 @@ async function saveMqttSettings(event) {
       keepalive: parseInt(form.querySelector('[name="keepalive"]').value, 10) || 60,
       use_tls:   form.querySelector('[name="use_tls"]').checked,
       tls_insecure: form.querySelector('[name="tls_insecure"]').checked,
+      tls_profile: form.querySelector('[name="tls_profile"]').value,
       servers:   form.querySelector('[name="servers"]').value
                      .split('\n').map(s => s.trim()).filter(Boolean).slice(0, 7)
     }
@@ -365,6 +380,8 @@ async function saveMqttSettings(event) {
     const r = await API.post('settings', payload);
     toast('MQTT settings saved');
     form.querySelector('[name="password"]').value = '';
+    form.querySelector('[name="tls_profile"]').dataset.value = payload.mqtt.tls_profile;
+    loadTlsProfiles();
     /* Refresh status badge after a short delay to let the engine reconnect */
     setTimeout(loadMqttSettings, 1500);
   } catch(e) {
@@ -763,7 +780,254 @@ async function loadAllSettings() {
     loadSmtpSettings(settings);
     loadMqttSettings(settings);
     loadSparkplugSettings(settings);
+    loadTlsProfiles();
   } catch(e) { /* non-fatal — individual loaders will show errors as needed */ }
+}
+
+/* ===== TLS profiles (certificates for HTTPS and MQTT) ===== */
+
+async function loadTlsProfiles() {
+  try {
+    tlsProfiles = await API.getCerts();
+  } catch(e) {
+    if (!Array.isArray(tlsProfiles)) tlsProfiles = [];
+  }
+  renderTlsProfiles();
+  fillSettingsTlsSelects();
+  return tlsProfiles;
+}
+
+function apiErrorText(e) {
+  return String((e && e.message) || e).replace(/^HTTP \d+:\s*/, '');
+}
+
+function cnOf(dn) {
+  const m = /(?:^|,)CN=((?:\\,|[^,])+)/.exec(dn || '');
+  return m ? m[1].replace(/\\,/g, ',') : (dn || '');
+}
+
+function fmtCertDate(epoch) {
+  return new Date(epoch * 1000).toISOString().slice(0, 10);
+}
+
+function tlsExpiryBadge(expires) {
+  if (!expires) return '<span style="color:var(--text-muted);">—</span>';
+  const days = Math.floor((expires * 1000 - Date.now()) / 86400000);
+  const nw = 'style="white-space:nowrap;"';
+  if (days < 0)  return `<span class="badge event-badge-error" ${nw}>Expired ${fmtCertDate(expires)}</span>`;
+  if (days < 30) return `<span class="badge event-badge-warning" ${nw}>Expires in ${days} day${days === 1 ? '' : 's'}</span>`;
+  return `<span class="badge event-badge-fired" ${nw}>Valid until ${fmtCertDate(expires)}</span>`;
+}
+
+function renderTlsProfiles() {
+  const box = document.getElementById('tls-list');
+  if (!box) return;
+  const list = Array.isArray(tlsProfiles) ? tlsProfiles : [];
+  if (!list.length) {
+    box.innerHTML = `<div style="font-size:13px;color:var(--text-muted);">No profiles yet.</div>`;
+    return;
+  }
+  box.innerHTML = `<table class="var-table">
+    <thead><tr><th>Name</th><th>Client certificate</th><th>Server check</th><th>Expiry</th><th>Used by</th><th></th></tr></thead>
+    <tbody>${list.map(p => {
+      const leaf = p.cert && p.cert[0];
+      const client = leaf
+        ? `${escHtml(leaf.cn || leaf.subject)}<div class="form-hint">issued by ${escHtml(cnOf(leaf.issuer))}${p.key ? ` · ${escHtml(p.key.type)} ${p.key.bits}-bit` : ''}</div>`
+        : '<span style="color:var(--text-muted);">None</span>';
+      const server = p.insecure
+        ? '<span class="badge event-badge-warning" style="white-space:nowrap;">Not verified</span>'
+        : p.ca ? `Trusts ${escHtml(p.ca.map(c => c.cn || cnOf(c.subject)).join(', '))}`
+               : '<span style="color:var(--text-muted);">Public CAs</span>';
+      const used = (p.used_by || []).map(u => escHtml(u.name)).join(', ')
+        || '<span style="color:var(--text-muted);">Not used</span>';
+      return `<tr>
+        <td><b>${escHtml(p.name)}</b></td><td>${client}</td><td>${server}</td>
+        <td>${tlsExpiryBadge(p.expires)}</td><td>${used}</td>
+        <td style="white-space:nowrap;text-align:right;">
+          <button class="btn btn-ghost btn-sm" data-name="${escHtml(p.name)}" onclick="tlsEditProfile(this.dataset.name)">Edit</button>
+          <button class="btn btn-ghost btn-sm" data-name="${escHtml(p.name)}" onclick="tlsDeleteProfile(this.dataset.name)">Delete</button>
+        </td></tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+let tlsEditing = null;   /* null = editor closed, '' = new profile, otherwise the profile name */
+
+function tlsPemField(part, label, hint, current) {
+  const begin = part === 'key' ? 'PRIVATE KEY' : 'CERTIFICATE';
+  return `<div class="form-row"><div class="form-group">
+    <label>${label}</label>
+    ${current ? `<div style="font-size:12px;margin-bottom:6px;">Current: ${current}
+      <label style="display:inline-flex;align-items:center;gap:6px;margin-left:12px;font-weight:400;cursor:pointer;">
+        <input type="checkbox" id="tls-remove-${part}"> Remove</label></div>` : ''}
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('tls-file-${part}').click()">Choose file…</button>
+      <span id="tls-fname-${part}" style="font-size:12px;color:var(--text-muted);">${current ? '' : 'or paste below'}</span>
+      <input type="file" id="tls-file-${part}" style="display:none;" accept=".pem,.crt,.cer,.key,.der,.p12,.pfx" onchange="tlsReadFile('${part}', this)">
+    </div>
+    <textarea id="tls-${part}" rows="3" spellcheck="false" style="font-family:var(--mono,monospace);font-size:11px;"
+      placeholder="${current ? 'Paste or choose a file to replace it' : `-----BEGIN ${begin}-----`}"></textarea>
+    <div class="form-hint">${hint}</div>
+  </div></div>`;
+}
+
+function tlsEditProfile(name) {
+  const p = name ? (tlsProfiles || []).find(x => x.name === name) : null;
+  tlsEditing = p ? p.name : '';
+  const leaf = p && p.cert && p.cert[0];
+  const ed = document.getElementById('tls-editor');
+  ed.innerHTML = `
+    <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:14px;display:flex;flex-direction:column;gap:12px;">
+      <h4 style="font-size:13px;margin:0;">${p ? `Edit profile <b>${escHtml(p.name)}</b>` : 'New TLS profile'}</h4>
+      <div class="form-row"><div class="form-group" style="max-width:320px;">
+        <label>Name</label>
+        <input type="text" id="tls-name" value="${p ? escHtml(p.name) : ''}" ${p ? 'disabled' : ''} maxlength="48" placeholder="e.g. upload-server">
+        ${p ? '' : '<div class="form-hint">Letters, digits, spaces, - _ and . — shown in the rule editor</div>'}
+      </div></div>
+      ${tlsPemField('ca', 'Server CA certificate <span style="color:var(--text-muted);font-weight:400;">(optional)</span>',
+        "The CA that signed the server's certificate, when the server doesn't use a public CA. When set, only this CA is trusted.",
+        p && p.ca ? escHtml(p.ca.map(c => c.cn || cnOf(c.subject)).join(', ')) : '')}
+      ${tlsPemField('cert', 'Client certificate <span style="color:var(--text-muted);font-weight:400;">(optional)</span>',
+        'Sent to servers that require a client certificate (mutual TLS). PEM; may also contain the chain and the private key.',
+        leaf ? `${escHtml(leaf.cn || leaf.subject)}, issued by ${escHtml(cnOf(leaf.issuer))}, valid until ${fmtCertDate(leaf.not_after)}` : '')}
+      ${tlsPemField('key', 'Private key',
+        'Required with a client certificate. Stored on the camera and never shown again.',
+        p && p.key ? `${escHtml(p.key.type)} ${p.key.bits}-bit key` : '')}
+      <div class="form-row"><div class="form-group" style="max-width:320px;">
+        <label>Key passphrase <span style="color:var(--text-muted);font-weight:400;">(only if the key is encrypted)</span></label>
+        <input type="password" id="tls-passphrase" autocomplete="new-password">
+      </div></div>
+      <div class="form-row"><div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="tls-insecure" ${p && p.insecure ? 'checked' : ''}>
+          Don't verify server certificate
+        </label>
+        <div class="form-hint">The connection is still encrypted and the client certificate is still sent, but the server's identity isn't checked. Use only for testing or servers with self-signed certificates.</div>
+      </div></div>
+      <div id="tls-error" style="display:none;font-size:13px;color:var(--accent-danger);"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="tlsCancelEdit()">Cancel</button>
+        <button class="btn btn-primary" id="tls-save-btn" onclick="tlsSaveProfile()">Save Profile</button>
+      </div>
+    </div>`;
+  ed.style.display = '';
+  ed.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (!p) document.getElementById('tls-name').focus();
+}
+
+function tlsCancelEdit() {
+  tlsEditing = null;
+  const ed = document.getElementById('tls-editor');
+  ed.innerHTML = '';
+  ed.style.display = 'none';
+}
+
+function showTlsError(msg) {
+  const el = document.getElementById('tls-error');
+  if (!el) { toast(msg, 'error'); return; }
+  el.textContent = msg;
+  el.style.display = msg ? '' : 'none';
+}
+
+async function tlsReadFile(part, input) {
+  const f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  if (/\.(p12|pfx)$/i.test(f.name)) {
+    showTlsError(`${f.name} is a PKCS#12 bundle, which isn't supported yet. Convert it to PEM first, ` +
+                 `for example: openssl pkcs12 -in ${f.name} -out bundle.pem -nodes — then choose bundle.pem as the client certificate.`);
+    return;
+  }
+  const buf = new Uint8Array(await f.arrayBuffer());
+  if (buf.length > 48 * 1024) { showTlsError(`${f.name} is larger than 48 KB`); return; }
+  let text = new TextDecoder().decode(buf);
+  if (!text.includes('-----BEGIN')) {
+    /* Binary DER (.cer/.der): wrap it as PEM */
+    let bin = '';
+    buf.forEach(b => { bin += String.fromCharCode(b); });
+    const label = part === 'key' ? 'PRIVATE KEY' : 'CERTIFICATE';
+    text = `-----BEGIN ${label}-----\n${btoa(bin).replace(/(.{64})/g, '$1\n')}\n-----END ${label}-----\n`;
+  }
+  document.getElementById(`tls-${part}`).value = text;
+  document.getElementById(`tls-fname-${part}`).textContent = f.name;
+  showTlsError('');
+}
+
+async function tlsSaveProfile() {
+  if (tlsEditing === null) return;
+  const isNew = tlsEditing === '';
+  const name = isNew ? document.getElementById('tls-name').value.trim() : tlsEditing;
+  if (!name) { showTlsError('Enter a name for the profile'); return; }
+  if (isNew && (tlsProfiles || []).some(p => p.name === name)) {
+    showTlsError(`A profile named "${name}" already exists. Use Edit to change it.`);
+    return;
+  }
+  const body = { name, insecure: document.getElementById('tls-insecure').checked };
+  for (const part of ['ca', 'cert', 'key']) {
+    const txt = document.getElementById(`tls-${part}`).value.trim();
+    const rm = document.getElementById(`tls-remove-${part}`);
+    if (txt) body[part] = txt;
+    else if (rm && rm.checked) body[part] = '';
+  }
+  /* A key without its certificate is useless: remove them together */
+  if (body.cert === '' && body.key === undefined) body.key = '';
+  const pass = document.getElementById('tls-passphrase').value;
+  if (pass) body.passphrase = pass;
+  if (JSON.stringify(body).length > 60000) { showTlsError('Certificates and key together must be under 60 KB'); return; }
+
+  const btn = document.getElementById('tls-save-btn');
+  btn.disabled = true;
+  showTlsError('');
+  try {
+    await API.saveCert(body);
+    toast(`TLS profile "${name}" saved`, 'success');
+    tlsCancelEdit();
+    await loadTlsProfiles();
+  } catch(e) {
+    showTlsError(apiErrorText(e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function tlsDeleteProfile(name) {
+  const p = (tlsProfiles || []).find(x => x.name === name);
+  const users = (p && p.used_by) || [];
+  if (users.length) {
+    toast(`"${name}" is used by ${users.map(u => u.name).join(', ')}. Choose another profile there first.`, 'error');
+    return;
+  }
+  if (!confirm(`Delete TLS profile "${name}"? Its certificates and key are removed from the camera.`)) return;
+  try {
+    await API.deleteCert(name);
+    toast(`TLS profile "${name}" deleted`, 'success');
+    if (tlsEditing === name) tlsCancelEdit();
+    await loadTlsProfiles();
+  } catch(e) {
+    toast(apiErrorText(e), 'error');
+  }
+}
+
+function fillSettingsTlsSelects() {
+  fillTlsProfileSelect(document.querySelector('#mqtt-form [name="tls_profile"]'));
+  fillTlsProfileSelect(document.getElementById('smtp-tls-profile'));
+}
+
+/* Profile picker in the settings forms; the saved choice is kept in data-value */
+function fillTlsProfileSelect(sel) {
+  if (!sel) return;
+  const cur = sel.dataset.value !== undefined ? sel.dataset.value : sel.value;
+  const list = Array.isArray(tlsProfiles) ? tlsProfiles : [];
+  const missing = cur && !list.some(p => p.name === cur);
+  sel.innerHTML = `<option value="">None — public CAs, no client certificate</option>` +
+    list.map(p => `<option value="${escHtml(p.name)}">${escHtml(p.name)}${escHtml(tlsProfileLabel(p))}</option>`).join('') +
+    (missing ? `<option value="${escHtml(cur)}">${escHtml(cur)} (missing)</option>` : '');
+  sel.value = cur || '';
+}
+
+function mqttTlsRowVisibility() {
+  const form = document.getElementById('mqtt-form');
+  const row = document.getElementById('mqtt-tls-profile-row');
+  if (form && row) row.style.display = form.querySelector('[name="use_tls"]').checked ? '' : 'none';
 }
 
 /* ===== Serial Port / RS-485 Setup ===== */

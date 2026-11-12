@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Event Engine</title>
-  <link rel="stylesheet" href="style.css?v=1.9.24">
+  <link rel="stylesheet" href="style.css?v=1.9.25">
   <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_light.svg">
   <script>(function(){
     var stored=localStorage.getItem('theme');
@@ -176,6 +176,20 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:16px;" id="tls-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">TLS CERTIFICATES</h3>
+          <button class="btn btn-ghost btn-sm" onclick="tlsEditProfile()">+ Add profile</button>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Certificates the camera uses when it connects to a server: the CA of a server with a private certificate,
+          and a client certificate for servers that require one (mutual TLS). Choose a profile in HTTP Request,
+          Snapshot Upload, InfluxDB Write, FTP Upload, HTTP Check, or the MQTT broker and Email settings below.
+        </p>
+        <div id="tls-list"></div>
+        <div id="tls-editor" style="display:none;"></div>
+      </div>
+
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <h3 style="font-size:13px;color:var(--text-muted);margin:0;">MQTT BROKER</h3>
@@ -229,7 +243,7 @@
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
                 <span style="font-size:13px;">Use TLS</span>
                 <label class="toggle">
-                  <input type="checkbox" name="use_tls">
+                  <input type="checkbox" name="use_tls" onchange="mqttTlsRowVisibility()">
                   <span class="toggle-slider"></span>
                 </label>
               </label>
@@ -242,6 +256,13 @@
                   <span class="toggle-slider"></span>
                 </label>
               </label>
+            </div>
+          </div>
+          <div class="form-row" id="mqtt-tls-profile-row" style="display:none;">
+            <div class="form-group" style="max-width:480px;">
+              <label>TLS certificates <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <select name="tls_profile"></select>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">For a broker with its own CA or one that requires a client certificate. Add profiles under TLS Certificates above.</div>
             </div>
           </div>
           <div class="form-row">
@@ -344,13 +365,29 @@
               <label>SMTP Server</label>
               <input type="text" id="smtp-server" placeholder="smtp.gmail.com:587">
               <div class="form-hint">Use <code>host:port</code> (recommended) or a full URL. Example: <code>smtp.gmail.com:587</code> with TLS enabled.</div>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:10px;">
-                <span style="font-size:13px;">Use TLS</span>
-                <span class="toggle">
-                  <input type="checkbox" id="smtp-tls" checked>
-                  <span class="toggle-slider"></span>
-                </span>
-              </label>
+              <div style="display:flex;align-items:center;gap:24px;margin-top:10px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                  <span style="font-size:13px;">Use TLS</span>
+                  <span class="toggle">
+                    <input type="checkbox" id="smtp-tls" checked>
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;" title="Accept a self-signed or otherwise untrusted mail server certificate. The connection is still encrypted but the server identity is not checked.">
+                  <span style="font-size:13px;">Skip certificate verification</span>
+                  <span class="toggle">
+                    <input type="checkbox" id="smtp-tls-insecure">
+                    <span class="toggle-slider"></span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="max-width:480px;">
+              <label>TLS certificates <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+              <select id="smtp-tls-profile"></select>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">For a mail server with its own CA or one that requires a client certificate. Add profiles under TLS Certificates above.</div>
             </div>
           </div>
           <div class="form-row">
@@ -490,11 +527,11 @@
 
 <div class="toast-container" id="toast-container"></div>
 
-<script src="api.js?v=1.9.24" onerror="__scriptLoadError('api.js')"></script>
-<script src="app.js?v=1.9.24" onerror="__scriptLoadError('app.js')"></script>
-<script src="update-checker.js?v=1.9.24" onerror="__scriptLoadError('update-checker.js')"></script>
-<script src="device-capabilities.js?v=1.9.24" onerror="__scriptLoadError('device-capabilities.js')"></script>
-<script src="settings.js?v=1.9.24" onerror="__scriptLoadError('settings.js')"></script>
-<script src="rule-editor.js?v=1.9.24" onerror="__scriptLoadError('rule-editor.js')"></script>
+<script src="api.js?v=1.9.25" onerror="__scriptLoadError('api.js')"></script>
+<script src="app.js?v=1.9.25" onerror="__scriptLoadError('app.js')"></script>
+<script src="update-checker.js?v=1.9.25" onerror="__scriptLoadError('update-checker.js')"></script>
+<script src="device-capabilities.js?v=1.9.25" onerror="__scriptLoadError('device-capabilities.js')"></script>
+<script src="settings.js?v=1.9.25" onerror="__scriptLoadError('settings.js')"></script>
+<script src="rule-editor.js?v=1.9.25" onerror="__scriptLoadError('rule-editor.js')"></script>
 </body>
 </html>

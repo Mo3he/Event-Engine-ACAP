@@ -19,6 +19,7 @@
 #include "engine/mqtt_client.h"
 #include "engine/sparkplug.h"
 #include "engine/alert_stream.h"
+#include "engine/certs.h"
 
 #define APP_PACKAGE "acap_event_engine"
 
@@ -264,6 +265,8 @@ static void fill_mqtt_config(cJSON* cfg, MQTT_Config* mc) {
     if (ka) mc->keepalive = (int)ka->valuedouble;
     mc->use_tls = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "use_tls")) ? 1 : 0;
     mc->tls_insecure = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "tls_insecure")) ? 1 : 0;
+    const char* tls_profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tls_profile"));
+    snprintf(mc->tls_profile, sizeof(mc->tls_profile), "%s", tls_profile ? tls_profile : "");
     mc->enabled = cJSON_IsTrue(cJSON_GetObjectItem(cfg, "enabled")) ? 1 : 0;
 
     /* Broker list for Sparkplug-style failover: entry 0 is always the primary
@@ -1769,6 +1772,171 @@ static void HTTP_Variables(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req)
 }
 
 /*=====================================================
+ * TLS profiles: GET/POST/DELETE /local/acap_event_engine/certs
+ *
+ * GET /certs                - profiles (certificate details, never keys) with
+ *                             the rules and settings that use each one
+ * POST /certs               - create or update {name, ca, cert, key, passphrase, insecure}
+ *                             omitted parts are kept, "" removes a part
+ * DELETE /certs?name=NAME   - delete, refused (409) while something uses it
+ *=====================================================*/
+static int json_uses_profile(cJSON* node, const char* name) {
+    if (!node) return 0;
+    if (node->string && strcmp(node->string, "tls_profile") == 0 &&
+        cJSON_IsString(node) && strcmp(node->valuestring, name) == 0)
+        return 1;
+    cJSON* child;
+    cJSON_ArrayForEach(child, node)
+        if (json_uses_profile(child, name)) return 1;
+    return 0;
+}
+
+/* Array of {type:"rule",id,name} / {type:"mqtt"|"smtp",name} that reference the profile */
+static cJSON* profile_users(const char* name) {
+    cJSON* users = cJSON_CreateArray();
+    cJSON* list = RuleEngine_List();
+    cJSON* r;
+    cJSON_ArrayForEach(r, list) {
+        const char* id = cJSON_GetStringValue(cJSON_GetObjectItem(r, "id"));
+        cJSON* full = id ? RuleEngine_Get(id) : NULL;
+        if (full && (json_uses_profile(cJSON_GetObjectItem(full, "actions"), name) ||
+                     json_uses_profile(cJSON_GetObjectItem(full, "conditions"), name))) {
+            cJSON* u = cJSON_CreateObject();
+            cJSON_AddStringToObject(u, "type", "rule");
+            cJSON_AddStringToObject(u, "id", id);
+            const char* rn = cJSON_GetStringValue(cJSON_GetObjectItem(full, "name"));
+            cJSON_AddStringToObject(u, "name", rn ? rn : id);
+            cJSON_AddItemToArray(users, u);
+        }
+        cJSON_Delete(full);
+    }
+    cJSON_Delete(list);
+
+    cJSON* settings = ACAP_Get_Config("settings");
+    static const struct { const char* key; const char* label; } svc[] = {
+        { "mqtt", "MQTT broker settings" }, { "smtp", "Email (SMTP) settings" },
+    };
+    for (size_t i = 0; i < sizeof(svc) / sizeof(svc[0]); i++) {
+        cJSON* sc = settings ? cJSON_GetObjectItem(settings, svc[i].key) : NULL;
+        const char* sp = sc ? cJSON_GetStringValue(cJSON_GetObjectItem(sc, "tls_profile")) : NULL;
+        if (sp && strcmp(sp, name) == 0) {
+            cJSON* u = cJSON_CreateObject();
+            cJSON_AddStringToObject(u, "type", svc[i].key);
+            cJSON_AddStringToObject(u, "name", svc[i].label);
+            cJSON_AddItemToArray(users, u);
+        }
+    }
+    return users;
+}
+
+static gboolean check_certificate_expiry(gpointer user_data) {
+    (void)user_data;
+    cJSON* warnings = Certs_Expiry_Warnings(30);
+    cJSON* w;
+    cJSON_ArrayForEach(w, warnings)
+        EventLog_System("certs", "warning", "%s", w->valuestring);
+    cJSON_Delete(warnings);
+    return G_SOURCE_CONTINUE;
+}
+
+static void wipe_request_body(const ACAP_HTTP_Request req) {
+    char* raw = (char*)ACAP_HTTP_Get_Body(req);
+    if (raw) explicit_bzero(raw, ACAP_HTTP_Get_Body_Length(req));
+}
+
+static void HTTP_Certs(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    const char* method = get_method(req);
+
+    if (strcmp(method, "GET") == 0) {
+        cJSON* list = Certs_List();
+        cJSON* p;
+        cJSON_ArrayForEach(p, list) {
+            const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(p, "name"));
+            cJSON_AddItemToObject(p, "used_by", profile_users(name ? name : ""));
+        }
+        ACAP_HTTP_Respond_JSON(resp, list);
+        cJSON_Delete(list);
+
+    } else if (strcmp(method, "POST") == 0) {
+        cJSON* body = get_body_json(req);
+        if (!body) {
+            wipe_request_body(req);
+            ACAP_HTTP_Respond_Error(resp, 400, ACAP_HTTP_Get_Content_Length(req) >= ACAP_MAX_BUFFER_SIZE
+                ? "Request too large: certificates and key together must be under 64 KB"
+                : "Invalid JSON");
+            return;
+        }
+        char err[256] = "";
+        int ok = Certs_Save(body, err, sizeof(err));
+        /* Keys and passphrases are no longer needed. A key can also arrive inside
+         * the certificate field, so wipe every string except the name. */
+        cJSON* item;
+        cJSON_ArrayForEach(item, body)
+            if (cJSON_IsString(item) && item->string && strcmp(item->string, "name") != 0)
+                explicit_bzero(item->valuestring, strlen(item->valuestring));
+        wipe_request_body(req);
+        if (!ok) {
+            cJSON_Delete(body);
+            ACAP_HTTP_Respond_Error(resp, 400, err);
+            return;
+        }
+        const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(body, "name"));
+        EventLog_System("certs", "info", "TLS profile '%s' saved", name);
+        MQTT_TLS_Profile_Changed(name);
+        cJSON* saved = Certs_Get(name);
+        cJSON_Delete(body);
+        if (saved) {
+            ACAP_HTTP_Respond_JSON(resp, saved);
+            cJSON_Delete(saved);
+        } else {
+            ACAP_HTTP_Respond_Text(resp, "OK");
+        }
+
+    } else if (strcmp(method, "DELETE") == 0) {
+        char* name = ACAP_HTTP_Request_Param(req, "name");
+        if (!name || !*name) {
+            free(name);
+            ACAP_HTTP_Respond_Error(resp, 400, "Missing name parameter");
+            return;
+        }
+        if (!Certs_Exists(name)) {
+            free(name);
+            ACAP_HTTP_Respond_Error(resp, 404, "No such TLS profile");
+            return;
+        }
+        cJSON* users = profile_users(name);
+        if (cJSON_GetArraySize(users) > 0) {
+            char msg[512];
+            size_t off = (size_t)snprintf(msg, sizeof(msg), "TLS profile '%s' is used by ", name);
+            int i = 0;
+            cJSON* u;
+            cJSON_ArrayForEach(u, users) {
+                const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(u, "type"));
+                const char* un = cJSON_GetStringValue(cJSON_GetObjectItem(u, "name"));
+                if (off < sizeof(msg))
+                    off += (size_t)snprintf(msg + off, sizeof(msg) - off, "%s%s%s%s", i++ ? ", " : "",
+                                            strcmp(type, "rule") == 0 ? "rule '" : "", un,
+                                            strcmp(type, "rule") == 0 ? "'" : "");
+            }
+            if (off < sizeof(msg))
+                snprintf(msg + off, sizeof(msg) - off, ". Choose another profile there first.");
+            cJSON_Delete(users);
+            free(name);
+            ACAP_HTTP_Respond_Error(resp, 409, msg);
+            return;
+        }
+        cJSON_Delete(users);
+        Certs_Delete(name);
+        EventLog_System("certs", "info", "TLS profile '%s' deleted", name);
+        free(name);
+        ACAP_HTTP_Respond_Text(resp, "OK");
+
+    } else {
+        ACAP_HTTP_Respond_Error(resp, 405, "Method not allowed");
+    }
+}
+
+/*=====================================================
  * Signal handler
  *=====================================================*/
 static gboolean Signal_Handler(gpointer user_data) {
@@ -1800,6 +1968,14 @@ int main(void) {
     EventLog_Load();
     ACAP_Set_Warning_Hook(acap_warning_to_log);
     EventLog_System("engine", "info", "Event Engine %s started", app_version());
+
+    {
+        char tls_dir[512];
+        snprintf(tls_dir, sizeof(tls_dir), "%slocaldata/tls", ACAP_FILE_AppPath());
+        Certs_Init(tls_dir);
+        check_certificate_expiry(NULL);
+        g_timeout_add_seconds(12 * 3600, check_certificate_expiry, NULL);
+    }
 
     cJSON* eng_cfg = cJSON_GetObjectItem(settings, "engine");
     if (eng_cfg) apply_proxy_config(eng_cfg);
@@ -1860,6 +2036,7 @@ int main(void) {
     ACAP_HTTP_Node("aoa",        HTTP_AOA);
     ACAP_HTTP_Node("remote-caps", HTTP_RemoteCaps);
     ACAP_HTTP_Node("sparkplug",  HTTP_Sparkplug);
+    ACAP_HTTP_Node("certs",      HTTP_Certs);
 
     g_timeout_add_seconds(1, Engine_Tick, NULL);
 

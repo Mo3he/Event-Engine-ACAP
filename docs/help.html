@@ -407,6 +407,7 @@
       <a href="#arm-disarm">Arm / Disarm</a>
       <a href="#mqtt-setup">MQTT Setup</a>
       <a href="#sparkplug-setup">Sparkplug B Setup</a>
+      <a href="#tls-certs">TLS Certificates</a>
       <a href="#settings">Application Settings</a>
       <a href="#device-capabilities">Device Capabilities</a>
       <a href="#event-log">Event Log</a>
@@ -640,6 +641,7 @@ Content-Type: application/json
         <tr><td><strong>JSON Path</strong></td><td>Optional dot-notation path into a JSON response to extract a value (e.g. <code>data.temperature</code>).</td></tr>
         <tr><td><strong>JSON Expected Value</strong></td><td>The value the extracted JSON field must equal for the condition to pass.</td></tr>
         <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
       </table>
 
       <h3 id="cond-aoa">AOA Occupancy</h3>
@@ -710,6 +712,7 @@ Content-Type: application/json
         <tr><td><strong>Attach snapshot</strong></td><td>Fetch a JPEG from the camera and make it available as <span class="var">{{trigger.snapshot_base64}}</span> in subsequent actions and in this action's body.</td></tr>
         <tr><td><strong>Attach ALPV image</strong></td><td>For AXIS License Plate Verifier events: fetch the image ALPV saved for the car (vehicle crop, plate crop or frame, per ALPV's <em>Save full frame</em> setting) as <span class="var">{{trigger.alpv_image_base64}}</span>. ALPV saves it a few seconds after it first sees the car, so the request waits up to 15 s (other rules keep running), then sends without it.</td></tr>
         <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
         <tr><td><strong>Fallback action</strong></td><td>Execute an alternate action when the request fails (non-2xx or network error): log a syslog message, publish to MQTT, or send a secondary HTTP GET request.</td></tr>
       </table>
 
@@ -785,14 +788,20 @@ Content-Type: application/json
         <tr><td><strong>Channel</strong></td><td>Video channel to capture from.</td></tr>
         <tr><td><strong>Username / Password</strong></td><td>Optional Basic Auth credentials for the target server.</td></tr>
         <tr><td><strong>Extra headers</strong></td><td>Optional custom HTTP headers for the upload request.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
       </table>
+      <p>A response other than 2xx counts as a failure and is shown on the rule in the Event Log. To upload at a fixed interval, use a <a href="#trig-schedule">Schedule</a> trigger with an interval.</p>
 
       <h3 id="act-ftp">FTP Upload</h3>
-      <p>Capture a JPEG and upload it to an FTP or SFTP server.</p>
+      <p>Capture a JPEG and upload it to an FTP, FTPS or SFTP server.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>URL</strong></td><td>Full FTP URL including path. Template-aware (e.g. <code>ftp://server/{{camera.serial}}/{{date}}_{{time}}.jpg</code>). Directories are created automatically.</td></tr>
         <tr><td><strong>Username / Password</strong></td><td>FTP credentials.</td></tr>
+        <tr><td><strong>Use TLS (FTPS)</strong></td><td>Encrypt an <code>ftp://</code> connection (explicit FTPS, AUTH TLS); fails if the server doesn't support it. <code>ftps://</code> URLs (implicit FTPS) are always encrypted; <code>sftp://</code> uses SSH, so the TLS options don't apply.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
       </table>
 
       <h3 id="act-syslog">Send Syslog</h3>
@@ -1023,6 +1032,8 @@ Content-Type: application/json
         <tr><td><strong>Measurement</strong></td><td>Line protocol measurement name. Template substitution supported.</td></tr>
         <tr><td><strong>Tags</strong></td><td>Optional tag key=value pairs. Template substitution supported.</td></tr>
         <tr><td><strong>Fields</strong></td><td>At least one field key=value pair. Template substitution supported.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
       </table>
 
       <h3 id="act-aoa-counts">AOA Get Counts</h3>
@@ -1171,6 +1182,7 @@ Content-Type: application/json
         <tr><td><strong>Backup Brokers</strong></td><td>Optional. One <code>host</code> or <code>host:port</code> per line, up to seven. Tried in order, one second apart, whenever the broker above cannot be reached. Saving settings always restarts from the primary.</td></tr>
         <tr><td><strong>Use TLS</strong></td><td>Enable TLS/SSL encryption for secure broker connections.</td></tr>
         <tr><td><strong>Skip certificate verification</strong></td><td>Only with TLS. Accept self-signed or otherwise untrusted broker certificates and skip hostname checks. Traffic stays encrypted, but the broker identity is not verified, so use it only on trusted networks.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Only with TLS. Optional <a href="#tls-certs">TLS profile</a> for a broker with its own CA or one that requires a client certificate. Saving the profile reconnects with the new certificates.</td></tr>
         <tr><td><strong>Enabled</strong></td><td>Toggle MQTT on or off without clearing settings.</td></tr>
       </table>
       <p>Features:</p>
@@ -1225,6 +1237,24 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
         <li>QoS 1 publishes are resent with the DUP flag until the broker acknowledges them or the retry budget runs out. Sessions are always clean, as Sparkplug requires, so anything still unacknowledged when a connection drops is discarded and the reconnect publishes a fresh birth certificate instead.</li>
       </ul>
 
+      <!-- ═══════════════════════════════════════════ TLS CERTIFICATES -->
+      <h2 id="tls-certs">TLS Certificates</h2>
+      <p>Some servers only accept a camera that proves who it is with a client certificate (mutual TLS, like <code>curl --cert --key --cacert</code>), or use certificates from their own CA rather than a public one. Store those certificates once in <strong>Settings → TLS Certificates</strong> as a named <em>profile</em>, then choose the profile in <a href="#act-http">HTTP Request</a>, <a href="#act-snapshot">Snapshot Upload</a>, <a href="#act-influx">InfluxDB Write</a>, <a href="#act-ftp">FTP Upload</a>, the <a href="#cond-http">HTTP Check</a> condition, or the <a href="#mqtt-setup">MQTT broker</a> and <a href="#settings">Email (SMTP)</a> settings.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Name</strong></td><td>Shown in the rule editor. Letters, digits, spaces, <code>-</code>, <code>_</code> and <code>.</code>.</td></tr>
+        <tr><td><strong>Server CA certificate</strong></td><td>Optional. The CA that signed the server's certificate. When set, only this CA (or bundle) is trusted for the server, instead of the public CAs.</td></tr>
+        <tr><td><strong>Client certificate</strong></td><td>Optional. Presented to servers that ask for one. PEM; may be followed by its chain, and may also contain the private key.</td></tr>
+        <tr><td><strong>Private key</strong></td><td>Required with a client certificate and must match it. Encrypted keys need their <strong>passphrase</strong>; the key is decrypted when saved, stored on the camera only readable by the app, and never shown or exported again.</td></tr>
+        <tr><td><strong>Don't verify server certificate</strong></td><td>The connection is still encrypted and the client certificate is still sent, but the server's identity isn't checked. For testing or servers with self-signed certificates.</td></tr>
+      </table>
+      <p>Choose a file (PEM, or a binary <code>.cer</code>/<code>.der</code> certificate) or paste the PEM text. When editing a profile, leave a field empty to keep what is stored, or tick <strong>Remove</strong>; to renew a client certificate, choose only the new certificate if it uses the same key. PKCS#12 files (<code>.p12</code>/<code>.pfx</code>) must first be converted, for example <code>openssl pkcs12 -in camera.p12 -out camera.pem -nodes</code>.</p>
+      <p>The list shows each profile's client certificate, what the server is checked against, when the earliest certificate expires, and which rules use it. A profile in use can't be deleted until those rules (or the MQTT settings) use another one. Certificates that expire within 30 days, or have expired, are reported in the <a href="#event-log">Event Log</a> at startup and every 12 hours. Server addresses can be host names or IP addresses; an IP address must be in the server certificate's subject alternative names (or its CN, when it has none).</p>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Profiles are not part of <strong>Export Settings</strong>, so private keys never leave the camera. After moving to another camera, add the profiles there again; rules refer to them by name.</div>
+      </div>
+
       <!-- ═══════════════════════════════════════════ SETTINGS -->
       <h2 id="settings">Application Settings</h2>
 
@@ -1243,6 +1273,8 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>SMTP Server</strong></td><td>Use <code>host:port</code> format (e.g. <code>smtp.gmail.com:587</code>).</td></tr>
         <tr><td><strong>Use TLS</strong></td><td>Enable STARTTLS. Recommended for port 587.</td></tr>
+        <tr><td><strong>Skip certificate verification</strong></td><td>Accept a self-signed or otherwise untrusted mail server certificate. Traffic stays encrypted, but the server identity is not checked.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a> for a mail server with its own CA or one that requires a client certificate.</td></tr>
         <tr><td><strong>Username / Password</strong></td><td>SMTP credentials.</td></tr>
         <tr><td><strong>From Address</strong></td><td>Sender address used in all outbound emails.</td></tr>
       </table>
@@ -1324,6 +1356,7 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
         <tr><td>GET</td><td><code>/engine</code></td><td>Engine status, MQTT status, device info.</td></tr>
         <tr><td>GET</td><td><code>/aoa</code></td><td>List configured AOA scenarios (id, name, type).</td></tr>
         <tr><td>GET / POST</td><td><code>/settings</code></td><td>Engine, MQTT, SMTP, and device configuration.</td></tr>
+        <tr><td>GET / POST / DELETE</td><td><code>/certs</code></td><td><a href="#tls-certs">TLS profiles</a>. GET lists certificate details and <code>used_by</code> (never keys). POST <code>{name, ca, cert, key, passphrase, insecure}</code> creates or updates; omitted parts are kept, <code>""</code> removes one. DELETE <code>?name=</code> answers 409 while the profile is in use. Actions and the HTTP Check condition take <code>tls_profile</code>, as do <code>mqtt.tls_profile</code> and <code>smtp.tls_profile</code>.</td></tr>
         <tr><td>GET</td><td><code>/alertStream</code></td><td>Real-time multipart event stream. See below.</td></tr>
       </table>
       <p>For interactive documentation, open <a href="swagger.html" target="_blank">API Docs</a>.</p>

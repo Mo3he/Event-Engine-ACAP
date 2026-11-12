@@ -49,4 +49,8 @@ const API = {
   getAcapEvents:   ()   => API.get('acapevents'),
   addAcapEvent:    ev   => API.post('acapevents', ev).then(r => r.json()),
   deleteAcapEvent: id   => API.delete(`acapevents?id=${encodeURIComponent(id)}`),
+
+  getCerts:        ()   => API.get('certs'),
+  saveCert:        p    => API.post('certs', p).then(r => r.json()),
+  deleteCert:      name => API.delete(`certs?name=${encodeURIComponent(name)}`),
 };

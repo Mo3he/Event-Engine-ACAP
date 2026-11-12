@@ -20,6 +20,7 @@ let guardTours = null;        /* null=loading, []=none,   [{id,name},...] */
 let aoaScenarios = null;      /* null=loading, []=none or not available, [{id,name,type},...] */
 let ioOutputs = null;         /* null=loading, []=none, [{port,name},...] (1-based output ports) */
 let acapEvents = null;        /* null=loading, []=none, [{id,name,state,system},...] */
+let tlsProfiles = null;       /* null=loading, []=none, [{name,ca,cert,key,insecure,expires,used_by},...] */
 let pagingActions = null;     /* null=loading, []=none or not a paging device, [{id,label},...] */
 let pagingPages   = null;     /* null=loading, []=none, [{id,name},...] */
 let knownVarNames = [];       /* variable names loaded at startup for hint display */
@@ -104,6 +105,10 @@ if (typeof API === 'undefined') {
     getAcapEvents:   ()   => API.get('acapevents'),
     addAcapEvent:    ev   => API.post('acapevents', ev).then(r => r.json()),
     deleteAcapEvent: id   => API.delete(`acapevents?id=${encodeURIComponent(id)}`),
+
+    getCerts:        ()   => API.get('certs'),
+    saveCert:        p    => API.post('certs', p).then(r => r.json()),
+    deleteCert:      name => API.delete(`certs?name=${encodeURIComponent(name)}`),
   };
 }
 
@@ -1688,6 +1693,7 @@ window.addEventListener('DOMContentLoaded', () => {
     startPoll();
     loadVapixEventCatalog();
     loadAcapEvents();
+    loadTlsProfiles();
 
     API.getStatus().then(s => {
       if (s && s.engine_version) checkForUpdate(s.engine_version);

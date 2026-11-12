@@ -21,7 +21,7 @@ extern "C" {
  *   - Keepalive PINGREQ/PINGRESP
  *   - Multiple topic subscriptions with wildcard support (+ and #)
  *   - Optional TLS transport with hostname verification (can be disabled for
- *     self-signed brokers)
+ *     self-signed brokers), a custom CA and a client certificate (TLS profiles)
  *   - Incoming message dispatch via callback (on GMainLoop thread)
  *   - Thread-safe publish (mutex protected)
  *   - Binary-safe publish and Last Will & Testament (required by Sparkplug B)
@@ -67,6 +67,7 @@ typedef struct {
     int  keepalive;       /* seconds, 0 = default (60) */
     int  use_tls;         /* 1 = TLS transport, 0 = plain TCP */
     int  tls_insecure;    /* 1 = skip certificate and hostname verification */
+    char tls_profile[64]; /* TLS profile (CA / client certificate), "" = system CAs */
     int  enabled;
 } MQTT_Config;
 
@@ -75,6 +76,9 @@ void MQTT_Cleanup(void);
 
 /* Update config; reconnects if the broker list, TLS, credentials, client id or enabled changed */
 int  MQTT_Reconfigure(MQTT_Config* config);
+
+/* Reconnect when the given TLS profile is in use, so changed certificates take effect */
+void MQTT_TLS_Profile_Changed(const char* name);
 
 /* Publish — thread-safe, returns 1 on success.
  * qos: 0 = fire and forget, 1 = at-least-once (PUBACK expected from broker) */

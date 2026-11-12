@@ -11,7 +11,9 @@
     "username": "",
     "password": "",
     "from": "",
-    "use_tls": true
+    "use_tls": true,
+    "tls_insecure": false,
+    "tls_profile": ""
   },
   "mqtt": {
     "enabled": false,
@@ -23,6 +25,7 @@
     "keepalive": 60,
     "use_tls": false,
     "tls_insecure": false,
+    "tls_profile": "",
     "servers": []
   },
   "sparkplug": {

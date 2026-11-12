@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "scheduler.h"
 #include "actions.h"
+#include "certs.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "conditions: " fmt, ## args)
@@ -666,6 +667,27 @@ static int cond_http_check(cJSON* cfg) {
     if (allow_insecure && cJSON_IsTrue(allow_insecure)) {
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    const char* tls_profile = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tls_profile"));
+    if (tls_profile && tls_profile[0]) {
+        Certs_Paths cp;
+        if (!Certs_Get_Paths(tls_profile, &cp)) {
+            syslog(LOG_WARNING, "conditions: http_check: TLS profile '%s' does not exist", tls_profile);
+            curl_easy_cleanup(curl);
+            return 0;
+        }
+        if (cp.has_ca) {
+            curl_easy_setopt(curl, CURLOPT_CAINFO, cp.ca);
+            curl_easy_setopt(curl, CURLOPT_CAPATH, NULL);
+        }
+        if (cp.has_cert) {
+            curl_easy_setopt(curl, CURLOPT_SSLCERT, cp.cert);
+            curl_easy_setopt(curl, CURLOPT_SSLKEY, cp.key);
+        }
+        if (cp.insecure) {
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+        }
     }
     if (g_socks5_proxy[0]) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);

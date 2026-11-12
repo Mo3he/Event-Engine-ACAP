@@ -16,6 +16,7 @@
 #include "event_log.h"
 #include "rule_engine.h"
 #include "modbus_pool.h"
+#include "certs.h"
 #include "../ACAP.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "actions: " fmt, ## args)
@@ -668,6 +669,50 @@ static void curl_apply_base(CURL* curl, long timeout) {
     }
 }
 
+/* Apply TLS options to a curl handle: a TLS profile and/or skipping server
+ * verification. Returns 0, with the error recorded, when the profile does not
+ * exist: the request must not go out without the certificates the user asked for. */
+static int curl_apply_tls_opts(CURL* curl, const char* name, int insecure, const char* what) {
+    if (insecure) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    if (!name || !name[0]) return 1;
+    Certs_Paths cp;
+    if (!Certs_Get_Paths(name, &cp)) {
+        LOG_ACTION_ERR("%s: TLS profile '%s' does not exist", what, name);
+        return 0;
+    }
+    if (cp.has_ca) {
+        /* Only the profile's CAs, not the system bundle */
+        curl_easy_setopt(curl, CURLOPT_CAINFO, cp.ca);
+        curl_easy_setopt(curl, CURLOPT_CAPATH, NULL);
+    }
+    if (cp.has_cert) {
+        curl_easy_setopt(curl, CURLOPT_SSLCERT, cp.cert);
+        curl_easy_setopt(curl, CURLOPT_SSLCERTTYPE, "PEM");
+        curl_easy_setopt(curl, CURLOPT_SSLKEY, cp.key);
+        curl_easy_setopt(curl, CURLOPT_SSLKEYTYPE, "PEM");
+    }
+    if (cp.insecure) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    return 1;
+}
+
+/* The action's own TLS options: cfg.tls_profile and cfg.allow_insecure */
+static int curl_apply_tls(CURL* curl, cJSON* cfg, const char* what) {
+    return curl_apply_tls_opts(curl,
+                               cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tls_profile")),
+                               cJSON_IsTrue(cJSON_GetObjectItem(cfg, "allow_insecure")), what);
+}
+
+/* curl's detailed message when it has one (e.g. which TLS check failed) */
+static const char* curl_err_text(CURLcode res, const char* errbuf) {
+    return errbuf && errbuf[0] ? errbuf : curl_easy_strerror(res);
+}
+
 /* ---------- Remote-device VAPIX helpers ----------
  * Detect and strip an http(s):// scheme prefix from a remote host string.
  * Returns 1 for https (caller should disable TLS cert verification for the
@@ -1156,11 +1201,9 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_apply_base(curl, 10L);
-    cJSON* allow_insecure_j = cJSON_GetObjectItem(cfg, "allow_insecure");
-    if (allow_insecure_j && cJSON_IsTrue(allow_insecure_j)) {
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-    }
+    int tls_ok = curl_apply_tls(curl, cfg, "http_request");
+    char errbuf[CURL_ERROR_SIZE] = "";
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
 
     /* HTTP Basic/Digest authentication */
     const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
@@ -1207,14 +1250,14 @@ static void action_http_request(const char* rule_id, cJSON* cfg, cJSON* trigger_
 
     if (hdrs) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
 
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = tls_ok ? curl_easy_perform(curl) : CURLE_SSL_CERTPROBLEM;
     long http_code = 0;
     if (res == CURLE_OK) {
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code < 200 || http_code >= 300)
             LOG_ACTION_ERR("http_request to %s returned HTTP %ld", url, http_code);
-    } else {
-        LOG_ACTION_ERR("http_request to %s failed: %s", url, curl_easy_strerror(res));
+    } else if (tls_ok) {
+        LOG_ACTION_ERR("http_request to %s failed: %s", url, curl_err_text(res, errbuf));
     }
 
     if (hdrs) curl_slist_free_all(hdrs);
@@ -2925,6 +2968,9 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
 
     curl_easy_setopt(curl, CURLOPT_URL, write_url);
     curl_apply_base(curl, 10L);
+    int tls_ok = curl_apply_tls(curl, cfg, "influxdb_write");
+    char errbuf[CURL_ERROR_SIZE] = "";
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, line);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
@@ -2939,10 +2985,10 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
         }
     }
 
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK)
-        LOG_ACTION_ERR("influxdb_write failed: %s", curl_easy_strerror(res));
-    else {
+    CURLcode res = tls_ok ? curl_easy_perform(curl) : CURLE_SSL_CERTPROBLEM;
+    if (res != CURLE_OK) {
+        if (tls_ok) LOG_ACTION_ERR("influxdb_write failed: %s", curl_err_text(res, errbuf));
+    } else {
         long http_code = 0;
         curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
         if (http_code != 204 && http_code != 200)
@@ -3118,14 +3164,20 @@ static void action_email(cJSON* cfg, cJSON* trigger_data) {
 
     if (use_tls)
         curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+    int tls_ok = curl_apply_tls_opts(curl,
+        cJSON_GetStringValue(cJSON_GetObjectItem(smtp_cfg, "tls_profile")),
+        cJSON_IsTrue(cJSON_GetObjectItem(smtp_cfg, "tls_insecure")), "email");
+    char errbuf[CURL_ERROR_SIZE] = "";
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
 
     if (g_socks5_proxy[0]) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
         curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
     }
 
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_ACTION_ERR("email failed: %s", curl_easy_strerror(res));
+    CURLcode res = tls_ok ? curl_easy_perform(curl) : CURLE_SSL_CERTPROBLEM;
+    if (res != CURLE_OK && tls_ok) LOG_ACTION_ERR("email failed: %s", curl_err_text(res, errbuf));
+    explicit_bzero(smtp_pw, sizeof(smtp_pw));
     curl_slist_free_all(recipients);
     curl_easy_cleanup(curl);
     free(msg);
@@ -3271,8 +3323,14 @@ static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
         curl_easy_setopt(curl, CURLOPT_PROXY, g_socks5_proxy);
         curl_easy_setopt(curl, CURLOPT_PROXYTYPE, (long)CURLPROXY_SOCKS5_HOSTNAME);
     }
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_WARN("ftp_upload to %s failed: %s", url, curl_easy_strerror(res));
+    /* use_tls: explicit FTPS (AUTH TLS) on an ftp:// URL; ftps:// is always TLS */
+    if (cJSON_IsTrue(cJSON_GetObjectItem(cfg, "use_tls")))
+        curl_easy_setopt(curl, CURLOPT_USE_SSL, (long)CURLUSESSL_ALL);
+    int tls_ok = curl_apply_tls(curl, cfg, "ftp_upload");
+    char errbuf[CURL_ERROR_SIZE] = "";
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+    CURLcode res = tls_ok ? curl_easy_perform(curl) : CURLE_SSL_CERTPROBLEM;
+    if (res != CURLE_OK && tls_ok) LOG_ACTION_ERR("ftp_upload to %s failed: %s", url, curl_err_text(res, errbuf));
     curl_easy_cleanup(curl);
     free(url);
     free(snap);
@@ -3483,6 +3541,9 @@ static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
 
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_apply_base(curl, 30L);
+    int tls_ok = curl_apply_tls(curl, cfg, "snapshot_upload");
+    char errbuf[CURL_ERROR_SIZE] = "";
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
 
     const char* username = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "username"));
     const char* password = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "password"));
@@ -3518,11 +3579,17 @@ static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, snap_raw);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, (long)snap_len);
 
-    CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK)
-        LOG_WARN("snapshot_upload to %s failed: %s", url, curl_easy_strerror(res));
-    else
-        LOG("snapshot_upload: sent %zu bytes to %s", snap_len, url);
+    CURLcode res = tls_ok ? curl_easy_perform(curl) : CURLE_SSL_CERTPROBLEM;
+    long http_code = 0;
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+        if (http_code < 200 || http_code >= 300)
+            LOG_ACTION_ERR("snapshot_upload to %s returned HTTP %ld", url, http_code);
+        else
+            LOG("snapshot_upload: sent %zu bytes to %s (HTTP %ld)", snap_len, url, http_code);
+    } else if (tls_ok) {
+        LOG_ACTION_ERR("snapshot_upload to %s failed: %s", url, curl_err_text(res, errbuf));
+    }
 
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);

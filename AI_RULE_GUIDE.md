@@ -525,6 +525,7 @@ plus a first action `{"type":"set_variable","name":"last_car","value":"{{trigger
 | `expected_body` | string | Substring that must appear in response body |
 | `json_path` | string | Dot-notation path into JSON response (e.g. `"data.temperature"`) |
 | `json_expected` | string | Expected value at `json_path` |
+| `tls_profile` | string | Optional [TLS profile](#tls-profiles-client-certificates) name |
 
 ### 6. `vapix_event_state` — Live Event State Check
 
@@ -653,6 +654,8 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `io_flash`
 | `attach_snapshot` | boolean | `false` | Capture JPEG snapshot, available as `{{trigger.snapshot_base64}}` |
 | `attach_alpv_image` | boolean | `false` | For ALPV events (needs `carID`): fetch the image ALPV saved for the car, available as `{{trigger.alpv_image_base64}}`. ALPV saves it a few seconds after first seeing the car, so the request (and any later actions) waits up to 15 s without blocking other rules, then sends without it |
 | `on_failure` | array | — | Actions to execute if request fails (non-2xx or network error) |
+| `allow_insecure` | boolean | `false` | Skip server certificate verification |
+| `tls_profile` | string | — | [TLS profile](#tls-profiles-client-certificates) name: private CA and/or client certificate (mutual TLS) |
 
 ### 2. `mqtt_publish` — MQTT Publish
 
@@ -1038,6 +1041,11 @@ Fetches the latest cached data from a device event and injects values as `{{trig
 | `username` | string | — | HTTP auth username |
 | `password` | string | — | HTTP auth password |
 | `headers` | string | — | Extra headers (Key: Value, one per line) |
+| `allow_insecure` | boolean | `false` | Skip server certificate verification |
+| `tls_profile` | string | — | [TLS profile](#tls-profiles-client-certificates) name: private CA and/or client certificate (mutual TLS) |
+
+A non-2xx response counts as a failure. For an upload every N seconds, use a
+`schedule` trigger with `schedule_type: "interval"`.
 
 ### 20. `ir_cut_filter` — Day/Night Mode
 
@@ -1262,6 +1270,8 @@ Requires SMTP to be configured in settings.
 | `measurement` | string | — | Measurement name. Supports template variables. |
 | `fields` | string | — | Line protocol fields. Supports template variables. |
 | `tags` | string | — | Line protocol tags. Supports template variables. |
+| `allow_insecure` | boolean | `false` | Skip server certificate verification |
+| `tls_profile` | string | — | Optional [TLS profile](#tls-profiles-client-certificates) name |
 | **v2:** `org` | string | — | Organization |
 | **v2:** `bucket` | string | — | Bucket |
 | **v2:** `token` | string | — | Bearer token |
@@ -1285,6 +1295,9 @@ Requires SMTP to be configured in settings.
 | `url` | string | FTP/SFTP URL (including filename). Supports template variables. |
 | `username` | string | FTP credentials |
 | `password` | string | FTP credentials |
+| `use_tls` | boolean | Explicit FTPS (AUTH TLS) on an `ftp://` URL. `ftps://` is always TLS; not used for `sftp://` |
+| `allow_insecure` | boolean | Skip server certificate verification |
+| `tls_profile` | string | Optional [TLS profile](#tls-profiles-client-certificates) name |
 
 ### 32. `digest` — Notification Digest (Batched Alerts)
 
@@ -1416,6 +1429,29 @@ For a broker with a self-signed certificate, set `"use_tls": true` and
 `"tls_insecure": true` (default `false`). This skips certificate and host name
 verification, so the broker's identity is not checked.
 
+### TLS profiles (client certificates)
+
+For a server or broker that uses its own CA, or requires the camera to present
+a client certificate (mutual TLS), store the certificates once as a named
+profile, then reference it with `"tls_profile": "NAME"` in `http_request`,
+`snapshot_upload`, `influxdb_write`, `ftp_upload`, the `http_check` condition,
+`mqtt.tls_profile` (with `use_tls: true`) or `smtp.tls_profile`. Profiles are not stored in rules or
+settings, so create them on each camera before importing rules that use them.
+
+```bash
+# CA_FILE, CERT_FILE and KEY_FILE are PEM files
+jq -n --rawfile ca CA_FILE --rawfile cert CERT_FILE --rawfile key KEY_FILE \
+  '{name: "upload-server", ca: $ca, cert: $cert, key: $key}' |
+curl -s -k -u root:pass --anyauth -X POST -H "Content-Type: application/json" \
+  --data-binary @- "https://CAMERA_IP/local/acap_event_engine/certs"
+```
+
+Optional fields: `passphrase` (encrypted key) and `insecure: true` (don't verify
+the server certificate; the client certificate is still sent). On update,
+omitted parts are kept and `""` removes a part. `GET /certs` lists profiles
+without keys; `DELETE /certs?name=NAME` returns 409 while a rule or the MQTT
+settings use it.
+
 ### Configure SMTP (for email actions)
 
 ```bash
@@ -1432,6 +1468,9 @@ curl -s -k -u root:pass --anyauth \
   }' \
   "https://CAMERA_IP/local/acap_event_engine/settings"
 ```
+
+Optional: `"tls_insecure": true` for a mail server with a self-signed
+certificate, and `"tls_profile": "NAME"` for its own CA or a client certificate.
 
 ### Set Location (for astronomical triggers)
 

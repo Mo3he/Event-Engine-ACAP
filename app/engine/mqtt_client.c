@@ -19,6 +19,7 @@
 #include <glib.h>
 
 #include "event_log.h"
+#include "certs.h"
 #include "mqtt_client.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "mqtt: " fmt, ## args)
@@ -239,28 +240,31 @@ static int tls_init(void) {
     return 1;
 }
 
-static SSL* tls_connect(int fd, const char* host, int insecure) {
-    if (!tls_init()) return NULL;
-
+static SSL* tls_connect(int fd, const char* host, int insecure, const char* profile) {
+    SSL* ssl = NULL;
     ERR_clear_error();
-    SSL* ssl = SSL_new(tls_ctx);
+    if (profile && profile[0]) {
+        char err[256] = "";
+        int profile_insecure = 0;
+        SSL_CTX* ctx = Certs_New_SSL_CTX(profile, &profile_insecure, err, sizeof(err));
+        if (!ctx) {
+            LOG_WARN("%s", err);
+            return NULL;
+        }
+        if (profile_insecure) insecure = 1;
+        ssl = SSL_new(ctx);
+        SSL_CTX_free(ctx);   /* the connection holds its own reference */
+    } else {
+        if (!tls_init()) return NULL;
+        ssl = SSL_new(tls_ctx);
+    }
     if (!ssl) {
         log_tls_error("SSL_new");
         return NULL;
     }
 
     SSL_set_verify(ssl, insecure ? SSL_VERIFY_NONE : SSL_VERIFY_PEER, NULL);
-    if (host && host[0]) {
-        if (!insecure) {
-            X509_VERIFY_PARAM* param = SSL_get0_param(ssl);
-            if (!param || X509_VERIFY_PARAM_set1_host(param, host, 0) != 1) {
-                log_tls_error("X509_VERIFY_PARAM_set1_host");
-                SSL_free(ssl);
-                return NULL;
-            }
-        }
-        SSL_set_tlsext_host_name(ssl, host);
-    }
+    Certs_Set_SNI(ssl, host);
 
     if (SSL_set_fd(ssl, fd) != 1) {
         log_tls_error("SSL_set_fd");
@@ -268,12 +272,22 @@ static SSL* tls_connect(int fd, const char* host, int insecure) {
         return NULL;
     }
     if (SSL_connect(ssl) != 1) {
-        log_tls_error("SSL_connect");
+        long vr = SSL_get_verify_result(ssl);
+        if (!insecure && vr != X509_V_OK)
+            LOG_WARN("TLS certificate verification failed for %s: %s", host ? host : "broker",
+                     X509_verify_cert_error_string(vr));
+        else
+            log_tls_error("SSL_connect");
         SSL_free(ssl);
         return NULL;
     }
     if (!insecure && SSL_get_verify_result(ssl) != X509_V_OK) {
         LOG_WARN("TLS certificate verification failed for %s", host ? host : "broker");
+        SSL_free(ssl);
+        return NULL;
+    }
+    if (!insecure && !Certs_Check_Server_Identity(ssl, host)) {
+        LOG_WARN("TLS certificate of the broker does not match %s", host ? host : "the broker address");
         SSL_free(ssl);
         return NULL;
     }
@@ -809,8 +823,12 @@ static void* worker_fn(void* arg) {
         active_port = cur_port;
         pthread_mutex_unlock(&cfg_lock);
 
-        const char* tls_note = !active.use_tls ? "" :
-                               active.tls_insecure ? " with TLS (certificate verification disabled)" : " with TLS";
+        char tls_note[128] = "";
+        if (active.use_tls)
+            snprintf(tls_note, sizeof(tls_note), " with TLS%s%s%s%s",
+                     active.tls_profile[0] ? " (profile '" : "", active.tls_profile,
+                     active.tls_profile[0] ? "')" : "",
+                     active.tls_insecure ? " (certificate verification disabled)" : "");
         if (count > 1)
             LOG("connecting to %s:%d%s (broker %d of %d)", cur_host, cur_port,
                 tls_note, idx + 1, count);
@@ -828,7 +846,7 @@ static void* worker_fn(void* arg) {
 
         SSL* ssl = NULL;
         if (active.use_tls) {
-            ssl = tls_connect(fd, cur_host, active.tls_insecure);
+            ssl = tls_connect(fd, cur_host, active.tls_insecure, active.tls_profile);
             if (!ssl) {
                 close(fd);
                 int wrapped = next_server(count);
@@ -1054,7 +1072,8 @@ void MQTT_Cleanup(void) {
 int MQTT_Reconfigure(MQTT_Config* config) {
     pthread_mutex_lock(&cfg_lock);
     int host_changed = strcmp(cfg.host, config->host) != 0 || cfg.port != config->port ||
-                       cfg.use_tls != config->use_tls || cfg.tls_insecure != config->tls_insecure;
+                       cfg.use_tls != config->use_tls || cfg.tls_insecure != config->tls_insecure ||
+                       strcmp(cfg.tls_profile, config->tls_profile) != 0;
     int auth_changed  = strcmp(cfg.username, config->username) != 0 ||
                         strcmp(cfg.password, config->password) != 0 ||
                         strcmp(cfg.client_id, config->client_id) != 0;
@@ -1073,6 +1092,17 @@ int MQTT_Reconfigure(MQTT_Config* config) {
      * backing off it must pick up the corrected settings straight away. */
     if (restart) request_reconnect();
     return 1;
+}
+
+void MQTT_TLS_Profile_Changed(const char* name) {
+    if (!name) return;
+    pthread_mutex_lock(&cfg_lock);
+    int used = cfg.enabled && cfg.use_tls && strcmp(cfg.tls_profile, name) == 0;
+    pthread_mutex_unlock(&cfg_lock);
+    if (used) {
+        LOG("TLS profile '%s' changed, reconnecting", name);
+        request_reconnect();
+    }
 }
 
 void MQTT_Set_Proxy(const char* ph, int pp) {
@@ -1227,6 +1257,7 @@ cJSON* MQTT_Status(void) {
     cJSON_AddBoolToObject(obj,   "connected", connected);
     cJSON_AddBoolToObject(obj,   "use_tls",   cfg.use_tls);
     cJSON_AddBoolToObject(obj,   "tls_insecure", cfg.use_tls && cfg.tls_insecure);
+    cJSON_AddStringToObject(obj, "tls_profile", cfg.use_tls ? cfg.tls_profile : "");
     cJSON_AddStringToObject(obj, "host",      cfg.host);
     cJSON_AddNumberToObject(obj, "port",      cfg.port);
     cJSON_AddStringToObject(obj, "active_host", active_host);

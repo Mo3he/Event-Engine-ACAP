@@ -1,5 +1,74 @@
 # Release Notes
 
+## v1.9.25 - Client certificates (mutual TLS)
+
+Event Engine can now present a client certificate to servers that require one
+(mutual TLS) and trust servers that use their own CA, for HTTPS requests,
+snapshot uploads, InfluxDB, FTP, email, the HTTP Check condition and MQTT. For
+example, a
+camera can upload a snapshot every few minutes to a server that only accepts
+cameras with a certificate it issued, the equivalent of
+`curl --cert --key --cacert`.
+
+### Upgrading to 1.9.25
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.25
+
+- **TLS certificates.** *Settings → TLS Certificates* stores named profiles,
+  each with any of: the CA of the server (used instead of the public CAs), a
+  client certificate (optionally with its chain), its private key, and
+  *Don't verify server certificate* (the connection stays encrypted and the
+  client certificate is still sent, but the server's identity isn't checked).
+  Choose a file or paste PEM text; binary `.cer`/`.der` certificates and
+  combined certificate-and-key files work too. An encrypted key needs its
+  passphrase; it is decrypted when saved, stored readable only by the app, and
+  never shown or exported. Saving checks the files and that the key matches
+  the certificate, with a clear message when it doesn't.
+- **Choose a profile** under *TLS certificates* in *HTTP Request*,
+  *Snapshot Upload*, *InfluxDB Write*, *FTP Upload*, the *HTTP Check*
+  condition, and the MQTT broker and Email (SMTP) settings. Saving a profile
+  that MQTT uses reconnects it with the new certificates.
+- **Skip certificate verification everywhere it applies.** *Snapshot Upload*,
+  *InfluxDB Write* and *FTP Upload* get the *Allow untrusted certificate*
+  option *HTTP Request* already had, and the Email (SMTP) settings get *Skip
+  certificate verification*, for servers with self-signed certificates.
+- **FTPS.** *FTP Upload* has a *Use TLS (FTPS)* option that encrypts an
+  `ftp://` connection (explicit FTPS); `ftps://` URLs already worked.
+- **The profile list** shows each client certificate, what the server is
+  checked against, when the earliest certificate expires (amber within 30
+  days, red once expired), and which rules use it. A profile in use can't be
+  deleted until those rules or the MQTT settings use another one.
+  Certificates that expire within 30 days are also reported in the Event Log
+  at startup and every 12 hours.
+- **API:** `GET/POST/DELETE /certs`; `tls_profile` on the actions, the HTTP
+  Check condition, `mqtt` and `smtp`; `allow_insecure` on `snapshot_upload`,
+  `influxdb_write` and `ftp_upload`; `use_tls` on `ftp_upload`;
+  `smtp.tls_insecure`.
+
+### Fixes in 1.9.25
+
+- **Snapshot Upload reports failed uploads.** A response such as 401 or 403
+  was logged as sent; it now fails the action, with the status on the rule in
+  the Event Log, like *HTTP Request*. Snapshot and FTP upload errors also
+  appear on the rule instead of only in the system log.
+- **Clearer TLS errors.** HTTP, FTP and email actions report curl's own
+  message, such as
+  `SSL certificate problem: unable to get local issuer certificate`, and MQTT
+  names the verification error.
+- **MQTT brokers addressed by IP** are verified against the IP address in the
+  broker certificate's subject alternative names (or its CN when it has none),
+  and the IP is no longer sent as the TLS server name.
+
+Verified on a P3288-LV against a test CA, an HTTPS server and a Mosquitto
+broker that both require a client certificate: uploads, HTTP requests,
+InfluxDB writes and HTTP checks succeed with the profile and are refused
+without a client certificate or without the CA; MQTT connects, carries
+messages both ways, reconnects when the profile is saved and after an app
+restart, and the profiles and expiry warning survive the restart.
+
 ## v1.9.24 - Axis events with values, system messages in the Event Log
 
 The *Fire ACAP Event* action can now send values with an event, for example a

@@ -33,6 +33,18 @@ jobs:
              tools/sparkplug_pb_test.c app/engine/sparkplug_pb.c
           /tmp/sparkplug_pb_test
 
+  certs:
+    name: TLS profile store tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run the certificate store and mutual-TLS handshake tests
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libssl-dev
+          cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iapp/engine \
+             -o /tmp/certs_test tools/certs_test.c app/engine/certs.c app/cJSON.c -lssl -lcrypto -lpthread
+          /tmp/certs_test
+
   build_acap:
     name: Build ACAP (${{ matrix.arch }})
     runs-on: ubuntu-latest

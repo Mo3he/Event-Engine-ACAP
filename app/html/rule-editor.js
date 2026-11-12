@@ -925,7 +925,8 @@ function conditionFields(c, rowIdx) {
         Allow untrusted certificate (skip SSL verification)
       </label>
       <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
-    </div></div>`;
+    </div></div>
+    ${tlsProfileField(c.tls_profile)}`;
   if (type === 'aoa_occupancy') {
     const isRemote = c.remote_host_toggle === 'remote'
       || (c.remote_host && c.remote_host_toggle !== 'local');
@@ -1677,6 +1678,41 @@ function applyRemotePtzPreset(sel, rowIdx) {
   if (presetInput) presetInput.value = val.slice(colon + 1);
 }
 
+/* TLS profile picker for HTTPS actions and conditions (profiles live in Settings) */
+function tlsProfileLabel(p) {
+  const parts = [];
+  if (p.cert) parts.push('client certificate');
+  if (p.ca) parts.push('private CA');
+  if (p.insecure) parts.push('server not verified');
+  return parts.length ? ` — ${parts.join(', ')}` : '';
+}
+
+function insecureField(a) {
+  return `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="allow_insecure" ${a.allow_insecure ? 'checked' : ''}>
+        Allow untrusted certificate (skip SSL verification)
+      </label>
+      <div class="form-hint">Enable when the server uses a self-signed or expired certificate.</div>
+    </div></div>`;
+}
+
+function tlsProfileField(cur) {
+  const list = Array.isArray(tlsProfiles) ? tlsProfiles : [];
+  const missing = cur && !list.some(p => p.name === cur);
+  return `
+    <div class="form-row"><div class="form-group">
+      <label>TLS certificates <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+      <select data-k="tls_profile">
+        <option value="">None — public CAs, no client certificate</option>
+        ${list.map(p => `<option value="${escHtml(p.name)}" ${p.name === cur ? 'selected' : ''}>${escHtml(p.name)}${escHtml(tlsProfileLabel(p))}</option>`).join('')}
+        ${missing ? `<option value="${escHtml(cur)}" selected>${escHtml(cur)} (missing — add it in Settings)</option>` : ''}
+      </select>
+      <div class="form-hint">For servers that use their own CA or require a client certificate (mutual TLS). ${list.length ? '' : 'No profiles yet: '}Add certificates in <b>Settings → TLS Certificates</b>.</div>
+    </div></div>`;
+}
+
 function actionFields(a, rowIdx) {
   const type = a.type || 'http_request';
   const hint = getTokenInsertWidget();
@@ -1741,6 +1777,7 @@ function actionFields(a, rowIdx) {
       </label>
       <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
     </div></div>
+    ${tlsProfileField(a.tls_profile)}
     ${renderOnFailureFields(a)}`;
   if (type === 'recording') {
     const recStart = (a.operation || 'start') === 'start';
@@ -2418,7 +2455,9 @@ function actionFields(a, rowIdx) {
       <input type="text" data-k="fields" value="${escHtml(a.fields || '')}" placeholder="co2={{trigger.CO2}},temperature={{trigger.Temperature}}">
       ${hint}
       <div class="form-hint">Numeric values sent as-is. Wrap strings in double quotes: <code>name="{{trigger.name}}"</code></div>
-    </div></div>`;
+    </div></div>
+    ${insecureField(a)}
+    ${tlsProfileField(a.tls_profile)}`;
   if (type === 'telegram') return `
     <div class="form-row">
       <div class="form-group">
@@ -2480,7 +2519,7 @@ function actionFields(a, rowIdx) {
       <label>FTP URL</label>
       <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="ftp://server/cameras/{{camera.serial}}/{{date}}_{{time}}.jpg">
       ${hint}
-      <div class="form-hint">Supports FTP and SFTP. Directories are created automatically. Use <code>sftp://</code> for SFTP.</div>
+      <div class="form-hint">Supports FTP, FTPS and SFTP. Directories are created automatically. Use <code>sftp://</code> for SFTP, <code>ftps://</code> for implicit FTPS (port 990).</div>
     </div></div>
     <div class="form-row">
       <div class="form-group">
@@ -2491,7 +2530,16 @@ function actionFields(a, rowIdx) {
         <label>Password</label>
         <input type="password" data-k="password" value="${escHtml(a.password || '')}" autocomplete="new-password">
       </div>
-    </div>`;
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="use_tls" ${a.use_tls ? 'checked' : ''}>
+        Use TLS (FTPS)
+      </label>
+      <div class="form-hint">Encrypts an <code>ftp://</code> connection (explicit FTPS, AUTH TLS) and fails if the server doesn't support it. Not needed for <code>ftps://</code>; doesn't apply to <code>sftp://</code>, which uses SSH.</div>
+    </div></div>
+    ${insecureField(a)}
+    ${tlsProfileField(a.tls_profile)}`;
   if (type === 'digest') return `
     <div class="form-row">
       <div class="form-group">
@@ -2699,7 +2747,9 @@ function actionFields(a, rowIdx) {
         <label>Extra Headers</label>
         <textarea data-k="headers" rows="2" placeholder="X-Token: abc123">${escHtml(a.headers || '')}</textarea>
       </div>
-    </div>`;
+    </div>
+    ${insecureField(a)}
+    ${tlsProfileField(a.tls_profile)}`;
   if (type === 'ir_cut_filter') return `
     <div class="form-row">
       <div class="form-group" style="flex:0 0 180px;">
@@ -3326,6 +3376,7 @@ function normalizeCondition(c) {
     if (c.expected_body) out.expected_body = c.expected_body;
     if (c.json_path) { out.json_path = c.json_path; out.json_expected = c.json_expected || ''; }
     if (c.allow_insecure === true) out.allow_insecure = true;
+    if (c.tls_profile) out.tls_profile = c.tls_profile;
   } else if (c.type === 'aoa_occupancy') {
     out.scenario_id = parseInt(c.scenario_id) || 1;
     out.object_class = c.object_class || 'any';
@@ -3373,7 +3424,7 @@ function normalizeAction(a) {
                  'measurement','tags','fields','bot_token','chat_id','parse_mode',
                  'smtp_server','from','to','subject','deliver_via','line',
                  'event_key','data_key','expected','interval',
-                 'action_id','page_id','slot','duration_ms','gap_ms','count'];
+                 'action_id','page_id','slot','duration_ms','gap_ms','count','tls_profile'];
   pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
   if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
   const isRemote = a.remote_host_toggle === 'remote'
@@ -3528,6 +3579,9 @@ function normalizeAction(a) {
   if (a.type === 'influxdb_write') {
     out.version = a.version || 'v2';
   }
+  if (['snapshot_upload', 'influxdb_write', 'ftp_upload'].includes(a.type) && a.allow_insecure === true)
+    out.allow_insecure = true;
+  if (a.type === 'ftp_upload' && a.use_tls === true) out.use_tls = true;
   if (a.type === 'email') {
     /* use_tls is controlled by global SMTP config, not per-action */
     out.attach_snapshot = a.attach_snapshot === true;

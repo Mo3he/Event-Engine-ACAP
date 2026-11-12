@@ -11,7 +11,8 @@ OBJS1 = main.c ACAP.c cJSON.c \
         engine/sparkplug_pb.c \
         engine/sparkplug.c \
         engine/alert_stream.c \
-        engine/modbus_pool.c
+        engine/modbus_pool.c \
+        engine/certs.c
 PROGS = $(PROG1)
 
 PKGS = glib-2.0 gio-2.0 axevent fcgi
