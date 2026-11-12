@@ -379,6 +379,12 @@ int main(void) {
 
     Certs_Cleanup();
     SSL_CTX_free(sctx);
+    EVP_PKEY* keys[] = { ca_key, other_ca_key, srv_key, cli_key, stray_key };
+    X509* certs[] = { ca, other_ca, srv, cli, cli_renewed, cli_soon, cli_expired, other_cli };
+    char* pems[] = { ca_pem, cli_pem, cli_key_pem, cli_key_enc, stray_key_pem, combined, renewed, intruder, soon, old };
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) EVP_PKEY_free(keys[i]);
+    for (size_t i = 0; i < sizeof(certs) / sizeof(certs[0]); i++) X509_free(certs[i]);
+    for (size_t i = 0; i < sizeof(pems) / sizeof(pems[0]); i++) free(pems[i]);
     char cmd[400];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
     if (system(cmd) != 0) printf("cleanup of %s failed\n", dir);
