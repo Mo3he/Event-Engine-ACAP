@@ -1817,7 +1817,28 @@ function actionFields(a, rowIdx) {
       </label>
     </div></div>` : ''}`;
   }
-  if (type === 'overlay_text') return `
+  if (type === 'overlay_text') {
+    const clearing = a.operation === 'clear';
+    return `
+    <div class="form-row" style="flex-wrap:wrap;">
+      <div class="form-group" style="flex:0 0 150px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="set"   ${!clearing ? 'selected' : ''}>Show / update</option>
+          <option value="clear" ${clearing  ? 'selected' : ''}>Clear</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 80px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}">
+      </div>
+      <div class="form-group" style="flex:1 1 200px;">
+        <label>Overlay name (optional)</label>
+        <input type="text" data-k="overlay" value="${escHtml(a.overlay || '')}" placeholder="e.g. plate_alert">
+        <div class="form-hint">Actions with the same name and channel control the same overlay, also across rules. Leave empty to use the channel's shared overlay.</div>
+      </div>
+    </div>
+    ${clearing ? '' : `
     <div class="form-row">
       <div class="form-group">
         <label>Text</label>
@@ -1826,10 +1847,6 @@ function actionFields(a, rowIdx) {
       </div>
     </div>
     <div class="form-row" style="flex-wrap:wrap;">
-      <div class="form-group" style="flex:0 0 80px;">
-        <label>Channel</label>
-        <input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}">
-      </div>
       <div class="form-group" style="flex:0 0 130px;">
         <label>Duration (s, 0=keep)</label>
         <input type="number" data-k="duration" min="0" value="${escHtml(a.duration || 0)}" onchange="rerenderAction(this)">
@@ -1873,7 +1890,8 @@ function actionFields(a, rowIdx) {
         <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
         Run while active - automatically clear overlay when the triggering condition clears
       </label>
-    </div></div>` : ''}`;
+    </div></div>` : ''}`}`;
+  }
   if (type === 'ptz_preset') {
     const remoteCtrl = remoteCapControl(a, rowIdx, 'ptz', 'preset', a.preset || '', 'HomePosition');
     if (remoteCtrl) {
@@ -3506,8 +3524,16 @@ function normalizeAction(a) {
   }
   if (a.type === 'recording' && (out.operation || 'start') === 'start')
     out.while_active = a.while_active === true;
-  if (a.type === 'overlay_text' && !(parseInt(a.duration) > 0))
-    out.while_active = a.while_active === true;
+  if (a.type === 'overlay_text') {
+    if (out.operation === 'clear') {
+      ['text', 'duration', 'position', 'text_color'].forEach(k => delete out[k]);
+    } else {
+      delete out.operation;
+      if (!(parseInt(a.duration) > 0)) out.while_active = a.while_active === true;
+    }
+    const name = String(a.overlay || '').trim();
+    if (name) out.overlay = name;
+  }
   if (a.type === 'io_output') {
     const states = ioOutputStates(a);
     out.ports = Object.keys(states).map(Number).sort((x, y) => x - y).map(p => ({ port: p, state: states[p] }));

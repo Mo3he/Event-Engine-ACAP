@@ -1,5 +1,36 @@
 # Release Notes
 
+## v1.9.26 - Named overlays, and overlays that stay Event Engine's own
+
+**Overlay Text** can now show several overlays on one channel and clear them from
+any rule. Give the action an **Overlay name** (for example `plate_alert`): every
+action with the same name and channel controls the same overlay, so one rule can
+show an alert and another can remove it. The new **Clear** operation removes an
+overlay. Without a name, the action uses the channel's shared overlay as before,
+so existing rules behave the same.
+
+Fixes:
+
+- Event Engine could change or remove overlays that weren't its own. The camera
+  reuses overlay numbers, so after Event Engine's overlay was removed, its next
+  update (or a pending duration) could hit an overlay added in the camera's
+  settings, by another app, or (with remote targets) on another device. Event
+  Engine now checks that an overlay still shows the text it wrote before changing
+  or removing it, and creates a new one otherwise.
+- Firing an overlay again before its duration ended removed it when the first
+  duration ran out; the countdown now restarts.
+- Overlays stayed on the video when Event Engine stopped or was upgraded, and the
+  next firing added a second one. Event Engine now removes its overlays when it
+  stops, and after an unexpected exit removes the ones it left at the next start.
+  Overlays left on screen by 1.9.25 or earlier can't be identified; remove them
+  once under **Settings > Overlays** or restart the camera.
+- Local and remote Overlay Text actions on the same channel no longer share
+  (and overwrite) one overlay.
+- Overlay errors from the camera (for example an invalid position) are shown in
+  the action test and the Event Log.
+
+API: `overlay` and `operation` (`set` | `clear`) on `overlay_text`.
+
 ## v1.9.25 - Client certificates (mutual TLS)
 
 Event Engine can now present a client certificate to servers that require one

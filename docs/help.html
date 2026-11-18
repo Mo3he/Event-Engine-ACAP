@@ -826,13 +826,16 @@ Content-Type: application/json
       <p>Write text on the live video stream.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Show / update</em> writes the text; <em>Clear</em> removes the overlay.</td></tr>
         <tr><td><strong>Channel</strong></td><td>Video channel number.</td></tr>
+        <tr><td><strong>Overlay name</strong></td><td>Optional. Actions with the same name and channel control the same overlay, also across rules, so one rule can show an alert and another can clear it. Leave empty to use the channel's shared overlay.</td></tr>
         <tr><td><strong>Text</strong></td><td>Overlay text. Template substitution supported.</td></tr>
         <tr><td><strong>Position</strong></td><td>Where to place the text: top-left, top-right, bottom-left, bottom-right, top, or bottom.</td></tr>
         <tr><td><strong>Text colour</strong></td><td>Overlay colour: white, black, red, transparent, or semi-transparent.</td></tr>
-        <tr><td><strong>Duration</strong></td><td>Seconds before the overlay is cleared automatically. Set to 0 and enable <em>While active</em> to clear when the triggering condition ends.</td></tr>
+        <tr><td><strong>Duration</strong></td><td>Seconds before the overlay is cleared automatically; firing again restarts the countdown. Set to 0 and enable <em>While active</em> to clear when the triggering condition ends.</td></tr>
         <tr><td><strong>While active</strong></td><td>Automatically clear the overlay when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
       </table>
+      <p>Event Engine only changes or removes overlays it created. Overlays added in the camera's own settings or by other apps are left alone, and Event Engine's overlays are removed when it stops.</p>
 
       <h3 id="act-ptz">PTZ Preset</h3>
       <p>Move the camera to a named preset position. Available presets are loaded from the camera.</p>
