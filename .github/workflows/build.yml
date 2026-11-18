@@ -20,6 +20,13 @@ jobs:
         run: ./tools/sync-docs.sh --check
       - name: Check UI assets are cache-busted with the app version
         run: ./tools/check-cache-bust.sh
+      - name: Check the site's version fallback matches the app version
+        run: |
+          v=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' app/manifest.json | head -1)
+          grep -q "id=\"hero-version\">v$v " docs/index.html || {
+            echo "docs/index.html: hero-version should start with v$v (shown when the GitHub API is unavailable)"
+            exit 1
+          }
 
   sparkplug_codec:
     name: Sparkplug B codec tests
