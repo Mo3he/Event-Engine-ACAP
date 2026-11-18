@@ -717,14 +717,28 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `io_flash`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `operation` | string | `set` | `set` shows or updates the overlay; `clear` removes it (needs only `channel`, `overlay` and the remote fields) |
+| `overlay` | string | — | Optional name (up to 63 characters). Actions with the same name, channel and target device control the same overlay, also across rules. Empty = the channel's shared overlay. |
 | `text` | string | — | Overlay text. Supports template variables. |
-| `duration` | integer | `0` | Seconds to display (0 = until next update) |
+| `duration` | integer | `0` | Seconds to display (0 = until next update). Firing again restarts the countdown. |
 | `channel` | integer | `1` | Video channel |
 | `position` | string | `topLeft` | `keep` (leave current position untouched), `topLeft`, `topRight`, `bottomLeft`, `bottomRight`, `top` (top centre), `bottom` (bottom centre), or `custom` |
 | `pos_x` | number | `-0.99` | Custom X coordinate (-1..1, left to right). Used when `position` = `custom` |
 | `pos_y` | number | `-0.99` | Custom Y coordinate (-1..1, top to bottom). Used when `position` = `custom` |
 | `text_color` | string | `white` | `white`, `black`, `red`, `transparent`, `semiTransparent` |
 | `while_active` | boolean | `false` | Auto-clear when trigger goes inactive |
+
+Event Engine only changes or removes overlays it created: before each update it
+checks that the overlay still shows the text it wrote, and creates a new one
+otherwise. Its overlays are removed when Event Engine stops. Show and clear an
+alert from two rules by giving both actions the same `overlay` name:
+
+```json
+[
+  { "type": "overlay_text", "overlay": "plate_alert", "text": "BLOCKED {{trigger.text}}", "position": "top" },
+  { "type": "overlay_text", "overlay": "plate_alert", "operation": "clear" }
+]
+```
 
 ### 5. `ptz_preset` — PTZ Preset
 

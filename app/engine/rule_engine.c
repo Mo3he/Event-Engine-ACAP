@@ -644,6 +644,7 @@ static int siren_condition_check(const char* rule_id, void* userdata) {
 void RuleEngine_Tick(void) {
     Triggers_Tick();
     Variables_Flush();
+    Actions_Overlay_Flush();
     Actions_ForEach_Active_Siren(siren_condition_check, NULL);
 
     /* Re-fire rules whose time_window just reopened while a stateful trigger

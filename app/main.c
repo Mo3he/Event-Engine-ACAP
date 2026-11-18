@@ -2056,6 +2056,7 @@ int main(void) {
     LOG("Shutting down %s", APP_PACKAGE);
     ACAP_EVENTS_Fire_State("EngineReady", 0);
     Actions_IoFlash_Stop_All();
+    Actions_Overlay_Cleanup();
     AlertStream_Cleanup();
     RuleEngine_Cleanup();
     Sparkplug_Cleanup();
