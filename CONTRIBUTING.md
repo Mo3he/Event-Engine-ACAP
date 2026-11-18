@@ -55,6 +55,10 @@ tools/sync-docs.sh --check   # what CI runs
 Edit `app/html/help.html`, then run the script and commit both. CI fails if they
 drift apart.
 
+When bumping the version in `app/manifest.json`, also update the `hero-version`
+badge in `docs/index.html`; the site shows it when the GitHub API is unavailable
+(rate limits), and CI checks it.
+
 `docs/index.html` and `docs/use-cases.html` are maintained by hand. When adding a
 trigger or action, update the feature lists there too, and when adding a rule
 template add it to `use-cases/USE_CASES.md` and `docs/use-cases.html` with the
