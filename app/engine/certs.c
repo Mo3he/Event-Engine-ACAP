@@ -160,10 +160,15 @@ static cJSON* cert_summary(X509* x) {
     unsigned char md[EVP_MAX_MD_SIZE];
     unsigned int mdlen = 0;
     if (X509_digest(x, EVP_sha256(), md, &mdlen) == 1) {
+        static const char digits[] = "0123456789ABCDEF";
         char hex[EVP_MAX_MD_SIZE * 3 + 1];
         size_t p = 0;
-        for (unsigned int i = 0; i < mdlen; i++)
-            p += (size_t)snprintf(hex + p, sizeof(hex) - p, i ? ":%02X" : "%02X", md[i]);
+        for (unsigned int i = 0; i < mdlen && i < EVP_MAX_MD_SIZE; i++) {
+            if (i) hex[p++] = ':';
+            hex[p++] = digits[md[i] >> 4];
+            hex[p++] = digits[md[i] & 0x0F];
+        }
+        hex[p] = '\0';
         cJSON_AddStringToObject(o, "sha256", hex);
     }
 
@@ -182,10 +187,8 @@ static cJSON* cert_summary(X509* x) {
                     snprintf(buf, sizeof(buf), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
                     cJSON_AddItemToArray(san, cJSON_CreateString(buf));
                 } else if (iplen == 16) {
-                    size_t p = 0;
-                    for (int k = 0; k < 16; k += 2)
-                        p += (size_t)snprintf(buf + p, sizeof(buf) - p, k ? ":%x" : "%x", (ip[k] << 8) | ip[k + 1]);
-                    cJSON_AddItemToArray(san, cJSON_CreateString(buf));
+                    if (inet_ntop(AF_INET6, ip, buf, sizeof(buf)))
+                        cJSON_AddItemToArray(san, cJSON_CreateString(buf));
                 }
             }
         }

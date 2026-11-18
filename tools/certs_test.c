@@ -247,6 +247,31 @@ int main(void) {
     CHECK(srv_info_ok, "ca-only has no cert/key");
     cJSON_Delete(w);
 
+    /* Certificate summary: SHA-256 fingerprint and IP subject alternative names */
+    X509* sanned = make_cert("san.example", srv_key, ca, ca_key, 0, 365, "DNS:san.example,IP:192.0.2.7,IP:2001:db8::1");
+    char* sanned_pem = cert_pem(sanned);
+    CHECK(save_obj(err, "san-check", "ca", sanned_pem, NULL, NULL, NULL, NULL), "save san-check: %s", err);
+    w = Certs_Get("san-check");
+    cJSON* sc = cJSON_GetArrayItem(cJSON_GetObjectItem(w, "ca"), 0);
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int mdlen = 0;
+    char want[EVP_MAX_MD_SIZE * 3 + 1] = "";
+    X509_digest(sanned, EVP_sha256(), md, &mdlen);
+    for (unsigned int i = 0; i < mdlen; i++) {
+        char byte[4];
+        snprintf(byte, sizeof(byte), i ? ":%02X" : "%02X", md[i]);
+        strncat(want, byte, sizeof(want) - strlen(want) - 1);
+    }
+    const char* got = cJSON_GetStringValue(cJSON_GetObjectItem(sc, "sha256"));
+    CHECK(got && strcmp(got, want) == 0, "sha256 fingerprint (%s)", got ? got : "none");
+    char* san_txt = cJSON_PrintUnformatted(cJSON_GetObjectItem(sc, "san"));
+    CHECK(san_txt && strcmp(san_txt, "[\"san.example\",\"192.0.2.7\",\"2001:db8::1\"]") == 0, "SAN list (%s)", san_txt ? san_txt : "none");
+    free(san_txt);
+    cJSON_Delete(w);
+    Certs_Delete("san-check");
+    X509_free(sanned);
+    free(sanned_pem);
+
     /* Partial updates */
     CHECK(save("{\"name\":\"Walmart upload\",\"insecure\":true}", err), "toggle insecure: %s", err);
     Certs_Paths cp;
