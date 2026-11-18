@@ -1,5 +1,14 @@
 # Release Notes
 
+## Unreleased
+
+### Fixes
+
+- **IPv6 addresses in certificate details** (*Settings → TLS Certificates*)
+  are shown in the usual short form, for example `2001:db8::1` instead of
+  `2001:db8:0:0:0:0:0:1`. The certificate fingerprint and address list are
+  now built without the string handling that code scanning flagged.
+
 ## v1.9.27 - Overlay Image
 
 The new **Overlay Image** action shows an image uploaded to the camera on the
