@@ -21,9 +21,10 @@ Fixes:
   duration ran out; the countdown now restarts.
 - Overlays stayed on the video when Event Engine stopped or was upgraded, and the
   next firing added a second one. Event Engine now removes its overlays when it
-  stops, and after an unexpected exit removes the ones it left at the next start.
-  Overlays left on screen by 1.9.25 or earlier can't be identified; remove them
-  once under **Settings > Overlays** or restart the camera.
+  stops. After an unexpected exit (or when a remote device couldn't be reached
+  at shutdown) it removes the ones it left at the next start, also when a camera
+  restart has renumbered them. Overlays left on screen by 1.9.25 or earlier can't
+  be identified; remove them once under **Settings > Overlays**.
 - Local and remote Overlay Text actions on the same channel no longer share
   (and overwrite) one overlay.
 - Overlay errors from the camera (for example an invalid position) are shown in
