@@ -850,7 +850,7 @@ Content-Type: application/json
         <tr><td><strong>Duration</strong> / <strong>While active</strong></td><td>As for Overlay Text.</td></tr>
       </table>
       <p><strong>Preparing the image:</strong> upload it once in the camera's settings under <strong>Video &gt; Overlays</strong>. A PNG with a transparent background keeps the video visible through it. Make it the size of the camera's full resolution (for example 3840×2160 on a 4K camera) and upload it with scaling to the stream resolution turned on, so it covers the same part of the picture at every stream resolution; a smaller image covers only part of a full-resolution stream.</p>
-      <p>An image overlay counts as Event Engine's while it shows the image Event Engine set. If another overlay shows the same image file, Event Engine still only changes the one it created, but after a camera restart it can't tell the two apart and leaves both alone.</p>
+      <p>An image overlay counts as Event Engine's while it shows the image at the position Event Engine set, so another overlay showing the same image elsewhere (for example a logo added in the camera's settings) is left alone. Choose a position rather than <em>Keep current</em> for the most reliable result.</p>
 
       <h3 id="act-ptz">PTZ Preset</h3>
       <p>Move the camera to a named preset position. Available presets are loaded from the camera.</p>

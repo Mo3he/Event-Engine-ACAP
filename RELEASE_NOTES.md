@@ -35,7 +35,8 @@ in-place upgrade. Rules, settings and variables are kept.
 Verified on a P3288-LV (AXIS OS 12.11), with remote image overlays on an
 M3098-LV (13.0): images shown, swapped, cleared, timed out and placed at custom
 positions, layered under Overlay Text, other overlays (also ones showing the
-same image) left alone, and cleanup after a power cut with renumbered overlays.
+same image elsewhere) left alone, and cleanup after a power cut with renumbered
+overlays.
 
 ## v1.9.26 - Named overlays, and overlays that stay Event Engine's own
 

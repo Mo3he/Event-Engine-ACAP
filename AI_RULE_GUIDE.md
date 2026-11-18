@@ -767,11 +767,12 @@ example a transparent alert frame. Same naming, Clear, duration and
 | `position` | string | `topLeft` | Same values as `overlay_text` (`keep`, presets, `custom` with `pos_x`/`pos_y`) |
 | `while_active` | boolean | `false` | Auto-clear when trigger goes inactive |
 
-An image overlay counts as Event Engine's while it shows the image file Event
-Engine set. If another overlay on the same camera shows the same file (for
-example one added in the camera's settings), Event Engine still only changes
-or removes the one it created, but after a camera restart it can't tell the
-two apart and leaves both alone.
+An image overlay counts as Event Engine's while it shows the image file at the
+position Event Engine set, so another overlay showing the same file elsewhere
+(for example a logo added in the camera's settings) is left alone. With
+`"position": "keep"` Event Engine doesn't know the position: it then goes by
+the file alone, and after an unexpected restart it doesn't look for its image
+overlay if the camera has renumbered it.
 
 ### 5. `ptz_preset` — PTZ Preset
 

@@ -1609,6 +1609,7 @@ typedef struct {
     char     name[64];           /* empty = the camera's default overlay */
     int      identity;           /* -1 = none on the camera */
     char     text[OVERLAY_TEXT_MAX]; /* last text written, or the image's overlayPath */
+    char     pos[48];            /* image position we set ("topLeft", "x,y"); "" = unknown */
     guint    timer;              /* pending duration removal, 0 = none */
     unsigned gen;                /* bumped on every change so stale timers do nothing */
     int      stale;              /* left by a previous run, removal still to be retried */
@@ -1627,6 +1628,31 @@ static char* overlay_post(const OverlaySlot* s, const char* body) {
  * another overlay, -1 = could not tell (device unreachable or odd response),
  * 2 = the device rejects "list" (firmware we haven't seen): the identity is
  * trusted as before ownership checks existed. */
+/* A position as list reports it: a preset name, or "x,y" for coordinates. */
+static void overlay_pos_str(cJSON* pos, char* out, size_t n) {
+    out[0] = '\0';
+    if (cJSON_IsString(pos)) {
+        snprintf(out, n, "%s", pos->valuestring);
+    } else if (cJSON_IsArray(pos) && cJSON_GetArraySize(pos) == 2) {
+        cJSON* x = cJSON_GetArrayItem(pos, 0);
+        cJSON* y = cJSON_GetArrayItem(pos, 1);
+        if (cJSON_IsNumber(x) && cJSON_IsNumber(y))
+            snprintf(out, n, "%.4g,%.4g", x->valuedouble, y->valuedouble);
+    }
+}
+
+/* The file alone doesn't identify an image overlay (an overlay added in the
+ * camera's settings can show the same file), so images must also be where we
+ * put them. Text is identified by its text alone. */
+static int overlay_matches(const OverlaySlot* s, cJSON* o) {
+    const char* t = cJSON_GetStringValue(cJSON_GetObjectItem(o, OVL_CONTENT_KEY(s->kind)));
+    if (!t || strcmp(t, s->text) != 0) return 0;
+    if (s->kind != OVL_IMAGE || !s->pos[0]) return 1;
+    char pos[48];
+    overlay_pos_str(cJSON_GetObjectItem(o, "position"), pos, sizeof(pos));
+    return strcmp(pos, s->pos) == 0;
+}
+
 static int overlay_owned(const OverlaySlot* s) {
     if (s->identity < 0) return 0;
     char body[96];
@@ -1645,8 +1671,7 @@ static int overlay_owned(const OverlaySlot* s) {
         cJSON_ArrayForEach(o, list) {
             cJSON* id = cJSON_GetObjectItem(o, "identity");
             if (!cJSON_IsNumber(id) || (int)id->valuedouble != s->identity) continue;
-            const char* t = cJSON_GetStringValue(cJSON_GetObjectItem(o, OVL_CONTENT_KEY(s->kind)));
-            owned = (t && strcmp(t, s->text) == 0);
+            owned = overlay_matches(s, o);
             break;
         }
     }
@@ -1744,6 +1769,7 @@ static void overlay_save_locked(void) {
         cJSON_AddStringToObject(o, "name", s->name);
         cJSON_AddNumberToObject(o, "identity", s->identity);
         cJSON_AddStringToObject(o, "text", s->text);
+        if (s->pos[0]) cJSON_AddStringToObject(o, "pos", s->pos);
         cJSON_AddItemToArray(arr, o);
     }
     ACAP_FILE_Write(OVERLAY_STATE_FILE, arr);
@@ -1765,6 +1791,7 @@ void Actions_Overlay_Flush(void) {
  * there is none or more than one, -2 if the device could not be asked.
  * take_lock: the caller does not hold overlay_lock (taken only to read the table). */
 static int overlay_find_by_text(const OverlaySlot* s, int take_lock) {
+    if (s->kind == OVL_IMAGE && !s->pos[0]) return -1; /* the file alone could be anyone's */
     char body[96];
     snprintf(body, sizeof(body),
              "{\"apiVersion\":\"1.0\",\"method\":\"list\",\"params\":{\"camera\":%d}}", s->camera);
@@ -1778,8 +1805,7 @@ static int overlay_find_by_text(const OverlaySlot* s, int take_lock) {
     cJSON* o;
     cJSON_ArrayForEach(o, list) {
         cJSON* id = cJSON_GetObjectItem(o, "identity");
-        const char* t = cJSON_GetStringValue(cJSON_GetObjectItem(o, OVL_CONTENT_KEY(s->kind)));
-        if (!cJSON_IsNumber(id) || !t || strcmp(t, s->text) != 0) continue;
+        if (!cJSON_IsNumber(id) || !overlay_matches(s, o)) continue;
         int held = 0;
         if (take_lock) g_mutex_lock(&overlay_lock);
         for (int i = 0; i < MAX_OVERLAY_SLOTS; i++) {
@@ -1848,6 +1874,8 @@ static int overlay_entry_parse(cJSON* o, OverlaySlot* s) {
     snprintf(s->pass, sizeof(s->pass), "%s", p ? p : "");
     snprintf(s->name, sizeof(s->name), "%s", n ? n : "");
     snprintf(s->text, sizeof(s->text), "%s", t);
+    const char* ps = cJSON_GetStringValue(cJSON_GetObjectItem(o, "pos"));
+    snprintf(s->pos, sizeof(s->pos), "%s", ps ? ps : "");
     const char* k = cJSON_GetStringValue(cJSON_GetObjectItem(o, "kind"));
     s->kind     = (k && strcmp(k, "image") == 0) ? OVL_IMAGE : OVL_TEXT;
     s->camera   = (int)c->valuedouble;
@@ -2031,6 +2059,7 @@ static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data,
     }
 
     char* err = NULL;
+    char sent_pos[48] = "";
     for (int attempt = 0; attempt < 2; attempt++) {
         cJSON* req = cJSON_CreateObject();
         cJSON_AddStringToObject(req, "apiVersion", "1.0");
@@ -2062,6 +2091,7 @@ static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data,
             cJSON_AddStringToObject(params, "position", position);
         }
         if (kind == OVL_TEXT) cJSON_AddStringToObject(params, "textColor", text_color);
+        overlay_pos_str(cJSON_GetObjectItem(params, "position"), sent_pos, sizeof(sent_pos));
 
         char* body = cJSON_PrintUnformatted(req);
         cJSON_Delete(req);
@@ -2099,6 +2129,11 @@ static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data,
         free(text);
         return;
     }
+    /* With "keep" the position of an updated overlay is unchanged, and that of a
+     * new one is the camera's default, which we don't know. */
+    int added = (s->identity >= 0 && !reuse);
+    if (sent_pos[0] || added)
+        snprintf(s->pos, sizeof(s->pos), "%s", sent_pos);
     snprintf(s->text, sizeof(s->text), "%s", text);
     free(text);
     s->stale = 0;
