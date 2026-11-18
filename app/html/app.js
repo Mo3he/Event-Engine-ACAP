@@ -12,6 +12,7 @@ let actionRows = [];
 let vapixEventCatalog = null; /* null = not yet fetched */
 let ptzPresets = null;        /* null=loading, []=no PTZ, [{channel,presets:[name,...]},...] */
 let audioClips = null;        /* null=loading, []=none,   [{id,name},...] */
+let overlayImages = null;     /* null=loading, []=none,   ['/etc/overlays/x.ovl',...] */
 let sirenProfiles = null;     /* null=loading, []=none or not supported, [{name,label},...] */
 let acapApps = null;          /* null=loading, []=none,   [{package,niceName},...] */
 let privacyMasks = null;      /* null=loading, []=none,   [{name},...] */
@@ -173,7 +174,7 @@ const RULE_TYPE_LABELS = {
   action: {
     http_request: 'HTTP', mqtt_publish: 'MQTT', recording: 'Recording',
     sparkplug_publish: 'Sparkplug',
-    overlay_text: 'Overlay', ptz_preset: 'PTZ', io_output: 'I/O Output', io_flash: 'I/O Flash',
+    overlay_text: 'Overlay', overlay_image: 'Image', ptz_preset: 'PTZ', io_output: 'I/O Output', io_flash: 'I/O Flash',
     audio_clip: 'Audio', siren_light: 'Siren/Light', vapix_query: 'Event Query',
     set_variable: 'Set Variable', increment_counter: 'Counter', run_rule: 'Run Rule',
     delay: 'Delay', fire_vapix_event: 'ACAP Event', send_syslog: 'Syslog',
@@ -1701,6 +1702,7 @@ window.addEventListener('DOMContentLoaded', () => {
     Promise.all([
       loadPtzPresets(),
       loadAudioClips(),
+      loadOverlayImages(),
       loadSirenProfiles(),
       loadAcapApps(),
       loadPrivacyMasks(),
