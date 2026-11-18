@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Fixes
+### Fixes in the next release
 
 - **IPv6 addresses in certificate details** (*Settings → TLS Certificates*)
   are shown in the usual short form, for example `2001:db8::1` instead of
