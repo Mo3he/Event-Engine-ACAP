@@ -718,7 +718,7 @@ Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `io_flash`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `operation` | string | `set` | `set` shows or updates the overlay; `clear` removes it (needs only `channel`, `overlay` and the remote fields) |
-| `overlay` | string | — | Optional name. Actions with the same name, channel and target device control the same overlay, also across rules. Empty = the channel's shared overlay. |
+| `overlay` | string | — | Optional name (up to 63 characters). Actions with the same name, channel and target device control the same overlay, also across rules. Empty = the channel's shared overlay. |
 | `text` | string | — | Overlay text. Supports template variables. |
 | `duration` | integer | `0` | Seconds to display (0 = until next update). Firing again restarts the countdown. |
 | `channel` | integer | `1` | Video channel |

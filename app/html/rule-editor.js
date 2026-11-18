@@ -1834,7 +1834,7 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:1 1 200px;">
         <label>Overlay name (optional)</label>
-        <input type="text" data-k="overlay" value="${escHtml(a.overlay || '')}" placeholder="e.g. plate_alert">
+        <input type="text" data-k="overlay" maxlength="63" value="${escHtml(a.overlay || '')}" placeholder="e.g. plate_alert">
         <div class="form-hint">Actions with the same name and channel control the same overlay, also across rules. Leave empty to use the channel's shared overlay.</div>
       </div>
     </div>

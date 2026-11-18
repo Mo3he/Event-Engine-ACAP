@@ -760,7 +760,7 @@
             "properties": {
               "type":         { "type": "string", "enum": ["overlay_text"] },
               "operation":    { "type": "string", "enum": ["set", "clear"], "default": "set", "description": "'set' shows or updates the overlay; 'clear' removes it (only text-free fields apply)." },
-              "overlay":      { "type": "string", "description": "Optional overlay name. Actions with the same name, channel and target device control the same overlay, also across rules. Empty = the channel's shared overlay.", "example": "plate_alert" },
+              "overlay":      { "type": "string", "maxLength": 63, "description": "Optional overlay name. Actions with the same name, channel and target device control the same overlay, also across rules. Empty = the channel's shared overlay.", "example": "plate_alert" },
               "text":         { "type": "string", "description": "Overlay text. Supports {{variable}} substitution.", "example": "Motion at {{time}}" },
               "duration":     { "type": "integer", "default": 0, "description": "Seconds to display before auto-removing (0 = leave until next update)" },
               "channel":      { "type": "integer", "default": 1, "description": "Video channel number" },

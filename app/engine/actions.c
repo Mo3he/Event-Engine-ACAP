@@ -1615,7 +1615,9 @@ static char* overlay_post(const OverlaySlot* s, const char* body) {
 }
 
 /* 1 = the slot's identity still shows our text, 0 = it is gone or belongs to
- * another overlay, -1 = could not tell (device unreachable or odd response). */
+ * another overlay, -1 = could not tell (device unreachable or odd response),
+ * 2 = the device rejects "list" (firmware we haven't seen): the identity is
+ * trusted as before ownership checks existed. */
 static int overlay_owned(const OverlaySlot* s) {
     if (s->identity < 0) return 0;
     char body[96];
@@ -1626,7 +1628,7 @@ static int overlay_owned(const OverlaySlot* s) {
     cJSON* j = cJSON_Parse(resp);
     free(resp);
     if (!j) return -1;
-    int owned = -1;
+    int owned = cJSON_GetObjectItem(j, "error") ? 2 : -1;
     cJSON* list = cJSON_GetObjectItem(cJSON_GetObjectItem(j, "data"), "textOverlays");
     if (cJSON_IsArray(list)) {
         owned = 0;
@@ -1647,7 +1649,7 @@ static int overlay_owned(const OverlaySlot* s) {
 static int overlay_remove_owned(const OverlaySlot* s, const char* why) {
     if (s->identity < 0) return 0;
     int owned = overlay_owned(s);
-    if (owned == 1) {
+    if (owned == 1 || owned == 2) {
         char body[96];
         snprintf(body, sizeof(body),
                  "{\"apiVersion\":\"1.0\",\"method\":\"remove\",\"params\":{\"identity\":%d}}", s->identity);
@@ -1675,7 +1677,9 @@ static OverlaySlot* overlay_slot_find(const char* host, int camera, const char* 
             return s;
     }
     if (!create || !free_slot) return NULL;
+    unsigned gen = free_slot->gen;
     memset(free_slot, 0, sizeof(*free_slot));
+    free_slot->gen = gen + 1; /* a timer of the slot's previous use must not match */
     free_slot->used = 1;
     free_slot->identity = -1;
     free_slot->camera = camera;
@@ -1736,8 +1740,10 @@ static void overlay_save_locked(void) {
     overlay_dirty = 0;
 }
 
+/* Called from the main-loop tick: never wait for the lock (an overlay action may
+ * hold it across network calls); the state is saved on a later tick instead. */
 void Actions_Overlay_Flush(void) {
-    g_mutex_lock(&overlay_lock);
+    if (!g_mutex_trylock(&overlay_lock)) return;
     if (overlay_dirty) overlay_save_locked();
     g_mutex_unlock(&overlay_lock);
 }
@@ -1746,8 +1752,8 @@ void Actions_Overlay_Flush(void) {
  * our overlay may carry another identity. Returns the identity of the only
  * overlay on the camera showing the slot's text that no slot holds, -1 if
  * there is none or more than one, -2 if the device could not be asked.
- * Caller holds overlay_lock. */
-static int overlay_find_by_text(const OverlaySlot* s) {
+ * take_lock: the caller does not hold overlay_lock (taken only to read the table). */
+static int overlay_find_by_text(const OverlaySlot* s, int take_lock) {
     char body[96];
     snprintf(body, sizeof(body),
              "{\"apiVersion\":\"1.0\",\"method\":\"list\",\"params\":{\"camera\":%d}}", s->camera);
@@ -1764,11 +1770,13 @@ static int overlay_find_by_text(const OverlaySlot* s) {
         const char* t = cJSON_GetStringValue(cJSON_GetObjectItem(o, "text"));
         if (!cJSON_IsNumber(id) || !t || strcmp(t, s->text) != 0) continue;
         int held = 0;
+        if (take_lock) g_mutex_lock(&overlay_lock);
         for (int i = 0; i < MAX_OVERLAY_SLOTS; i++) {
             const OverlaySlot* x = &overlay_slots[i];
             if (x->used && x->identity == (int)id->valuedouble && x->camera == s->camera &&
                 strcmp(x->host, s->host) == 0) held = 1;
         }
+        if (take_lock) g_mutex_unlock(&overlay_lock);
         if (held) continue;
         found = (int)id->valuedouble;
         matches++;
@@ -1779,11 +1787,12 @@ static int overlay_find_by_text(const OverlaySlot* s) {
 
 /* Remove an overlay left by a previous run that ended without cleaning up.
  * Returns 0 when done (removed, or nothing of ours left), -1 when its device
- * could not be asked. Caller holds overlay_lock. */
-static int overlay_recover_try(OverlaySlot* s) {
+ * could not be asked. locked: the caller holds overlay_lock. */
+static int overlay_recover_try(OverlaySlot* s, int locked) {
     int owned = overlay_owned(s);
+    if (owned == 2) return 0; /* can't verify: never remove blindly after a restart */
     if (owned == 0) {
-        int id = overlay_find_by_text(s);
+        int id = overlay_find_by_text(s, !locked);
         if (id == -2) return -1;
         if (id < 0) return 0;
         LOG("overlay '%s' (camera %d%s%s): identity %d was renumbered to %d by a camera restart",
@@ -1795,12 +1804,11 @@ static int overlay_recover_try(OverlaySlot* s) {
     return overlay_remove_owned(s, "left over from the previous run") == -1 ? -1 : 0;
 }
 
-/* Recover a saved entry; if its device can't be reached, keep it in the table
- * (marked stale) so it is retried, reused by the next update, or removed at the
- * next stop. Returns 1 if kept. Caller holds overlay_lock. */
-static int overlay_recover(OverlaySlot* s) {
+/* Keep a saved entry whose device couldn't be reached in the table (marked
+ * stale) so it is retried, reused by the next update, or removed at the next
+ * stop. Returns 1 if kept. Caller holds overlay_lock. */
+static int overlay_keep_stale(const OverlaySlot* s) {
     overlay_dirty = 1;
-    if (overlay_recover_try(s) == 0) return 0;
     OverlaySlot* t = overlay_slot_find(s->host, s->camera, s->name, 1);
     if (!t || t->identity >= 0) return 0;
     unsigned gen = t->gen;
@@ -1836,34 +1844,48 @@ static int overlay_entry_parse(cJSON* o, OverlaySlot* s) {
 
 /* Remote leftovers are handled on their own thread so an unreachable device
  * cannot hold up startup, then anything not yet removed (for example while the
- * camera's overlay service was still starting) is retried for two minutes.
- * Overlay actions wait on the lock meanwhile. */
+ * camera's overlay service was still starting) is retried for two minutes. */
 static gpointer overlay_recover_thread(gpointer user_data) {
     cJSON* arr = (cJSON*)user_data;
-    g_mutex_lock(&overlay_lock);
     cJSON* o;
     cJSON_ArrayForEach(o, arr) {
         OverlaySlot s;
-        if (overlay_entry_parse(o, &s)) overlay_recover(&s);
+        if (!overlay_entry_parse(o, &s)) continue;
+        int r = overlay_recover_try(&s, 0);
+        g_mutex_lock(&overlay_lock);
+        if (r == -1) overlay_keep_stale(&s);
+        else overlay_dirty = 1;
+        g_mutex_unlock(&overlay_lock);
     }
-    g_mutex_unlock(&overlay_lock);
     cJSON_Delete(arr);
 
+    /* Network calls run on copies without the lock; a slot changed meanwhile
+     * (its generation moved on) is left to whoever changed it. */
     for (int attempt = 0; attempt < 12; attempt++) {
         g_usleep(10 * G_USEC_PER_SEC);
-        int pending = 0;
+        OverlaySlot copy[MAX_OVERLAY_SLOTS];
+        int idx[MAX_OVERLAY_SLOTS], n = 0, pending = 0;
         g_mutex_lock(&overlay_lock);
-        for (int i = 0; i < MAX_OVERLAY_SLOTS; i++) {
-            OverlaySlot* s = &overlay_slots[i];
-            if (!s->used || !s->stale) continue;
-            if (overlay_recover_try(s) == -1) { pending++; continue; }
-            unsigned gen = s->gen;
-            memset(s, 0, sizeof(*s));
-            s->identity = -1;
-            s->gen = gen + 1;
-            overlay_dirty = 1;
-        }
+        for (int i = 0; i < MAX_OVERLAY_SLOTS; i++)
+            if (overlay_slots[i].used && overlay_slots[i].stale) { copy[n] = overlay_slots[i]; idx[n++] = i; }
         g_mutex_unlock(&overlay_lock);
+        for (int k = 0; k < n; k++) {
+            int r = overlay_recover_try(&copy[k], 0);
+            g_mutex_lock(&overlay_lock);
+            OverlaySlot* s = &overlay_slots[idx[k]];
+            if (s->used && s->stale && s->gen == copy[k].gen) {
+                if (r == -1) {
+                    pending++;
+                } else {
+                    unsigned gen = s->gen;
+                    memset(s, 0, sizeof(*s));
+                    s->identity = -1;
+                    s->gen = gen + 1;
+                    overlay_dirty = 1;
+                }
+            }
+            g_mutex_unlock(&overlay_lock);
+        }
         if (!pending) break;
     }
     return NULL;
@@ -1887,7 +1909,8 @@ static void overlay_init(void) {
             OverlaySlot s;
             if (!overlay_entry_parse(o, &s)) continue;
             if (s.host[0]) cJSON_AddItemToArray(remote, cJSON_Duplicate(o, 1));
-            else           kept += overlay_recover(&s);
+            else if (overlay_recover_try(&s, 1) == -1) kept += overlay_keep_stale(&s);
+            else overlay_dirty = 1;
         }
     }
     cJSON_Delete(saved);
@@ -1909,8 +1932,10 @@ void Actions_Overlay_Cleanup(void) {
         if (!s->used) continue;
         if (s->timer) { g_source_remove(s->timer); s->timer = 0; }
         if (overlay_remove_owned(s, "Event Engine stopping") == -1) continue;
+        unsigned gen = s->gen;
         memset(s, 0, sizeof(*s));
         s->identity = -1;
+        s->gen = gen + 1;
     }
     overlay_save_locked();
     g_mutex_unlock(&overlay_lock);
@@ -1922,8 +1947,10 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
     if (ch) camera = (int)(cJSON_IsString(ch) ? atof(ch->valuestring) : ch->valuedouble);
     if (camera < 1 || camera > MAX_OVERLAY_CAMERAS) camera = 1;
 
-    const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "overlay"));
-    if (!name) name = "";
+    /* Slots store at most 63 bytes of the name; look it up the same way. */
+    char name[64];
+    const char* name_cfg = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "overlay"));
+    snprintf(name, sizeof(name), "%s", name_cfg ? name_cfg : "");
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     int clearing = (op && strcmp(op, "clear") == 0);
 
@@ -2027,7 +2054,7 @@ static void action_overlay_text(const char* rule_id, cJSON* cfg, cJSON* trigger_
             cJSON_Delete(resp_j);
             /* setText also fails on a bad value; only start over if the overlay
              * really went away, otherwise the one on screen would be orphaned. */
-            if (reuse && overlay_owned(s) != 1) { reuse = 0; s->identity = -1; continue; }
+            if (reuse && overlay_owned(s) == 0) { reuse = 0; s->identity = -1; continue; }
             break;
         }
         if (!reuse) {
