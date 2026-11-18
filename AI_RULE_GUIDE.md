@@ -621,7 +621,7 @@ Many actions support targeting a remote Axis device. Add these fields to any sup
 
 Set `remote_https` to `true` to reach the remote device over HTTPS instead of HTTP. This is required for cameras running AXIS OS 13, which are HTTPS-only by default. The remote device's self-signed certificate is accepted (no verification). Leave it `false` (or omit it) for remote devices still served over HTTP. The same `remote_host` / `remote_user` / `remote_pass` / `remote_https` fields also work on the `io_state`, `vapix_event_state`, and `aoa_occupancy` conditions.
 
-Supported by: `recording`, `overlay_text`, `ptz_preset`, `io_output`, `io_flash`, `audio_clip`, `siren_light`, `guard_tour`, `set_device_param`, `ir_cut_filter`, `privacy_mask`, `wiper`, `light_control`, `acap_control`, `speaker_display`, `paging_console_execute`, `paging_console_button`.
+Supported by: `recording`, `overlay_text`, `overlay_image`, `ptz_preset`, `io_output`, `io_flash`, `audio_clip`, `siren_light`, `guard_tour`, `set_device_param`, `ir_cut_filter`, `privacy_mask`, `wiper`, `light_control`, `acap_control`, `speaker_display`, `paging_console_execute`, `paging_console_button`.
 
 ---
 
@@ -739,6 +739,40 @@ alert from two rules by giving both actions the same `overlay` name:
   { "type": "overlay_text", "overlay": "plate_alert", "operation": "clear" }
 ]
 ```
+
+### 4a. `overlay_image` — Dynamic Overlay Image
+
+Shows an image that was uploaded to the camera (**Video > Overlays**), for
+example a transparent alert frame. Same naming, Clear, duration and
+`while_active` behaviour as `overlay_text`.
+
+```json
+{
+  "type": "overlay_image",
+  "overlay": "plate_alert_frame",
+  "image": "/etc/overlays/alert(1920x1080).ovl",
+  "position": "topLeft",
+  "duration": 0,
+  "channel": 1
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `operation` | string | `set` | `set` shows or updates the image overlay; `clear` removes it |
+| `overlay` | string | — | Optional name (up to 63 characters). Actions with the same name, channel and target device control the same image overlay, also across rules. Image and text overlays are named separately. |
+| `image` | string | — | The uploaded image: its full path as listed by the camera (`/etc/overlays/…`), or just the file name. Supports template variables. |
+| `duration` | integer | `0` | Seconds to display (0 = until the next update or Clear). Firing again restarts the countdown. |
+| `channel` | integer | `1` | Video channel |
+| `position` | string | `topLeft` | Same values as `overlay_text` (`keep`, presets, `custom` with `pos_x`/`pos_y`) |
+| `while_active` | boolean | `false` | Auto-clear when trigger goes inactive |
+
+An image overlay counts as Event Engine's while it shows the image file at the
+position Event Engine set, so another overlay showing the same file elsewhere
+(for example a logo added in the camera's settings) is left alone. With
+`"position": "keep"` Event Engine doesn't know the position: it then goes by
+the file alone, and after an unexpected restart it doesn't look for its image
+overlay if the camera has renumbered it.
 
 ### 5. `ptz_preset` — PTZ Preset
 

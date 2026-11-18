@@ -86,7 +86,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
     static const char* const action_types[] = {
         "http_request", "mqtt_publish", "slack_webhook", "teams_webhook", "telegram",
         "email", "snapshot_upload", "ftp_upload", "send_syslog", "recording",
-        "overlay_text", "ptz_preset", "guard_tour", "ir_cut_filter", "privacy_mask",
+        "overlay_text", "overlay_image", "ptz_preset", "guard_tour", "ir_cut_filter", "privacy_mask",
         "wiper", "light_control", "audio_clip", "siren_light", "io_output", "io_flash", "digest",
         "delay", "set_variable", "increment_counter", "run_rule", "set_rule_enabled",
         "fire_vapix_event", "vapix_query", "set_device_param", "acap_control",
@@ -745,6 +745,7 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         {"send_syslog",       "Send Syslog",       "Write a message to the system log"},
         {"recording",         "Recording",         "Start or stop local camera recording"},
         {"overlay_text",      "Overlay Text",      "Set dynamic text overlay on video stream"},
+        {"overlay_image",     "Overlay Image",     "Show an image uploaded to the camera on the video stream"},
         {"ptz_preset",        "PTZ Preset",        "Move camera to a PTZ preset position"},
         {"guard_tour",        "Guard Tour",        "Start or stop a PTZ guard tour"},
         {"ir_cut_filter",     "IR Cut Filter",     "Force IR cut filter On, Off, or Auto"},

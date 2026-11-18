@@ -1261,6 +1261,7 @@ const ACTION_GROUPS = [
     { value: 'ptz_preset',        label: 'PTZ Preset' },
     { value: 'guard_tour',        label: 'Guard Tour' },
     { value: 'overlay_text',      label: 'Overlay Text' },
+    { value: 'overlay_image',     label: 'Overlay Image' },
     { value: 'ir_cut_filter',     label: 'IR Cut Filter' },
     { value: 'privacy_mask',      label: 'Privacy Mask' },
     { value: 'wiper',             label: 'Wiper' },
@@ -1546,7 +1547,7 @@ function renderOnFailureFields(a, hint) {
 }
 
 const REMOTE_CAPABLE_ACTIONS = new Set([
-  'recording', 'overlay_text', 'ptz_preset', 'io_output', 'io_flash',
+  'recording', 'overlay_text', 'overlay_image', 'ptz_preset', 'io_output', 'io_flash',
   'audio_clip', 'siren_light', 'guard_tour', 'set_device_param',
   'ir_cut_filter', 'privacy_mask', 'wiper', 'light_control',
   'acap_control', 'speaker_display', 'vapix_query',
@@ -1817,8 +1818,24 @@ function actionFields(a, rowIdx) {
       </label>
     </div></div>` : ''}`;
   }
-  if (type === 'overlay_text') {
+  if (type === 'overlay_text' || type === 'overlay_image') {
     const clearing = a.operation === 'clear';
+    const isImage = type === 'overlay_image';
+    const isRemote = a.remote_host_toggle === 'remote' || (a.remote_host && a.remote_host_toggle !== 'local');
+    let imageControl = '';
+    if (isImage) {
+      const cur = a.image || '';
+      if (isRemote || !Array.isArray(overlayImages) || !overlayImages.length) {
+        imageControl = `<input type="text" data-k="image" value="${escHtml(cur)}" placeholder="${overlayImages === null && !isRemote ? 'Loading images…' : 'File name or /etc/overlays/… path'}">`;
+      } else {
+        const files = overlayImages.includes(cur) || !cur ? overlayImages : [cur, ...overlayImages];
+        let opts = `<option value="">— select image —</option>`;
+        for (const f of files) {
+          opts += `<option value="${escHtml(f)}" ${cur === f ? 'selected' : ''}>${escHtml(f.replace(/^.*\//, ''))}</option>`;
+        }
+        imageControl = `<select data-k="image">${opts}</select>`;
+      }
+    }
     return `
     <div class="form-row" style="flex-wrap:wrap;">
       <div class="form-group" style="flex:0 0 150px;">
@@ -1834,16 +1851,19 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:1 1 200px;">
         <label>Overlay name (optional)</label>
-        <input type="text" data-k="overlay" maxlength="63" value="${escHtml(a.overlay || '')}" placeholder="e.g. plate_alert">
-        <div class="form-hint">Actions with the same name and channel control the same overlay, also across rules. Leave empty to use the channel's shared overlay.</div>
+        <input type="text" data-k="overlay" maxlength="63" value="${escHtml(a.overlay || '')}" placeholder="${isImage ? 'e.g. plate_alert_frame' : 'e.g. plate_alert'}">
+        <div class="form-hint">Actions with the same name and channel control the same ${isImage ? 'image ' : ''}overlay, also across rules. Leave empty to use the channel's shared ${isImage ? 'image ' : ''}overlay.</div>
       </div>
     </div>
     ${clearing ? '' : `
     <div class="form-row">
-      <div class="form-group">
+      <div class="form-group">${isImage ? `
+        <label>Image</label>
+        ${imageControl}
+        <div class="form-hint">Upload images once in the camera's settings under <strong>Video &gt; Overlays</strong>.${isRemote ? ' For a remote device, enter the image\'s file name as shown in its overlay list.' : ''}</div>` : `
         <label>Text</label>
         <input type="text" data-k="text" value="${escHtml(a.text || '')}" placeholder="MOTION DETECTED at {{time}}">
-        ${hint}
+        ${hint}`}
       </div>
     </div>
     <div class="form-row" style="flex-wrap:wrap;">
@@ -1873,7 +1893,7 @@ function actionFields(a, rowIdx) {
         <label>Y (-1..1)</label>
         <input type="number" step="0.01" min="-1" max="1" data-k="pos_y" value="${escHtml(a.pos_y !== undefined ? a.pos_y : -0.99)}">
       </div>` : ''}
-      <div class="form-group" style="flex:0 0 120px;">
+      ${isImage ? '' : `<div class="form-group" style="flex:0 0 120px;">
         <label>Text Colour</label>
         <select data-k="text_color">
           <option value="white"         ${(a.text_color||'white')==='white'         ? 'selected':''}>White</option>
@@ -1882,7 +1902,7 @@ function actionFields(a, rowIdx) {
           <option value="transparent"   ${a.text_color==='transparent'   ? 'selected':''}>Transparent</option>
           <option value="semiTransparent" ${a.text_color==='semiTransparent' ? 'selected':''}>Semi-transparent</option>
         </select>
-      </div>
+      </div>`}
     </div>
     ${!(parseInt(a.duration) > 0) ? `
     <div class="form-row"><div class="form-group">
@@ -3524,12 +3544,23 @@ function normalizeAction(a) {
   }
   if (a.type === 'recording' && (out.operation || 'start') === 'start')
     out.while_active = a.while_active === true;
-  if (a.type === 'overlay_text') {
+  if (a.type === 'overlay_text' || a.type === 'overlay_image') {
+    if (a.type === 'overlay_image') {
+      delete out.text_color;
+      delete out.text;
+      if (a.image) out.image = String(a.image).trim();
+    }
     if (out.operation === 'clear') {
-      ['text', 'duration', 'position', 'text_color'].forEach(k => delete out[k]);
+      ['text', 'image', 'duration', 'position', 'text_color', 'pos_x', 'pos_y'].forEach(k => delete out[k]);
     } else {
       delete out.operation;
       if (!(parseInt(a.duration) > 0)) out.while_active = a.while_active === true;
+      if (out.position === 'custom') {
+        ['pos_x', 'pos_y'].forEach(k => {
+          const v = parseFloat(a[k]);
+          out[k] = Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : -0.99;
+        });
+      }
     }
     const name = String(a.overlay || '').trim();
     if (name) out.overlay = name;

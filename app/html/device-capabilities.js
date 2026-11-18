@@ -241,6 +241,20 @@ async function loadAudioClips() {
   renderDeviceCapabilities();
 }
 
+/* Images uploaded to this camera (Video > Overlays), as the full paths addImage needs. */
+async function loadOverlayImages() {
+  try {
+    const resp = await fetch('/axis-cgi/dynamicoverlay/dynamicoverlay.cgi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiVersion: '1.0', method: 'list', params: { camera: 1 } })
+    });
+    const j = resp.ok ? await resp.json() : null;
+    overlayImages = (j && j.data && Array.isArray(j.data.imageFiles)) ? j.data.imageFiles : [];
+  } catch(e) { overlayImages = []; }
+  renderDeviceCapabilities();
+}
+
 async function loadIoOutputs() {
   try {
     const resp = await fetch('/axis-cgi/io/portmanagement.cgi', {

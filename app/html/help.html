@@ -374,6 +374,7 @@
       <a href="#act-syslog" class="sub">Send Syslog</a>
       <a href="#act-recording" class="sub">Recording</a>
       <a href="#act-overlay" class="sub">Overlay Text</a>
+      <a href="#act-overlay-image" class="sub">Overlay Image</a>
       <a href="#act-ptz" class="sub">PTZ Preset</a>
       <a href="#act-guard-tour" class="sub">Guard Tour</a>
       <a href="#act-ir" class="sub">IR Cut Filter</a>
@@ -829,12 +830,26 @@ Content-Type: application/json
         <tr><td><strong>Channel</strong></td><td>Video channel number.</td></tr>
         <tr><td><strong>Overlay name</strong></td><td>Optional. Actions with the same name and channel control the same overlay, also across rules, so one rule can show an alert and another can clear it. Leave empty to use the channel's shared overlay.</td></tr>
         <tr><td><strong>Text</strong></td><td>Overlay text. Template substitution supported.</td></tr>
-        <tr><td><strong>Position</strong></td><td>Where to place the text: top-left, top-right, bottom-left, bottom-right, top, or bottom.</td></tr>
+        <tr><td><strong>Position</strong></td><td>Where to place the text: top-left, top-right, bottom-left, bottom-right, top, bottom, <em>Custom (X,Y)</em> (from -1 to 1, left/top to right/bottom), or <em>Keep current</em>.</td></tr>
         <tr><td><strong>Text colour</strong></td><td>Overlay colour: white, black, red, transparent, or semi-transparent.</td></tr>
         <tr><td><strong>Duration</strong></td><td>Seconds before the overlay is cleared automatically; firing again restarts the countdown. Set to 0 and enable <em>While active</em> to clear when the triggering condition ends.</td></tr>
         <tr><td><strong>While active</strong></td><td>Automatically clear the overlay when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
       </table>
       <p>Event Engine only changes or removes overlays it created. Overlays added in the camera's own settings or by other apps are left alone, and Event Engine's overlays are removed when it stops.</p>
+
+      <h3 id="act-overlay-image">Overlay Image</h3>
+      <p>Show an image on the live video stream, for example a transparent alert frame, together with an Overlay Text action for the details.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Show / update</em> shows the image (or swaps it); <em>Clear</em> removes it.</td></tr>
+        <tr><td><strong>Channel</strong></td><td>Video channel number.</td></tr>
+        <tr><td><strong>Overlay name</strong></td><td>Optional. Actions with the same name and channel control the same image overlay, also across rules. Image and text overlays are named separately, so an alert frame and its text can share a name.</td></tr>
+        <tr><td><strong>Image</strong></td><td>An image uploaded to the camera, chosen from the list. For a remote device, enter its file name as shown in that device's overlay list.</td></tr>
+        <tr><td><strong>Position</strong></td><td>As for Overlay Text. The position is the image's top-left corner.</td></tr>
+        <tr><td><strong>Duration</strong> / <strong>While active</strong></td><td>As for Overlay Text.</td></tr>
+      </table>
+      <p><strong>Preparing the image:</strong> upload it once in the camera's settings under <strong>Video &gt; Overlays</strong>. A PNG with a transparent background keeps the video visible through it. Make it the size of the camera's full resolution (for example 3840×2160 on a 4K camera) and upload it with scaling to the stream resolution turned on, so it covers the same part of the picture at every stream resolution; a smaller image covers only part of a full-resolution stream.</p>
+      <p>An image overlay counts as Event Engine's while it shows the image at the position Event Engine set, so another overlay showing the same image elsewhere (for example a logo added in the camera's settings) is left alone. Choose a position rather than <em>Keep current</em> for the most reliable result.</p>
 
       <h3 id="act-ptz">PTZ Preset</h3>
       <p>Move the camera to a named preset position. Available presets are loaded from the camera.</p>
@@ -1056,7 +1071,7 @@ Content-Type: application/json
       <!-- ═══════════════════════════════════════════ REMOTE DEVICE -->
       <hr class="section-rule">
       <h2 id="remote-device">Remote Device Actions</h2>
-      <p>Many camera actions (Recording, PTZ Preset, Siren / Light, Speaker Display, I/O Output, I/O Flash, Audio Clip, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, ACAP Control, Overlay Text, Set Device Param) can target a <strong>remote Axis device</strong> instead of the camera running Event Engine.</p>
+      <p>Many camera actions (Recording, PTZ Preset, Siren / Light, Speaker Display, I/O Output, I/O Flash, Audio Clip, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, ACAP Control, Overlay Text, Overlay Image, Set Device Param) can target a <strong>remote Axis device</strong> instead of the camera running Event Engine.</p>
       <p>This enables cross-device automation — for example, triggering a Speaker Display on an Axis C1710 when motion is detected by a Q3538 running Area Object Analytics.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
@@ -1075,7 +1090,7 @@ Content-Type: application/json
       <!-- ═══════════════════════════════════════════ WHILE-ACTIVE -->
       <hr class="section-rule">
       <h2 id="while-active">While-Active Actions</h2>
-      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Siren / Light, I/O Output, I/O Flash, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops flashing, stops the display) when the triggering condition clears. While-active works correctly even when the action targets a <strong>remote device</strong>.</p>
+      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Overlay Image, Siren / Light, I/O Output, I/O Flash, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops flashing, stops the display) when the triggering condition clears. While-active works correctly even when the action targets a <strong>remote device</strong>.</p>
       <p>This is useful for scenarios like "record while motion is detected" or "activate siren while I/O port 1 is high". The rule must use a stateful trigger (e.g. a Device Event that has active/inactive states) for while-active to function correctly.</p>
       <div class="callout tip">
         <span class="callout-icon">💡</span>

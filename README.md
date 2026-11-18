@@ -166,6 +166,7 @@ stop a siren when motion ends).
 |------|-------------|
 | **Recording** | Start or stop a recording. Supports `while_active` auto-stop |
 | **Overlay Text** | Write text to the video stream with an optional auto-remove duration. Position via preset, custom X/Y coordinates, or keep the camera's current position. Name an overlay to show and clear it from different rules (*Clear* operation). Only changes overlays Event Engine created. Supports `while_active` auto-clear |
+| **Overlay Image** | Show an image uploaded to the camera (for example a transparent alert frame). Same naming, *Clear*, duration and `while_active` as Overlay Text |
 | **PTZ Preset** | Move the camera to a named preset position |
 | **Guard Tour** | Start or stop a configured PTZ guard tour. Available tours are loaded from the camera and shown in a dropdown |
 | **IR Cut Filter** | Force the IR cut filter **On** (day mode), **Off** (night mode), or restore **Auto** switching |
@@ -245,7 +246,7 @@ middleware required.
 **Conditions:** I/O State, AOA Occupancy (Load button fetches scenarios from
 remote), Device Event State (Load button fetches event catalog from remote).
 
-**Actions:** Recording, Overlay Text, PTZ Preset, Guard Tour, IR Cut Filter,
+**Actions:** Recording, Overlay Text, Overlay Image, PTZ Preset, Guard Tour, IR Cut Filter,
 Privacy Mask, Wiper, Light Control, Audio Clip, Siren / Light, Speaker Display,
 I/O Output, I/O Flash, Paging Console Execute, Paging Console Button, Device Event Query, Set
 Device Parameter, ACAP Control.

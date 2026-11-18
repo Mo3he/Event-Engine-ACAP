@@ -1,5 +1,43 @@
 # Release Notes
 
+## v1.9.27 - Overlay Image
+
+The new **Overlay Image** action shows an image uploaded to the camera on the
+video, for example a transparent alert frame around a block-listed car's plate,
+next to an **Overlay Text** action for the plate number. It works like Overlay
+Text: name it to show and clear it from different rules, give it a duration or
+let *Run while active* clear it, and use it on remote devices.
+
+### Upgrading to 1.9.27
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.27
+
+- **Overlay Image.** Choose an image uploaded under **Video > Overlays** on the
+  camera (or, for a remote device, enter its file name). *Show / update* shows
+  or swaps the image, *Clear* removes it. Image and text overlays are named
+  separately, so an alert frame and its text can share a name. As with text,
+  Event Engine only changes or removes image overlays it created, removes them
+  when it stops, and cleans up after a power cut.
+- For a frame that covers the whole picture, make the image the size of the
+  camera's full resolution and upload it with scaling to the stream resolution
+  turned on; a PNG with a transparent background keeps the video visible.
+- API: the `overlay_image` action (`image`, `overlay`, `operation`, `position`,
+  `duration`, `while_active`).
+
+### Fixes in 1.9.27
+
+- **Custom overlay positions are saved.** *Custom (X,Y)* in Overlay Text was
+  lost when the rule was saved, so the text appeared at the top left.
+
+Verified on a P3288-LV (AXIS OS 12.11), with remote image overlays on an
+M3098-LV (13.0): images shown, swapped, cleared, timed out and placed at custom
+positions, layered under Overlay Text, other overlays (also ones showing the
+same image elsewhere) left alone, and cleanup after a power cut with renumbered
+overlays.
+
 ## v1.9.26 - Named overlays, and overlays that stay Event Engine's own
 
 **Overlay Text** can now show several overlays on one channel and clear them from
