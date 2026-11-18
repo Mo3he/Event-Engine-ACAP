@@ -3,34 +3,53 @@
 ## v1.9.26 - Named overlays, and overlays that stay Event Engine's own
 
 **Overlay Text** can now show several overlays on one channel and clear them from
-any rule. Give the action an **Overlay name** (for example `plate_alert`): every
-action with the same name and channel controls the same overlay, so one rule can
-show an alert and another can remove it. The new **Clear** operation removes an
-overlay. Without a name, the action uses the channel's shared overlay as before,
-so existing rules behave the same.
+any rule, and it no longer touches overlays that aren't its own. For example,
+one rule can show `BLOCKED ABC123` when a block-listed plate is read and another
+can remove it when the car leaves, while the camera's own date overlay and
+other apps' overlays stay as they are.
 
-Fixes:
+### Upgrading to 1.9.26
 
-- Event Engine could change or remove overlays that weren't its own. The camera
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept, and existing Overlay
+Text actions behave as before. Overlays left on screen by 1.9.25 or earlier
+can't be identified as Event Engine's; remove them once under
+**Settings > Overlays** (a camera restart keeps them).
+
+### New in 1.9.26
+
+- **Overlay name.** Give Overlay Text a name (for example `plate_alert`, up to
+  63 characters): every action with the same name and channel, in any rule,
+  controls the same overlay. Without a name, the action uses the channel's
+  shared overlay as before.
+- **Clear.** The new *Clear* operation removes a named (or the shared) overlay.
+- API: `overlay` and `operation` (`set` | `clear`) on `overlay_text`.
+
+### Fixes in 1.9.26
+
+- **Only Event Engine's own overlays are changed or removed.** The camera
   reuses overlay numbers, so after Event Engine's overlay was removed, its next
-  update (or a pending duration) could hit an overlay added in the camera's
+  update or a pending duration could hit an overlay added in the camera's
   settings, by another app, or (with remote targets) on another device. Event
-  Engine now checks that an overlay still shows the text it wrote before changing
-  or removing it, and creates a new one otherwise.
-- Firing an overlay again before its duration ended removed it when the first
-  duration ran out; the countdown now restarts.
-- Overlays stayed on the video when Event Engine stopped or was upgraded, and the
-  next firing added a second one. Event Engine now removes its overlays when it
-  stops. After an unexpected exit (or when a remote device couldn't be reached
-  at shutdown) it removes the ones it left at the next start, also when a camera
-  restart has renumbered them. Overlays left on screen by 1.9.25 or earlier can't
-  be identified; remove them once under **Settings > Overlays**.
-- Local and remote Overlay Text actions on the same channel no longer share
-  (and overwrite) one overlay.
-- Overlay errors from the camera (for example an invalid position) are shown in
-  the action test and the Event Log.
+  Engine now checks that an overlay still shows the text it wrote before it
+  changes or removes it, and otherwise creates a new one.
+- **Overlays no longer stay on screen** after Event Engine stops or is
+  upgraded; it removes them when it stops. After a power cut, or when a remote
+  device couldn't be reached at shutdown, it removes the ones it left at the
+  next start, also when the camera has renumbered them in the meantime.
+- **Firing again restarts the duration** instead of the first duration
+  removing the overlay early.
+- **Local and remote overlays** on the same channel no longer share, and
+  overwrite, one overlay.
+- **Overlay errors** from the camera (for example an invalid position) are shown
+  in the action test and on the rule in the Event Log, and a rejected update
+  leaves the overlay on screen.
 
-API: `overlay` and `operation` (`set` | `clear`) on `overlay_text`.
+Verified on a P3288-LV (AXIS OS 12.11) with remote overlays on an M3098-LV
+(13.0) and an M3066-V (10.12): named overlays side by side and across rules,
+Clear, durations, *Run while active*, overlays added by others left untouched
+after their number was reused, and cleanup on stop, after a camera reboot and
+after a power cut (with renumbered overlays).
 
 ## v1.9.25 - Client certificates (mutual TLS)
 
