@@ -1,5 +1,13 @@
 # Release Notes
 
+## Unreleased
+
+### Fixes in the next release
+
+- **Overlay errors for remote devices say what went wrong**, for example
+  *wrong username or password*, *the device doesn't support this* or *could
+  not connect*, instead of always *no response from the device*.
+
 ## v1.9.28 - Overlay Text styling and Modbus fixes
 
 **Overlay Text** can now set the font size, background and outline colour, so
