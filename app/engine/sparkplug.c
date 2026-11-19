@@ -858,7 +858,7 @@ int Sparkplug_Configure(cJSON* cfg) {
     update_command_subscriptions();
     pthread_mutex_unlock(&spb_lock);
 
-    g_idle_add(resubscribe_events_idle, NULL);
+    g_idle_add_full(G_PRIORITY_DEFAULT, resubscribe_events_idle, NULL, NULL);
 
     if (!enabled) {
         MQTT_Set_Will(NULL, NULL, 0, 0, 0);

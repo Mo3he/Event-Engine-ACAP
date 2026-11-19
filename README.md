@@ -123,7 +123,7 @@ The web UI is accessible at
 | **Rule Chain** | Fires when another named rule executes |
 | **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}`, `{{trigger.active}}`, and `{{trigger.reason}}` |
 | **Manual** | Fired via the **Fire Now** button in the UI or `POST /fire` with a rule ID. Useful for testing and one-shot actions |
-| **Modbus Read** | Poll a Modbus register on a configurable interval and fire when the value crosses a threshold. Supports Modbus TCP and RTU/RS-485. Register types: holding (FC03), input (FC04), coil (FC01), discrete (FC02). Threshold operators: `gt`, `gte`, `lt`, `lte`, `eq`, `between`. Port 502 works on all firmware versions |
+| **Modbus Read** | Poll a Modbus register on a configurable interval and fire when the value crosses a threshold. Supports Modbus TCP and RTU/RS-485. Register types: holding (FC03), input (FC04), coil (FC01), discrete (FC02). Threshold operators: `gt`, `gte`, `lt`, `lte`, `eq`, `between`, or none to fire on every change of value. Port 502 works on all firmware versions |
 | **Sparkplug Command** | Fires when a Sparkplug B host writes a metric to this edge node via `NCMD`/`DCMD`. Optional metric-name and exact-value filters. Injects `{{trigger.metric}}` and `{{trigger.value}}`. Lets a SCADA host command the device, not just read from it |
 
 ## Conditions

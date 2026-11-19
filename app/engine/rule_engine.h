@@ -12,7 +12,7 @@ extern "C" {
  *
  * CRUD may be called from the FastCGI thread (store is mutex protected);
  * dispatch and Tick run on the GMainLoop thread. VAPIX subscriptions are
- * deferred to the main loop with g_idle_add(), so never call
+ * deferred to the main loop (g_idle_add_full), so never call
  * Triggers_Subscribe_Rule directly from a FastCGI callback.
  */
 

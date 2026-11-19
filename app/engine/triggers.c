@@ -120,6 +120,8 @@ typedef struct {
     int    modbus_register;           /* register address (0-65535) */
     int    modbus_poll_interval;      /* seconds between polls */
     time_t modbus_last_poll;          /* timestamp of last poll */
+    double modbus_last_value;         /* no threshold: last value, to fire on change */
+    int    modbus_have_value;
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
@@ -835,18 +837,20 @@ void Triggers_Tick(void) {
             continue;
         }
 
-        int passes = s->value_op[0]
-            ? value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)
-            : 1;
-
-        if (!passes) {
-            if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
-            s->value_hysteresis = 0;
-            continue;
+        if (!s->value_op[0]) {
+            /* No threshold: fire on the first read, then on every change */
+            if (s->modbus_have_value && value == s->modbus_last_value) continue;
+            s->modbus_have_value = 1;
+            s->modbus_last_value = value;
+        } else {
+            if (!value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)) {
+                if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
+                s->value_hysteresis = 0;
+                continue;
+            }
+            if (s->value_hysteresis) continue; /* already fired; wait for condition to clear */
+            s->value_hysteresis = 1;
         }
-        if (s->value_hysteresis) continue; /* already fired; wait for condition to clear */
-
-        s->value_hysteresis = 1;
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type",          "modbus_read");
         cJSON_AddNumberToObject(tdata,  "value",         value);

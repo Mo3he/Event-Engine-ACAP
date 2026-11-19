@@ -378,7 +378,7 @@
               "register_type":   { "type": "string", "enum": ["holding", "input", "coil", "discrete"], "description": "Register type to read" },
               "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Register address (0-based)" },
               "poll_interval":   { "type": "integer", "minimum": 1, "default": 30, "description": "Polling interval in seconds" },
-              "op":              { "type": "string", "enum": ["gt", "lt", "gte", "lte", "eq", "between"], "description": "Comparison operator for threshold check" },
+              "op":              { "type": "string", "enum": ["gt", "lt", "gte", "lte", "eq", "between"], "description": "Comparison operator for threshold check. Omit to fire on the first read and on every change of value." },
               "threshold":       { "type": "number", "description": "Primary threshold value" },
               "threshold2":      { "type": "number", "description": "Upper bound for 'between' operator" }
             }

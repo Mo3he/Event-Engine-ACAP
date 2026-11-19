@@ -1838,7 +1838,7 @@ Set `while_active: true` on recording, overlay, I/O output, siren, or speaker_di
 
 ## Trigger: `modbus_read`
 
-Polls a Modbus register at a configurable interval and fires when the value satisfies a threshold condition. Uses edge-triggered hysteresis — fires once when condition becomes true, does not re-fire until condition clears and becomes true again.
+Polls a Modbus register at a configurable interval and fires when the value satisfies a threshold condition. Uses edge-triggered hysteresis — fires once when condition becomes true, does not re-fire until condition clears and becomes true again. Without `op`, it fires on the first read and then every time the value changes.
 
 ```json
 {
@@ -1867,7 +1867,7 @@ Polls a Modbus register at a configurable interval and fires when the value sati
 | `register_type` | `"holding"` \| `"input"` \| `"coil"` \| `"discrete"` | `"holding"` | Register type (FC03/FC04/FC01/FC02) |
 | `register` | integer | `0` | Register address (0-based) |
 | `poll_interval` | integer | `30` | Seconds between polls (minimum 1) |
-| `op` | `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` \| `"eq"` \| `"between"` | — | Threshold comparison operator |
+| `op` | `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` \| `"eq"` \| `"between"` | — | Threshold comparison operator. Omit to fire on every change of value |
 | `threshold` | number | — | Lower threshold value |
 | `threshold2` | number | — | Upper threshold (required for `between`) |
 
