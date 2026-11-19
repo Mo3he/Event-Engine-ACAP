@@ -1982,6 +1982,28 @@ void Actions_Overlay_Cleanup(void) {
     g_mutex_unlock(&overlay_lock);
 }
 
+/* Optional text styling (font_size, bg_color, outline_color). Each one is sent
+ * only when set, so existing rules keep the camera's defaults, and an update
+ * without it leaves the overlay's current style as it is. The camera checks the
+ * values (font size range: getOverlayCapabilities). */
+static void overlay_add_text_style(cJSON *params, cJSON *cfg) {
+    cJSON *fs = cJSON_GetObjectItem(cfg, "font_size");
+    int font_size = 0;
+    if (cJSON_IsNumber(fs))
+        font_size = (int)fs->valuedouble;
+    else if (cJSON_IsString(fs))
+        font_size = atoi(fs->valuestring);
+    if (font_size > 0)
+        cJSON_AddNumberToObject(params, "fontSize", font_size);
+
+    const char *bg = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "bg_color"));
+    if (bg && bg[0])
+        cJSON_AddStringToObject(params, "textBGColor", bg);
+    const char *ol = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "outline_color"));
+    if (ol && ol[0])
+        cJSON_AddStringToObject(params, "textOLColor", ol);
+}
+
 static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data, int kind) {
     const char* atype = kind == OVL_IMAGE ? "overlay_image" : "overlay_text";
     int camera = 1;
@@ -2090,7 +2112,10 @@ static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data,
         } else if (!keep_position) {
             cJSON_AddStringToObject(params, "position", position);
         }
-        if (kind == OVL_TEXT) cJSON_AddStringToObject(params, "textColor", text_color);
+        if (kind == OVL_TEXT) {
+            cJSON_AddStringToObject(params, "textColor", text_color);
+            overlay_add_text_style(params, cfg);
+        }
         overlay_pos_str(cJSON_GetObjectItem(params, "position"), sent_pos, sizeof(sent_pos));
 
         char* body = cJSON_PrintUnformatted(req);

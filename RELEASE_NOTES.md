@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### New in the next release
+
+- **Overlay Text styling.** Optional *Font size*, *Background* and *Outline*
+  colour, for example a large plate number in white on red. Each is sent to the
+  camera only when set, so existing rules look the same as before.
+- API: `font_size`, `bg_color` and `outline_color` on `overlay_text`.
+
 ### Fixes in the next release
 
 - **IPv6 addresses in certificate details** (*Settings → TLS Certificates*)

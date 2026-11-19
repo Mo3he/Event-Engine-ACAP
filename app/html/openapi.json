@@ -767,6 +767,9 @@
               "pos_x":        { "type": "number", "minimum": -1, "maximum": 1, "description": "Custom X coordinate (normalized -1..1, left to right). Used when position=custom." },
               "pos_y":        { "type": "number", "minimum": -1, "maximum": 1, "description": "Custom Y coordinate (normalized -1..1, top to bottom). Used when position=custom." },
               "text_color":   { "type": "string", "enum": ["white", "black", "red", "transparent", "semiTransparent"], "default": "white" },
+              "font_size":    { "type": "integer", "minimum": 1, "description": "Optional text size in pixels (the camera's range, usually 16-200, is reported by getOverlayCapabilities). Not sent when unset: the camera's default.", "example": 110 },
+              "bg_color":     { "type": "string", "enum": ["white", "black", "red", "transparent", "semiTransparent"], "description": "Optional background colour behind the text. Not sent when unset." },
+              "outline_color": { "type": "string", "enum": ["white", "black", "red", "transparent", "semiTransparent"], "description": "Optional outline colour around the letters. Not sent when unset." },
               "while_active": { "type": "boolean", "default": false }
             }
           }
