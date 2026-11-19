@@ -47,7 +47,7 @@
     },
     {
       "type": "overlay_image",
-      "overlay": "alpv_alert",
+      "overlay": "alpv_blocklist_alert",
       "image": "8.5-blocklist-alert-1080p(1920x1080).ovl",
       "position": "topLeft",
       "channel": 1,
@@ -55,7 +55,7 @@
     },
     {
       "type": "overlay_text",
-      "overlay": "alpv_alert",
+      "overlay": "alpv_blocklist_alert",
       "text": " {{trigger.text}} ",
       "position": "custom",
       "pos_x": -0.97,

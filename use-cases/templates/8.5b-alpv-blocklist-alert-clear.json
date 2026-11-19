@@ -36,13 +36,13 @@
   "actions": [
     {
       "type": "overlay_text",
-      "overlay": "alpv_alert",
+      "overlay": "alpv_blocklist_alert",
       "operation": "clear",
       "channel": 1
     },
     {
       "type": "overlay_image",
-      "overlay": "alpv_alert",
+      "overlay": "alpv_blocklist_alert",
       "operation": "clear",
       "channel": 1
     }

@@ -1368,7 +1368,7 @@
         <span class="tag feature">remote device</span>
       </div>
       <ol class="how-list">
-        <li data-step="1"><strong>8.5a:</strong> <code>listMode</code> = <code>block</code>, <code>carState</code> ≠ <code>lost</code> and <code>carID</code> ≠ <span class="var">{{var.alpv_alert_car}}</span> → <strong>Set Variable</strong> stores the <code>carID</code>, <strong>Overlay Image</strong> shows the alert image and <strong>Overlay Text</strong> the plate (110 px white on red, black outline), both named <code>alpv_alert</code>. One alert per vehicle at its first block-list match; another block-listed vehicle takes over and the overlays update in place</li>
+        <li data-step="1"><strong>8.5a:</strong> <code>listMode</code> = <code>block</code>, <code>carState</code> ≠ <code>lost</code> and <code>carID</code> ≠ <span class="var">{{var.alpv_alert_car}}</span> → <strong>Set Variable</strong> stores the <code>carID</code>, <strong>Overlay Image</strong> shows the alert image and <strong>Overlay Text</strong> the plate (110 px white on red, black outline), both named <code>alpv_blocklist_alert</code> (keep the name unique to these rules: same name, same overlay). One alert per vehicle at its first block-list match; another block-listed vehicle takes over and the overlays update in place</li>
         <li data-step="2"><strong>8.5b:</strong> <code>carState</code> = <code>lost</code> and <code>carID</code> = <span class="var">{{var.alpv_alert_car}}</span> → <strong>Clear</strong> text and image. Only the vehicle being shown clears the alert</li>
         <li data-step="3"><code>alpv_alert_car</code> needs no initial value and is separate from 8.4's variable, so both templates can run together</li>
       </ol>

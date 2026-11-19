@@ -889,7 +889,9 @@ watches, rather than on the camera running ALPV.
   - **Overlay Text** shows the plate, 110 px white on red with a black
     outline.
 
-  Both overlays are named `alpv_alert`.
+  Both overlays are named `alpv_blocklist_alert`. Actions with the same
+  overlay name on the same camera control the same overlay, so keep this name
+  unique to these two rules.
   - The alert appears once per vehicle, at its first block-list match. As in
     8.4, the correct plate text often only arrives in an `update`, so the rule
     doesn't filter on `new`.
