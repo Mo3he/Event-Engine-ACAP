@@ -777,6 +777,41 @@ static int build_topic_path(cJSON* cfg, char* buf, size_t size) {
 }
 
 /* Accumulate response into a dynamically growing buffer */
+/* Outcome of the last remote request on this thread, so a caller that got an
+ * unusable answer can say why (wrong password, missing API, timeout ...). */
+static __thread struct {
+    CURLcode res;
+    long     http;
+    char     err[CURL_ERROR_SIZE];
+} remote_last;
+
+static CURLcode remote_perform(CURL* curl) {
+    remote_last.err[0] = '\0';
+    remote_last.http   = 0;
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, remote_last.err);
+    remote_last.res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &remote_last.http);
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, NULL);
+    return remote_last.res;
+}
+
+/* Why the last remote request on this thread gave no usable answer. */
+static const char* remote_failure_text(char* buf, size_t n) {
+    if (remote_last.res != CURLE_OK)
+        snprintf(buf, n, "%s", curl_err_text(remote_last.res, remote_last.err));
+    else if (remote_last.http == 401)
+        snprintf(buf, n, "wrong username or password");
+    else if (remote_last.http == 403)
+        snprintf(buf, n, "the account isn't allowed to do this (needs operator or administrator)");
+    else if (remote_last.http == 404)
+        snprintf(buf, n, "the device doesn't support this (HTTP 404)");
+    else if (remote_last.http >= 300)
+        snprintf(buf, n, "the device answered HTTP %ld", remote_last.http);
+    else
+        snprintf(buf, n, "unexpected answer from the device");
+    return buf;
+}
+
 static size_t remote_write_cb(void* ptr, size_t sz, size_t n, void* ud) {
     char** buf = (char**)ud;
     size_t add = sz * n;
@@ -811,7 +846,7 @@ static char* remote_vapix_post(const char* host, const char* user, const char* p
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = remote_perform(curl);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     explicit_bzero(userpwd, sizeof(userpwd));
@@ -838,7 +873,7 @@ static char* remote_vapix_get(const char* host, const char* user, const char* pa
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = remote_perform(curl);
     curl_easy_cleanup(curl);
     explicit_bzero(userpwd, sizeof(userpwd));
     if (res != CURLE_OK) { free(response); return NULL; }
@@ -867,7 +902,7 @@ static char* remote_vapix_post_path(const char* host, const char* user, const ch
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = remote_perform(curl);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     explicit_bzero(userpwd, sizeof(userpwd));
@@ -898,7 +933,7 @@ static char* remote_vapix_put_path(const char* host, const char* user, const cha
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = remote_perform(curl);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     explicit_bzero(userpwd, sizeof(userpwd));
@@ -925,7 +960,7 @@ static char* remote_vapix_get_path(const char* host, const char* user, const cha
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, REMOTE_AUTH(https));
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = remote_perform(curl);
     curl_easy_cleanup(curl);
     explicit_bzero(userpwd, sizeof(userpwd));
     if (res != CURLE_OK) { free(response); return NULL; }
@@ -955,7 +990,7 @@ static char* remote_soap_post(const char* host, const char* user, const char* pa
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, soap_body);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = remote_perform(curl);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     explicit_bzero(userpwd, sizeof(userpwd));
@@ -2130,7 +2165,9 @@ static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data,
         cJSON* e = resp_j ? cJSON_GetObjectItem(resp_j, "error") : NULL;
         if (!resp_j || e) {
             const char* m = e ? cJSON_GetStringValue(cJSON_GetObjectItem(e, "message")) : NULL;
-            err = strdup(m ? m : "no response from the device");
+            char why[160];
+            if (!m) m = s->host[0] ? remote_failure_text(why, sizeof(why)) : "no response from the device";
+            err = strdup(m);
             cJSON_Delete(resp_j);
             /* setText also fails on a bad value; only start over if the overlay
              * really went away, otherwise the one on screen would be orphaned. */
