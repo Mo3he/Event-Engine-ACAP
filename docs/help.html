@@ -833,6 +833,8 @@ Content-Type: application/json
         <tr><td><strong>Text</strong></td><td>Overlay text. Template substitution supported.</td></tr>
         <tr><td><strong>Position</strong></td><td>Where to place the text: top-left, top-right, bottom-left, bottom-right, top, bottom, <em>Custom (X,Y)</em> (from -1 to 1, left/top to right/bottom), or <em>Keep current</em>.</td></tr>
         <tr><td><strong>Text colour</strong></td><td>Overlay colour: white, black, red, transparent, or semi-transparent.</td></tr>
+        <tr><td><strong>Font size</strong></td><td>Optional. Text height in pixels; the camera's range is usually 16–200. Empty = the camera's default.</td></tr>
+        <tr><td><strong>Background</strong> / <strong>Outline</strong></td><td>Optional. Colour behind the text and around the letters, from the same list as the text colour. <em>Default</em> leaves the camera's own style. Unset fields are not sent, so an update without them keeps the overlay's current style.</td></tr>
         <tr><td><strong>Duration</strong></td><td>Seconds before the overlay is cleared automatically; firing again restarts the countdown. Set to 0 and enable <em>While active</em> to clear when the triggering condition ends.</td></tr>
         <tr><td><strong>While active</strong></td><td>Automatically clear the overlay when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
       </table>

@@ -165,7 +165,7 @@ stop a siren when motion ends).
 | Type | Description |
 |------|-------------|
 | **Recording** | Start or stop a recording. Supports `while_active` auto-stop |
-| **Overlay Text** | Write text to the video stream with an optional auto-remove duration. Position via preset, custom X/Y coordinates, or keep the camera's current position. Name an overlay to show and clear it from different rules (*Clear* operation). Only changes overlays Event Engine created. Supports `while_active` auto-clear |
+| **Overlay Text** | Write text to the video stream with an optional auto-remove duration. Position via preset, custom X/Y coordinates, or keep the camera's current position. Optional font size, background and outline colour. Name an overlay to show and clear it from different rules (*Clear* operation). Only changes overlays Event Engine created. Supports `while_active` auto-clear |
 | **Overlay Image** | Show an image uploaded to the camera (for example a transparent alert frame). Same naming, *Clear*, duration and `while_active` as Overlay Text |
 | **PTZ Preset** | Move the camera to a named preset position |
 | **Guard Tour** | Start or stop a configured PTZ guard tour. Available tours are loaded from the camera and shown in a dropdown |

@@ -726,6 +726,9 @@ Supported by: `recording`, `overlay_text`, `overlay_image`, `ptz_preset`, `io_ou
 | `pos_x` | number | `-0.99` | Custom X coordinate (-1..1, left to right). Used when `position` = `custom` |
 | `pos_y` | number | `-0.99` | Custom Y coordinate (-1..1, top to bottom). Used when `position` = `custom` |
 | `text_color` | string | `white` | `white`, `black`, `red`, `transparent`, `semiTransparent` |
+| `font_size` | integer | — | Optional text size in pixels (camera range, usually 16–200). Not sent when unset |
+| `bg_color` | string | — | Optional background colour, same values as `text_color`. Not sent when unset |
+| `outline_color` | string | — | Optional outline colour, same values as `text_color`. Not sent when unset |
 | `while_active` | boolean | `false` | Auto-clear when trigger goes inactive |
 
 Event Engine only changes or removes overlays it created: before each update it

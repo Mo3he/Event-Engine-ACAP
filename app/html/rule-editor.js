@@ -1714,6 +1714,14 @@ function tlsProfileField(cur) {
     </div></div>`;
 }
 
+/* Optional overlay text colours: empty = not sent, the camera's default. */
+function overlayColorOptions(value) {
+  const opts = [['', 'Default'], ['white', 'White'], ['black', 'Black'], ['red', 'Red'],
+                ['transparent', 'Transparent'], ['semiTransparent', 'Semi-transparent']];
+  return opts.map(([v, label]) =>
+    `<option value="${v}" ${(value || '') === v ? 'selected' : ''}>${label}</option>`).join('');
+}
+
 function actionFields(a, rowIdx) {
   const type = a.type || 'http_request';
   const hint = getTokenInsertWidget();
@@ -1902,6 +1910,18 @@ function actionFields(a, rowIdx) {
           <option value="transparent"   ${a.text_color==='transparent'   ? 'selected':''}>Transparent</option>
           <option value="semiTransparent" ${a.text_color==='semiTransparent' ? 'selected':''}>Semi-transparent</option>
         </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Font size</label>
+        <input type="number" data-k="font_size" min="16" max="200" value="${escHtml(a.font_size || '')}" placeholder="Default">
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Background</label>
+        <select data-k="bg_color">${overlayColorOptions(a.bg_color)}</select>
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Outline</label>
+        <select data-k="outline_color">${overlayColorOptions(a.outline_color)}</select>
       </div>`}
     </div>
     ${!(parseInt(a.duration) > 0) ? `
@@ -3456,7 +3476,7 @@ function normalizeAction(a) {
                  'preset','port','state','clip_name','message','level','event_id','profile',
                  'seconds','name','value','delta','rule_id','cron','interval_seconds',
                  'schedule_type','time','counter_name','op','token','edge',
-                 'topic','payload','qos','position','text_color',
+                 'topic','payload','qos','position','text_color','font_size','bg_color','outline_color',
                  'tour_id','parameter','mask_id','light_id','package','id','mode',
                  'webhook_url','title','theme_color','version','database','org','bucket',
                  'measurement','tags','fields','bot_token','chat_id','parse_mode',
@@ -3546,14 +3566,18 @@ function normalizeAction(a) {
     out.while_active = a.while_active === true;
   if (a.type === 'overlay_text' || a.type === 'overlay_image') {
     if (a.type === 'overlay_image') {
-      delete out.text_color;
-      delete out.text;
+      ['text_color', 'text', 'font_size', 'bg_color', 'outline_color'].forEach(k => delete out[k]);
       if (a.image) out.image = String(a.image).trim();
     }
     if (out.operation === 'clear') {
-      ['text', 'image', 'duration', 'position', 'text_color', 'pos_x', 'pos_y'].forEach(k => delete out[k]);
+      ['text', 'image', 'duration', 'position', 'text_color', 'pos_x', 'pos_y',
+       'font_size', 'bg_color', 'outline_color'].forEach(k => delete out[k]);
     } else {
       delete out.operation;
+      if (out.font_size !== undefined) {
+        const fs = parseInt(out.font_size);
+        if (fs > 0) out.font_size = fs; else delete out.font_size;
+      }
       if (!(parseInt(a.duration) > 0)) out.while_active = a.while_active === true;
       if (out.position === 'custom') {
         ['pos_x', 'pos_y'].forEach(k => {
