@@ -4578,37 +4578,11 @@ void Actions_Digest_Tick(void) {
     }
 }
 
-/* modbus_write — write a value to a Modbus register (TCP or RTU/RS-485) */
+/* modbus_write — write a value to a Modbus register (TCP or RTU/RS-485). Runs
+ * on the Modbus worker thread so a device that doesn't answer can't stall the
+ * main loop; writes keep their order. */
 static void action_modbus_write(cJSON* cfg) {
-    mb_ctx_t* ctx = modbus_pool_get(cfg);
-    if (!ctx) {
-        LOG_WARN("modbus_write: no connection available");
-        return;
-    }
-
-    cJSON* slave_j = cJSON_GetObjectItem(cfg, "slave_id");
-    int slave_id   = slave_j ? (int)slave_j->valuedouble : 1;
-
-    cJSON* reg_j = cJSON_GetObjectItem(cfg, "register");
-    int    reg   = reg_j ? (int)reg_j->valuedouble : 0;
-
-    cJSON* val_j = cJSON_GetObjectItem(cfg, "value");
-    double val   = val_j ? val_j->valuedouble : 0.0;
-
-    const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "register_type"));
-    if (!rtype) rtype = "holding";
-
-    int rc = -1;
-    if (strcmp(rtype, "coil") == 0) {
-        rc = mb_write_bit(ctx, slave_id, reg, (int)val ? 1 : 0);
-    } else {
-        rc = mb_write_register(ctx, slave_id, reg, (uint16_t)(int)val);
-    }
-
-    if (rc < 0) {
-        LOG_WARN("modbus_write: write failed (reg %d): %s", reg, strerror(errno));
-        modbus_pool_invalidate(ctx);
-    }
+    modbus_submit_write(cfg);
 }
 
 static void execute_from(const char* rule_id, cJSON* actions_array,

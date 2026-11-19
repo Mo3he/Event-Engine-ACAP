@@ -122,10 +122,13 @@ typedef struct {
     time_t modbus_last_poll;          /* timestamp of last poll */
     double modbus_last_value;         /* no threshold: last value, to fire on change */
     int    modbus_have_value;
+    unsigned modbus_serial;           /* identifies this subscription to the worker */
+    int    modbus_busy;               /* a read is queued or running */
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
 static int            sub_count = 0;
+static unsigned       modbus_serial_next = 0;
 static Trigger_Fire_Fn fire_fn  = NULL;
 
 /*-----------------------------------------------------
@@ -243,7 +246,7 @@ void Triggers_Cleanup(void) {
     }
     sub_count = 0;
     Scheduler_Cleanup();
-    modbus_pool_release_all();
+    modbus_worker_stop();
 }
 
 void Triggers_Unsubscribe_Rule(const char* rule_id) {
@@ -465,6 +468,7 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             cJSON* thresh2_j = cJSON_GetObjectItem(trig, "threshold2");
             if (thresh2_j) s->value_threshold2 = thresh2_j->valuedouble;
             s->modbus_last_poll = 0; /* force immediate first poll */
+            s->modbus_serial = ++modbus_serial_next;
             /* No VAPIX subscription — polled via Triggers_Tick */
 
         } else {
@@ -745,6 +749,46 @@ void Triggers_On_Sparkplug_Command(const char* metric, const char* value) {
     }
 }
 
+/* Main loop: result of a Modbus read queued by Triggers_Tick. Results for
+ * subscriptions removed or replaced in the meantime are dropped. */
+static void modbus_read_done(const mb_read_result_t* r) {
+    Subscription* s = NULL;
+    for (int i = 0; i < sub_count; i++) {
+        if (subs[i].type == TRIG_MODBUS_READ && subs[i].modbus_serial == r->tag) { s = &subs[i]; break; }
+    }
+    if (!s) return;
+    s->modbus_busy = 0;
+    if (!r->ok) {
+        LOG_WARN("modbus_read: read error for rule %s (reg %d): %s",
+                 s->rule_id, s->modbus_register, strerror(r->err));
+        return;
+    }
+    double value = r->value;
+
+    if (!s->value_op[0]) {
+        /* No threshold: fire on the first read, then on every change */
+        if (s->modbus_have_value && value == s->modbus_last_value) return;
+        s->modbus_have_value = 1;
+        s->modbus_last_value = value;
+    } else {
+        if (!value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)) {
+            if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
+            s->value_hysteresis = 0;
+            return;
+        }
+        if (s->value_hysteresis) return; /* already fired; wait for condition to clear */
+        s->value_hysteresis = 1;
+    }
+    cJSON* tdata = cJSON_CreateObject();
+    cJSON_AddStringToObject(tdata, "type",          "modbus_read");
+    cJSON_AddNumberToObject(tdata,  "value",         value);
+    cJSON_AddNumberToObject(tdata,  "register",      s->modbus_register);
+    cJSON_AddStringToObject(tdata, "register_type",  s->modbus_reg_type);
+    cJSON_AddNumberToObject(tdata,  "slave_id",      s->modbus_slave_id);
+    fire_fn(s->rule_id, s->trigger_index, tdata);
+    cJSON_Delete(tdata);
+}
+
 void Triggers_Tick(void) {
     Scheduler_Tick();
 
@@ -786,11 +830,12 @@ void Triggers_Tick(void) {
         }
     }
 
-    /* Modbus read poll triggers */
+    /* Modbus read poll triggers: the read runs on the Modbus worker thread,
+     * the result comes back in modbus_read_done(). */
     time_t now_mb = time(NULL);
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
-        if (s->type != TRIG_MODBUS_READ) continue;
+        if (s->type != TRIG_MODBUS_READ || s->modbus_busy) continue;
         if (s->modbus_last_poll > 0 &&
             (now_mb - s->modbus_last_poll) < (time_t)s->modbus_poll_interval) continue;
         s->modbus_last_poll = now_mb;
@@ -802,63 +847,9 @@ void Triggers_Tick(void) {
         cJSON_AddStringToObject(cfg, "device",          s->modbus_device);
         cJSON_AddNumberToObject(cfg, "baud",            s->modbus_baud);
         cJSON_AddStringToObject(cfg, "parity",          s->modbus_parity);
-
-        mb_ctx_t* ctx = modbus_pool_get(cfg);
-        cJSON_Delete(cfg);
-        if (!ctx) {
-            LOG_WARN("modbus_read: no connection available for rule %s", s->rule_id);
-            continue;
-        }
-
-        double  value = 0.0;
-        int     rc    = -1;
-        if (strcmp(s->modbus_reg_type, "holding") == 0) {
-            uint16_t v = 0;
-            rc = mb_read_register(ctx, s->modbus_slave_id, 0x03, s->modbus_register, &v);
-            if (rc == 0) value = (double)v;
-        } else if (strcmp(s->modbus_reg_type, "input") == 0) {
-            uint16_t v = 0;
-            rc = mb_read_register(ctx, s->modbus_slave_id, 0x04, s->modbus_register, &v);
-            if (rc == 0) value = (double)v;
-        } else if (strcmp(s->modbus_reg_type, "coil") == 0) {
-            uint8_t b = 0;
-            rc = mb_read_bit(ctx, s->modbus_slave_id, 0x01, s->modbus_register, &b);
-            if (rc == 0) value = (double)b;
-        } else if (strcmp(s->modbus_reg_type, "discrete") == 0) {
-            uint8_t b = 0;
-            rc = mb_read_bit(ctx, s->modbus_slave_id, 0x02, s->modbus_register, &b);
-            if (rc == 0) value = (double)b;
-        }
-
-        if (rc < 0) {
-            LOG_WARN("modbus_read: read error for rule %s (reg %d): %s",
-                     s->rule_id, s->modbus_register, strerror(errno));
-            modbus_pool_invalidate(ctx);
-            continue;
-        }
-
-        if (!s->value_op[0]) {
-            /* No threshold: fire on the first read, then on every change */
-            if (s->modbus_have_value && value == s->modbus_last_value) continue;
-            s->modbus_have_value = 1;
-            s->modbus_last_value = value;
-        } else {
-            if (!value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)) {
-                if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
-                s->value_hysteresis = 0;
-                continue;
-            }
-            if (s->value_hysteresis) continue; /* already fired; wait for condition to clear */
-            s->value_hysteresis = 1;
-        }
-        cJSON* tdata = cJSON_CreateObject();
-        cJSON_AddStringToObject(tdata, "type",          "modbus_read");
-        cJSON_AddNumberToObject(tdata,  "value",         value);
-        cJSON_AddNumberToObject(tdata,  "register",      s->modbus_register);
-        cJSON_AddStringToObject(tdata, "register_type",  s->modbus_reg_type);
-        cJSON_AddNumberToObject(tdata,  "slave_id",      s->modbus_slave_id);
-        fire_fn(s->rule_id, s->trigger_index, tdata);
-        cJSON_Delete(tdata);
+        s->modbus_busy = 1;
+        modbus_submit_read(cfg, s->modbus_slave_id, s->modbus_reg_type, s->modbus_register,
+                           s->modbus_serial, modbus_read_done);
     }
 }
 

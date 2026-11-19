@@ -44,6 +44,33 @@ int mb_write_register(mb_ctx_t* ctx, int slave_id, int address, uint16_t value);
 /* Write one coil (FC05). value: 0 = off, non-zero = on. Returns 0 on success, -1 on error. */
 int mb_write_bit(mb_ctx_t* ctx, int slave_id, int address, int value);
 
+/*
+ * Worker thread. A failing connect or read can block for seconds, so all
+ * Modbus I/O runs on one worker thread instead of the GLib main loop. Jobs run
+ * in the order they were queued.
+ */
+
+typedef struct {
+    unsigned tag;    /* the caller's tag, returned unchanged */
+    int      ok;     /* 1 = read succeeded */
+    double   value;  /* register value, or 0/1 for coils and discrete inputs */
+    int      err;    /* errno on failure */
+} mb_read_result_t;
+
+typedef void (*mb_read_done_fn)(const mb_read_result_t* result);
+
+/* Queue a read of one register or bit. conn is the connection cfg (see above)
+ * and is taken over by the worker. reg_type: "holding", "input", "coil" or
+ * "discrete". done() is called on the GLib main loop. */
+void modbus_submit_read(cJSON* conn, int slave_id, const char* reg_type,
+                        int address, unsigned tag, mb_read_done_fn done);
+
+/* Queue a modbus_write action (copied). Failures are logged. */
+void modbus_submit_write(cJSON* action_cfg);
+
+/* Stop the worker (pending jobs are dropped) and close all connections. */
+void modbus_worker_stop(void);
+
 #ifdef __cplusplus
 }
 #endif
