@@ -1559,7 +1559,7 @@ function remoteDeviceSection(obj, rerenderFn) {
   const isRemote = obj.remote_host_toggle === 'remote'
     || (obj.remote_host && obj.remote_host_toggle !== 'local');
   return `
-  <div class="form-row" style="border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+  <div class="form-row" style="flex-wrap:wrap;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
     <div class="form-group" style="flex:0 0 160px;">
       <label>Target Device</label>
       <select data-k="remote_host_toggle" onchange="${rerenderFn}(this)">
@@ -1572,15 +1572,15 @@ function remoteDeviceSection(obj, rerenderFn) {
       <label>IP / Hostname</label>
       <input type="text" data-k="remote_host" value="${escHtml(obj.remote_host || '')}" placeholder="192.168.1.100">
     </div>
-    <div class="form-group" style="flex:0 0 110px;">
+    <div class="form-group" style="flex:0 0 110px;min-width:0;">
       <label>Username</label>
       <input type="text" data-k="remote_user" value="${escHtml(obj.remote_user || '')}" placeholder="root" autocomplete="off">
     </div>
-    <div class="form-group" style="flex:0 0 130px;">
+    <div class="form-group" style="flex:0 0 130px;min-width:0;">
       <label>Password</label>
       <input type="password" data-k="remote_pass" value="${escHtml(obj.remote_pass || '')}" autocomplete="new-password">
     </div>
-    <div class="form-group" style="flex:0 0 150px;">
+    <div class="form-group" style="flex:0 0 auto;">
       <label>&nbsp;</label>
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer" title="Use HTTPS to reach this device. Required for OS 13 cameras that are HTTPS-only; the camera's self-signed certificate is accepted.">
         <input type="checkbox" data-k="remote_https" ${obj.remote_https ? 'checked' : ''}> Use HTTPS
@@ -1602,7 +1602,7 @@ function remoteDeviceFields(a) {
   const isRemote = a.remote_host_toggle === 'remote'
     || (a.remote_host && a.remote_host_toggle !== 'local');
   return `
-  <div class="form-row" style="border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:4px;">
+  <div class="form-row" style="flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:4px;">
     <div class="form-group" style="flex:0 0 160px;">
       <label>Target Device</label>
       <select data-k="remote_host_toggle" onchange="rerenderAction(this)">
@@ -1615,15 +1615,15 @@ function remoteDeviceFields(a) {
       <label>IP / Hostname</label>
       <input type="text" data-k="remote_host" value="${escHtml(a.remote_host || '')}" placeholder="192.168.1.100" onchange="rerenderAction(this)">
     </div>
-    <div class="form-group" style="flex:0 0 110px;">
+    <div class="form-group" style="flex:0 0 110px;min-width:0;">
       <label>Username</label>
       <input type="text" data-k="remote_user" value="${escHtml(a.remote_user || '')}" placeholder="root" autocomplete="off">
     </div>
-    <div class="form-group" style="flex:0 0 130px;">
+    <div class="form-group" style="flex:0 0 130px;min-width:0;">
       <label>Password</label>
       <input type="password" data-k="remote_pass" value="${escHtml(a.remote_pass || '')}" placeholder="" autocomplete="new-password">
     </div>
-    <div class="form-group" style="flex:0 0 150px;">
+    <div class="form-group" style="flex:0 0 auto;">
       <label>&nbsp;</label>
       <label style="display:flex;align-items:center;gap:6px;cursor:pointer" title="Use HTTPS to reach this device. Required for OS 13 cameras that are HTTPS-only; the camera's self-signed certificate is accepted.">
         <input type="checkbox" data-k="remote_https" ${a.remote_https ? 'checked' : ''}> Use HTTPS
