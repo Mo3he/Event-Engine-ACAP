@@ -2776,10 +2776,10 @@ void ACAP_Cleanup(void) {
 
     ACAP_HTTP_Cleanup();
 
-    if (ACAP_EVENTS_HANDLER) {
-        ax_event_handler_free(ACAP_EVENTS_HANDLER);
-        ACAP_EVENTS_HANDLER = NULL;
-    }
+    /* Not ax_event_handler_free(): with the main loop stopped it never returns,
+     * so systemd killed the app after its 15 s stop timeout. The process is
+     * exiting; the event service drops our declarations and subscriptions. */
+    ACAP_EVENTS_HANDLER = NULL;
     if (ACAP_EVENTS_SUBSCRIPTIONS) {
         cJSON_Delete(ACAP_EVENTS_SUBSCRIPTIONS);
         ACAP_EVENTS_SUBSCRIPTIONS = NULL;

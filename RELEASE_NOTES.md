@@ -11,6 +11,9 @@
 
 ### Fixes in the next release
 
+- **Stopping, restarting or upgrading Event Engine is faster.** The app hung
+  at the very end of shutdown, after everything was saved, until the camera
+  killed it 15 seconds later.
 - **Modbus Read with *Any change (no threshold)*** fired only on the first read.
   It now fires on the first read and then every time the value changes.
 - **An unreachable Modbus device no longer slows down the rest of the
