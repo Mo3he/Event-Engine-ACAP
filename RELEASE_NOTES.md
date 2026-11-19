@@ -1,15 +1,26 @@
 # Release Notes
 
-## Unreleased
+## v1.9.28 - Overlay Text styling and Modbus fixes
 
-### New in the next release
+**Overlay Text** can now set the font size, background and outline colour, so
+an alert such as a block-listed plate can be large white text on red. This and
+the layout fix below were contributed by FF Group, the makers of ALPV. Thank
+you! This release also makes Modbus more robust and speeds up stopping and
+upgrading the app.
+
+### Upgrading to 1.9.28
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.28
 
 - **Overlay Text styling.** Optional *Font size*, *Background* and *Outline*
   colour, for example a large plate number in white on red. Each is sent to the
   camera only when set, so existing rules look the same as before.
 - API: `font_size`, `bg_color` and `outline_color` on `overlay_text`.
 
-### Fixes in the next release
+### Fixes in 1.9.28
 
 - **Stopping, restarting or upgrading Event Engine is faster.** The app hung
   at the very end of shutdown, after everything was saved, until the camera
@@ -27,6 +38,13 @@
   are shown in the usual short form, for example `2001:db8::1` instead of
   `2001:db8:0:0:0:0:0:1`. The certificate fingerprint and address list are
   now built without the string handling that code scanning flagged.
+- **Remote device fields stay inside the action card.** The *Use HTTPS*
+  checkbox ended up outside the card; the row now wraps when it's narrow.
+
+Verified on a P3288-LV (AXIS OS 12.11), with a Modbus TCP server on a Linux PC
+and remote overlays on an M3066-V (AXIS OS 10.12): text styling on show and
+update, Modbus changes, outages, write order and rule changes next to an
+unreachable device, and a clean stop and restart.
 
 ## v1.9.27 - Overlay Image
 
