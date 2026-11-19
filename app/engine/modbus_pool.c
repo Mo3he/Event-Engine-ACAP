@@ -4,7 +4,12 @@
  * serial_gateway connects via TCP but speaks RTU framing (CRC, no MBAP), for
  * use with an Axis PortManager GenericTCPServer exposing a local RS-485 port.
  * Supports FC 0x01-0x04 (reads) and 0x05-0x06 (single writes).
+ *
+ * All I/O runs on one worker thread (modbus_submit_*), never on the GLib main
+ * loop: a device that doesn't answer blocks for the socket timeout.
  */
+
+#include <glib.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +46,8 @@ __asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.4");
 #define POOL_MAX        16
 #define MB_TIMEOUT_S     2   /* TCP socket timeout */
 #define MB_RTU_VTIME    10   /* termios VTIME units (0.1s each) → 1s */
+#define MB_RETRY_S       5   /* after a failed connect, wait before trying again */
+#define MB_QUEUE_MAX    64   /* queued writes; reads are one per trigger at most */
 
 typedef enum { MB_TCP, MB_RTU, MB_SERIAL_GW } mb_transport_t;
 
@@ -56,6 +63,8 @@ struct mb_ctx {
     /* state */
     int    fd;          /* socket or serial fd; -1 = disconnected */
     int    connected;
+    gint64 retry_at;    /* monotonic s; no connect attempt before this */
+    int    last_err;    /* errno of the failed connect */
     char   key[256];
 };
 
@@ -103,7 +112,7 @@ static int tcp_connect(struct mb_ctx* c) {
     hints.ai_socktype = SOCK_STREAM;
     char portstr[8];
     snprintf(portstr, sizeof(portstr), "%d", c->port);
-    if (getaddrinfo(c->host, portstr, &hints, &res) != 0 || !res) return -1;
+    if (getaddrinfo(c->host, portstr, &hints, &res) != 0 || !res) { errno = EHOSTUNREACH; return -1; }
     int fd = socket(res->ai_family, res->ai_socktype, 0);
     if (fd < 0) { freeaddrinfo(res); return -1; }
     struct timeval tv = { MB_TIMEOUT_S, 0 };
@@ -112,7 +121,11 @@ static int tcp_connect(struct mb_ctx* c) {
     int one = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
-        close(fd); freeaddrinfo(res); return -1;
+        int e = errno;
+        if (e == EINPROGRESS || e == EAGAIN) e = ETIMEDOUT; /* SO_SNDTIMEO expired */
+        close(fd); freeaddrinfo(res);
+        errno = e;
+        return -1;
     }
     freeaddrinfo(res);
     c->fd = fd; c->connected = 1;
@@ -145,7 +158,21 @@ static int rtu_connect(struct mb_ctx* c) {
 static int ensure_connected(struct mb_ctx* c) {
     if (c->connected && c->fd >= 0) return 0;
     if (c->fd >= 0) { close(c->fd); c->fd = -1; }
-    return (c->transport == MB_RTU) ? rtu_connect(c) : tcp_connect(c);
+    gint64 now = g_get_monotonic_time() / G_USEC_PER_SEC;
+    if (c->retry_at && now < c->retry_at) {
+        errno = c->last_err;
+        return -1;
+    }
+    errno = 0;
+    int rc = (c->transport == MB_RTU) ? rtu_connect(c) : tcp_connect(c);
+    if (rc != 0) {
+        c->last_err = errno ? errno : EIO;
+        c->retry_at = now + MB_RETRY_S;
+        errno = c->last_err;
+    } else {
+        c->retry_at = 0;
+    }
+    return rc;
 }
 
 /* ------------------------------------------------------------------ */
@@ -432,4 +459,181 @@ void modbus_pool_release_all(void) {
         pool_used[i] = 0;
     }
     pthread_mutex_unlock(&pool_mutex);
+}
+
+/* ------------------------------------------------------------------ */
+/* Worker thread                                                       */
+/* ------------------------------------------------------------------ */
+
+typedef enum { JOB_READ, JOB_WRITE, JOB_STOP } mb_job_kind_t;
+
+typedef struct {
+    mb_job_kind_t    kind;
+    cJSON*           cfg;
+    int              slave_id;
+    int              address;
+    char             reg_type[16];
+    mb_read_done_fn  done;
+    mb_read_result_t res;
+} mb_job_t;
+
+static GAsyncQueue*    jobs        = NULL;
+static GThread*        worker      = NULL;
+static int             pending_writes = 0;   /* queued or running, under worker_lock */
+static pthread_mutex_t worker_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void job_free(mb_job_t* j) {
+    if (j->cfg) cJSON_Delete(j->cfg);
+    free(j);
+}
+
+static gboolean deliver_read(gpointer data) {
+    mb_job_t* j = data;
+    j->done(&j->res);
+    job_free(j);
+    return G_SOURCE_REMOVE;
+}
+
+static void run_read(mb_job_t* j) {
+    mb_ctx_t* ctx = modbus_pool_get(j->cfg);
+    int rc = -1;
+    errno = 0;
+    if (!ctx) {
+        errno = ENOSPC;
+    } else if (strcmp(j->reg_type, "holding") == 0 || strcmp(j->reg_type, "input") == 0) {
+        uint16_t v = 0;
+        int fc = strcmp(j->reg_type, "holding") == 0 ? 0x03 : 0x04;
+        rc = mb_read_register(ctx, j->slave_id, fc, j->address, &v);
+        if (rc == 0) j->res.value = (double)v;
+    } else if (strcmp(j->reg_type, "coil") == 0 || strcmp(j->reg_type, "discrete") == 0) {
+        uint8_t b = 0;
+        int fc = strcmp(j->reg_type, "coil") == 0 ? 0x01 : 0x02;
+        rc = mb_read_bit(ctx, j->slave_id, fc, j->address, &b);
+        if (rc == 0) j->res.value = (double)b;
+    } else {
+        errno = EINVAL;
+    }
+    j->res.ok = rc == 0;
+    if (rc != 0) {
+        j->res.err = errno ? errno : EIO;
+        if (ctx) modbus_pool_invalidate(ctx);
+    }
+}
+
+static void run_write(mb_job_t* j) {
+    cJSON* cfg = j->cfg;
+    mb_ctx_t* ctx = modbus_pool_get(cfg);
+    if (!ctx) {
+        LOG_WARN("modbus_write: no connection available");
+        return;
+    }
+    cJSON* slave_j = cJSON_GetObjectItem(cfg, "slave_id");
+    int slave_id   = slave_j ? (int)slave_j->valuedouble : 1;
+    cJSON* reg_j   = cJSON_GetObjectItem(cfg, "register");
+    int reg        = reg_j ? (int)reg_j->valuedouble : 0;
+    cJSON* val_j   = cJSON_GetObjectItem(cfg, "value");
+    double val     = val_j ? val_j->valuedouble : 0.0;
+    const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "register_type"));
+    if (!rtype) rtype = "holding";
+
+    int rc;
+    if (strcmp(rtype, "coil") == 0)
+        rc = mb_write_bit(ctx, slave_id, reg, (int)val ? 1 : 0);
+    else
+        rc = mb_write_register(ctx, slave_id, reg, (uint16_t)(int)val);
+    if (rc < 0) {
+        LOG_WARN("modbus_write: write failed (reg %d): %s", reg, strerror(errno));
+        modbus_pool_invalidate(ctx);
+    }
+}
+
+static gpointer worker_main(gpointer unused) {
+    (void)unused;
+    for (;;) {
+        mb_job_t* j = g_async_queue_pop(jobs);
+        if (j->kind == JOB_STOP) { job_free(j); break; }
+        if (j->kind == JOB_WRITE) {
+            run_write(j);
+            job_free(j);
+            pthread_mutex_lock(&worker_lock);
+            pending_writes--;
+            pthread_mutex_unlock(&worker_lock);
+        } else {
+            run_read(j);
+            cJSON_Delete(j->cfg);
+            j->cfg = NULL;
+            g_idle_add_full(G_PRIORITY_DEFAULT, deliver_read, j, NULL);
+        }
+    }
+    return NULL;
+}
+
+/* Returns 0 if queued; the job is freed otherwise. */
+static int submit(mb_job_t* j) {
+    pthread_mutex_lock(&worker_lock);
+    if (!jobs) {
+        jobs   = g_async_queue_new();
+        worker = g_thread_new("modbus", worker_main, NULL);
+    }
+    if (j->kind == JOB_WRITE) {
+        if (pending_writes >= MB_QUEUE_MAX) {
+            pthread_mutex_unlock(&worker_lock);
+            job_free(j);
+            return -1;
+        }
+        pending_writes++;
+    }
+    g_async_queue_push(jobs, j);
+    pthread_mutex_unlock(&worker_lock);
+    return 0;
+}
+
+void modbus_submit_read(cJSON* conn, int slave_id, const char* reg_type,
+                        int address, unsigned tag, mb_read_done_fn done) {
+    mb_job_t* j = calloc(1, sizeof(*j));
+    if (!j) { cJSON_Delete(conn); return; }
+    j->kind     = JOB_READ;
+    j->cfg      = conn;
+    j->slave_id = slave_id;
+    j->address  = address;
+    j->done     = done;
+    j->res.tag  = tag;
+    snprintf(j->reg_type, sizeof(j->reg_type), "%s", reg_type ? reg_type : "holding");
+    submit(j);
+}
+
+void modbus_submit_write(cJSON* action_cfg) {
+    mb_job_t* j = calloc(1, sizeof(*j));
+    if (!j) return;
+    j->kind = JOB_WRITE;
+    j->cfg  = cJSON_Duplicate(action_cfg, 1);
+    if (!j->cfg) { free(j); return; }
+    if (submit(j) != 0)
+        LOG_WARN("modbus_write: queue full (%d writes waiting), write dropped", MB_QUEUE_MAX);
+}
+
+void modbus_worker_stop(void) {
+    pthread_mutex_lock(&worker_lock);
+    GAsyncQueue* q = jobs;
+    GThread*     t = worker;
+    if (q) {
+        mb_job_t* j;
+        while ((j = g_async_queue_try_pop(q))) job_free(j);
+        mb_job_t* stop = calloc(1, sizeof(*stop));
+        if (stop) {
+            stop->kind = JOB_STOP;
+            g_async_queue_push(q, stop);
+        } else {
+            t = NULL;   /* can't signal the worker; don't wait for it */
+        }
+    }
+    pthread_mutex_unlock(&worker_lock);
+    if (t) g_thread_join(t);
+    pthread_mutex_lock(&worker_lock);
+    if (q) g_async_queue_unref(q);
+    jobs = NULL;
+    worker = NULL;
+    pending_writes = 0;
+    pthread_mutex_unlock(&worker_lock);
+    modbus_pool_release_all();
 }
