@@ -331,7 +331,9 @@ static void schedule_subscribe(const char* rule_id, cJSON* triggers) {
     SubscribeWork* w = malloc(sizeof(SubscribeWork));
     snprintf(w->rule_id, sizeof(w->rule_id), "%s", rule_id);
     w->triggers = cJSON_Duplicate(triggers, 1);
-    g_idle_add(do_subscribe, w);
+    /* Default priority, not idle: a slow Modbus poll keeps the 1 s tick due
+     * all the time, and idle sources would then never run. */
+    g_idle_add_full(G_PRIORITY_DEFAULT, do_subscribe, w, NULL);
 }
 
 /* Unsubscribing touches the unlocked trigger table, so it must run on the main loop too. */
@@ -343,7 +345,7 @@ static gboolean do_unsubscribe(gpointer data) {
 
 static void schedule_unsubscribe(const char* rule_id) {
     char* copy = strdup(rule_id);
-    if (copy) g_idle_add(do_unsubscribe, copy);
+    if (copy) g_idle_add_full(G_PRIORITY_DEFAULT, do_unsubscribe, copy, NULL);
 }
 
 /*-----------------------------------------------------

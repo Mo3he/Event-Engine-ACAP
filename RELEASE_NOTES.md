@@ -11,6 +11,12 @@
 
 ### Fixes in the next release
 
+- **Modbus Read with *Any change (no threshold)*** fired only on the first read.
+  It now fires on the first read and then every time the value changes.
+- **An unreachable Modbus device no longer blocks rule changes.** With a short
+  poll interval, the failing connection kept the engine busy, so saved or
+  deleted rules didn't take effect and incoming MQTT messages weren't handled
+  until the app restarted.
 - **IPv6 addresses in certificate details** (*Settings → TLS Certificates*)
   are shown in the usual short form, for example `2001:db8::1` instead of
   `2001:db8:0:0:0:0:0:1`. The certificate fingerprint and address list are

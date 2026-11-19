@@ -676,7 +676,7 @@ static void inflight_retransmit(int fd, SSL* ssl) {
 }
 
 /* =====================================================
- * Dispatch incoming PUBLISH to GMainLoop via g_idle_add
+ * Dispatch incoming PUBLISH to the GMainLoop
  * ===================================================== */
 typedef struct {
     char* topic;
@@ -727,7 +727,7 @@ static void handle_publish(const uint8_t* buf, int remaining_len, uint8_t qos, i
     m->topic       = topic;
     m->payload     = payload;
     m->payload_len = payload_len;
-    g_idle_add(dispatch_message, m);
+    g_idle_add_full(G_PRIORITY_DEFAULT, dispatch_message, m, NULL); /* not starved by a slow tick */
 }
 
 /* =====================================================

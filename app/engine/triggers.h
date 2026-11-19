@@ -12,7 +12,8 @@ extern "C" {
  * Sparkplug commands, Modbus polls and rule chaining to the rule engine.
  *
  * ACAP_EVENTS_Subscribe/Unsubscribe MUST run on the GMainLoop thread, not the
- * FastCGI thread; rule_engine.c defers subscription work with g_idle_add().
+ * FastCGI thread; rule_engine.c defers subscription work to the main loop
+ * (g_idle_add_full at default priority).
  *
  * Trigger types: vapix_event, io_input, http_webhook, schedule,
  * counter_threshold, rule_fired, mqtt_message, sparkplug_command,
