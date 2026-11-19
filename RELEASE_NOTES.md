@@ -12,9 +12,11 @@
 
 **Overlay Text** can now set the font size, background and outline colour, so
 an alert such as a block-listed plate can be large white text on red. This and
-the layout fix below were contributed by FF Group, the makers of ALPV. Thank
-you! This release also makes Modbus more robust and speeds up stopping and
-upgrading the app.
+the layout fix below were contributed by
+[@ffgroup-usa](https://github.com/ffgroup-usa)
+(FF Group, the makers of ALPV), their first contribution to Event Engine.
+Thank you! This release also makes Modbus more robust and speeds up stopping
+and upgrading the app.
 
 ### Upgrading to 1.9.28
 
@@ -23,9 +25,12 @@ in-place upgrade. Rules, settings and variables are kept.
 
 ### New in 1.9.28
 
-- **Overlay Text styling.** Optional *Font size*, *Background* and *Outline*
-  colour, for example a large plate number in white on red. Each is sent to the
-  camera only when set, so existing rules look the same as before.
+- **Overlay Text styling**
+  ([#21](https://github.com/Mo3he/Event-Engine-ACAP/pull/21)
+  by [@ffgroup-usa](https://github.com/ffgroup-usa)).
+  Optional *Font size*, *Background* and *Outline* colour, for example a large
+  plate number in white on red. Each is sent to the camera only when set, so
+  existing rules look the same as before.
 - API: `font_size`, `bg_color` and `outline_color` on `overlay_text`.
 
 ### Fixes in 1.9.28
@@ -46,13 +51,22 @@ in-place upgrade. Rules, settings and variables are kept.
   are shown in the usual short form, for example `2001:db8::1` instead of
   `2001:db8:0:0:0:0:0:1`. The certificate fingerprint and address list are
   now built without the string handling that code scanning flagged.
-- **Remote device fields stay inside the action card.** The *Use HTTPS*
-  checkbox ended up outside the card; the row now wraps when it's narrow.
+- **Remote device fields stay inside the action card**
+  ([#22](https://github.com/Mo3he/Event-Engine-ACAP/pull/22)
+  by [@ffgroup-usa](https://github.com/ffgroup-usa)).
+  The *Use HTTPS* checkbox ended up outside the card; the row now wraps when
+  it's narrow.
 
 Verified on a P3288-LV (AXIS OS 12.11), with a Modbus TCP server on a Linux PC
 and remote overlays on an M3066-V (AXIS OS 10.12): text styling on show and
 update, Modbus changes, outages, write order and rule changes next to an
 unreachable device, and a clean stop and restart.
+
+### New contributors
+
+- [@ffgroup-usa](https://github.com/ffgroup-usa)
+  made their first contribution in
+  [#21](https://github.com/Mo3he/Event-Engine-ACAP/pull/21).
 
 ## v1.9.27 - Overlay Image
 
