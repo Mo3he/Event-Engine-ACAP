@@ -1,17 +1,33 @@
 # Release Notes
 
-## Unreleased
+## v1.9.29 - ALPV block list alert template
 
-### New in the next release
+A new ready-made use case from
+[@ffgroup-usa](https://github.com/ffgroup-usa)
+(FF Group, the makers of ALPV): when AXIS License Plate Verifier reads a
+block-listed plate, a full-screen alert and the plate appear on the video,
+on this camera or on the operator's overview camera, and clear when the
+vehicle has gone. Thank you! Errors for remote overlays now also say what
+went wrong.
 
-- **Use case 8.5: ALPV block list alert on the video.** When AXIS License
-  Plate Verifier reads a block-listed plate, a full-screen alert image and the
-  plate are shown on the video and cleared when the vehicle has gone. The
-  alert can also be shown on another camera, for example the operator's
-  overview camera. Two rules (8.5a, 8.5b) and the alert image in 1920×1080
-  and 3840×2160.
+### Upgrading to 1.9.29
 
-### Fixes in the next release
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. Templates are
+imported from the use-case gallery; existing rules don't change.
+
+### New in 1.9.29
+
+- **Use case 8.5: ALPV block list alert on the video**
+  ([#29](https://github.com/Mo3he/Event-Engine-ACAP/pull/29)
+  by [@ffgroup-usa](https://github.com/ffgroup-usa)).
+  When AXIS License Plate Verifier reads a block-listed plate, a full-screen
+  alert image and the plate are shown on the video and cleared when the
+  vehicle has gone. The alert can also be shown on another camera, for example
+  the operator's overview camera. Two rules (8.5a, 8.5b) and the alert image
+  in 1920×1080 and 3840×2160.
+
+### Fixes in 1.9.29
 
 - **Use case 8.4 matches the block list by `listMode`** instead of a list name
   containing "block", so it works whatever the list is called. Thanks to
@@ -19,6 +35,12 @@
 - **Overlay errors for remote devices say what went wrong**, for example
   *wrong username or password*, *the device doesn't support this* or *could
   not connect*, instead of always *no response from the device*.
+
+Verified on a P3288-LV (AXIS OS 12.11): templates 8.5a and 8.5b import and,
+replayed with simulated ALPV events, show the styled alert once per vehicle,
+hand over to a second block-listed vehicle in place and clear only when the
+vehicle shown has gone (tested with ALPV 3.1.9 by FF Group). Remote overlay
+errors checked against AXIS OS 9.80, 10.12 and 13.0 devices.
 
 ## v1.9.28 - Overlay Text styling and Modbus fixes
 
