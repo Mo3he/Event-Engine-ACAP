@@ -13,6 +13,9 @@
 
 ### Fixes in the next release
 
+- **Use case 8.4 matches the block list by `listMode`** instead of a list name
+  containing "block", so it works whatever the list is called. Thanks to
+  [@ffgroup-usa](https://github.com/ffgroup-usa) for pointing this out.
 - **Overlay errors for remote devices say what went wrong**, for example
   *wrong username or password*, *the device doesn't support this* or *could
   not connect*, instead of always *no response from the device*.
