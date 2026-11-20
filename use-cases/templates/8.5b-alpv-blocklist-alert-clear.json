@@ -1,0 +1,50 @@
+{
+  "name": "ALPV — Block List Alert on Video: Clear",
+  "description": "Clears the alert shown by 8.5a when ALPV reports the vehicle it is showing as lost. Requires Event Engine 1.9.28 or later. If 8.5a targets another camera, set the same Target Device here. Disabled on import.",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": {
+        "tnsaxis": "CameraApplicationPlatform"
+      },
+      "topic1": {
+        "": "ALPV.AllPlates"
+      }
+    }
+  ],
+  "conditions": [
+    {
+      "type": "trigger_data",
+      "key": "carState",
+      "op": "eq",
+      "value": "lost"
+    },
+    {
+      "type": "trigger_data",
+      "key": "carID",
+      "op": "eq",
+      "value": "{{var.alpv_alert_car}}"
+    }
+  ],
+  "actions": [
+    {
+      "type": "overlay_text",
+      "overlay": "alpv_blocklist_alert",
+      "operation": "clear",
+      "channel": 1
+    },
+    {
+      "type": "overlay_image",
+      "overlay": "alpv_blocklist_alert",
+      "operation": "clear",
+      "channel": 1
+    }
+  ]
+}

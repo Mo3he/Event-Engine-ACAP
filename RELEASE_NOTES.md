@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### New in the next release
+
+- **Use case 8.5: ALPV block list alert on the video.** When AXIS License
+  Plate Verifier reads a block-listed plate, a full-screen alert image and the
+  plate are shown on the video and cleared when the vehicle has gone. The
+  alert can also be shown on another camera, for example the operator's
+  overview camera. Two rules (8.5a, 8.5b) and the alert image in 1920×1080
+  and 3840×2160.
+
 ### Fixes in the next release
 
 - **Overlay errors for remote devices say what went wrong**, for example

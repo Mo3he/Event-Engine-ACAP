@@ -336,6 +336,7 @@
     <a href="#uc8-2" class="sub">8.2 Plate + Loud Vehicle</a>
     <a href="#uc8-3" class="sub">8.3 Native Push (UTMC)</a>
     <a href="#uc8-4" class="sub">8.4 Block List → Milestone</a>
+    <a href="#uc8-5" class="sub">8.5 Block List Alert on Video</a>
 
     <div class="sidebar-group">Reference</div>
     <a href="#summary">Template Summary</a>
@@ -1354,6 +1355,34 @@
       </div>
     </div>
 
+    <div class="uc-card" id="uc8-5">
+      <h3>8.5 Block List Alert on the Video</h3>
+      <p class="scenario">An operator watching live video should see at once when a block-listed vehicle is in view: a full-screen alert and the plate, shown while the vehicle is in the picture and cleared when it has gone. Often the alert belongs on another camera, for example the overview camera the operator watches.</p>
+      <div class="tags">
+        <span class="tag trigger">vapix_event (ALPV.AllPlates)</span>
+        <span class="tag condition">trigger_data (listMode = block)</span>
+        <span class="tag condition">trigger_data (carID vs. shown car)</span>
+        <span class="tag action">overlay_image</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag feature">named overlay</span>
+        <span class="tag feature">remote device</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><strong>8.5a:</strong> <code>listMode</code> = <code>block</code>, <code>carState</code> ≠ <code>lost</code> and <code>carID</code> ≠ <span class="var">{{var.alpv_alert_car}}</span> → <strong>Set Variable</strong> stores the <code>carID</code>, <strong>Overlay Image</strong> shows the alert image and <strong>Overlay Text</strong> the plate (110 px white on red, black outline), both named <code>alpv_blocklist_alert</code> (keep the name unique to these rules: same name, same overlay). One alert per vehicle at its first block-list match; another block-listed vehicle takes over and the overlays update in place</li>
+        <li data-step="2"><strong>8.5b:</strong> <code>carState</code> = <code>lost</code> and <code>carID</code> = <span class="var">{{var.alpv_alert_car}}</span> → <strong>Clear</strong> text and image. Only the vehicle being shown clears the alert</li>
+        <li data-step="3"><code>alpv_alert_car</code> needs no initial value and is separate from 8.4's variable, so both templates can run together</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Requires 1.9.28 or later. Upload the alert image that matches the camera's full resolution (1920×1080 or 3840×2160; scale the PNG for other resolutions) under <strong>Video &gt; Overlays</strong> with scaling to the stream resolution turned on, and keep its transparency; without scaling it is cropped in lower-resolution streams. Import both templates, select the uploaded image in 8.5a's <strong>Overlay Image</strong> action (the web UI names it e.g. <code>8.5-blocklist-alert-1080p(1920x1080).ovl</code>, the template default) and enable both. <strong>On another camera:</strong> set <strong>Target Device</strong> to it in all four overlay actions, use a dedicated account there, and upload the image to that camera.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('8.5a-alpv-blocklist-alert-show')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.5a — Show Alert</button>
+        <button class="dl-btn" onclick="downloadTemplate('8.5b-alpv-blocklist-alert-clear')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 8.5b — Clear Alert</button>
+        <button class="dl-btn" onclick="downloadTemplate('8.5-blocklist-alert-1080p', '.png')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> Image 1920×1080</button>
+        <button class="dl-btn" onclick="downloadTemplate('8.5-blocklist-alert-4k', '.png')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> Image 3840×2160</button>
+      </div>
+    </div>
+
     <!-- ═══════════════════════ SUMMARY ═══════════════════════ -->
     <div class="section-header" id="summary">
       <h2>Template Summary</h2>
@@ -1423,6 +1452,8 @@
         <tr><td>8.3a</td><td>alpv-push-enable-on-io-alarm</td><td>ALPV</td><td>I/O input active → enable ALPV push profile 1 (e.g. UTMC)</td></tr>
         <tr><td>8.3b</td><td>alpv-push-disable-on-io-clear</td><td>ALPV</td><td>I/O input inactive → disable ALPV push profile 1</td></tr>
         <tr><td>8.4</td><td>alpv-blocklist-to-milestone-alarm</td><td>ALPV</td><td>Block-list plate → Milestone Analytics Event (plate, country, vehicle, snapshots)</td></tr>
+        <tr><td>8.5a</td><td>alpv-blocklist-alert-show</td><td>ALPV</td><td>Block-list plate → full-screen alert image + plate text on the video (this or another camera)</td></tr>
+        <tr><td>8.5b</td><td>alpv-blocklist-alert-clear</td><td>ALPV</td><td>That vehicle lost → clear the alert</td></tr>
       </tbody>
     </table>
 
@@ -1489,8 +1520,9 @@ document.getElementById('theme-btn').addEventListener('click', function() {
 /* Templates are always fetched from GitHub raw (main branch) */
 var TEMPLATE_BASE = 'https://raw.githubusercontent.com/Mo3he/Event-Engine-ACAP/main/use-cases/templates/';
 
-function downloadTemplate(name) {
-  var url = TEMPLATE_BASE + name + '.json';
+function downloadTemplate(name, ext) {
+  ext = ext || '.json';
+  var url = TEMPLATE_BASE + name + ext;
   fetch(url)
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -1499,7 +1531,7 @@ function downloadTemplate(name) {
     .then(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = name + '.json';
+      a.download = name + ext;
       document.body.appendChild(a);
       a.click();
       setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 100);

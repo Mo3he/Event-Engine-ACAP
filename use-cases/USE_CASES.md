@@ -515,6 +515,8 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 8.3a | `8.3a-alpv-push-enable-on-io-alarm.json` | ALPV | I/O input active → enable ALPV push profile 1 (e.g. UTMC) |
 | 8.3b | `8.3b-alpv-push-disable-on-io-clear.json` | ALPV | I/O input inactive → disable ALPV push profile 1 |
 | 8.4 | `8.4-alpv-blocklist-to-milestone-alarm.json` | ALPV | Block-list plate → Milestone XProtect Analytics Event (plate, country, vehicle, snapshots) |
+| 8.5a | `8.5a-alpv-blocklist-alert-show.json` | ALPV | Block-list plate → full-screen alert image + plate text on the video (this or another camera) |
+| 8.5b | `8.5b-alpv-blocklist-alert-clear.json` | ALPV | That vehicle lost → clear the alert |
 
 ---
 
@@ -868,6 +870,72 @@ when the source or event name does not match; use **Test Event** in the
 Management Client to check the Milestone side first.
 
 **Template:** [`templates/8.4-alpv-blocklist-to-milestone-alarm.json`](templates/8.4-alpv-blocklist-to-milestone-alarm.json)
+
+### 8.5 Block List Alert on the Video
+
+**Scenario:** An operator watching live video should see at once when a
+block-listed vehicle is in view: a full-screen alert and the plate, shown
+while the vehicle is in the picture and cleared when it has gone. Often the
+alert belongs on another camera, for example an overview camera the operator
+watches, rather than on the camera running ALPV.
+
+**How it works:**
+
+- **8.5a (show):** a **Device Event** trigger on `ALPV.AllPlates` and three
+  **Trigger Data** conditions: `listMode` = `block`, `carState` ≠ `lost` and
+  `carID` ≠ `{{var.alpv_alert_car}}`. The actions:
+  - **Set Variable** stores the `carID`;
+  - **Overlay Image** shows the alert image;
+  - **Overlay Text** shows the plate, 110 px white on red with a black
+    outline.
+
+  Both overlays are named `alpv_blocklist_alert`. Actions with the same
+  overlay name on the same camera control the same overlay, so keep this name
+  unique to these two rules.
+  - The alert appears once per vehicle, at its first block-list match. As in
+    8.4, the correct plate text often only arrives in an `update`, so the rule
+    doesn't filter on `new`.
+  - When another block-listed vehicle appears, 8.5a runs again for it and
+    updates the same overlays in place, without flicker. The same happens when
+    ALPV tracks a vehicle again under a new `carID`.
+- **8.5b (clear):** `carState` = `lost` and `carID` = `{{var.alpv_alert_car}}`
+  → **Overlay Text** and **Overlay Image**, operation *Clear*. Only the vehicle
+  being shown clears the alert, so an earlier block-listed vehicle leaving
+  doesn't remove the alert for one still in view.
+- `alpv_alert_car` needs no initial value: unset, it is empty, and no `carID`
+  matches it. It is separate from 8.4's variable, so both templates can run
+  together.
+- Event Engine only changes its own overlays and removes them when it stops.
+
+**Setup:**
+
+1. Use Event Engine 1.9.28 or later (Overlay Image, text size and colours).
+2. Upload the alert image under **Video > Overlays**, with scaling to the
+   stream resolution turned on.
+   - Use [`8.5-blocklist-alert-1080p.png`](templates/8.5-blocklist-alert-1080p.png)
+     (1920×1080) or [`8.5-blocklist-alert-4k.png`](templates/8.5-blocklist-alert-4k.png)
+     (3840×2160), whichever matches the camera's full resolution. For other
+     resolutions, scale the PNG to the camera's full resolution.
+   - Without scaling the image is cropped in lower-resolution streams; at
+     640×360 the text is outside the picture.
+   - Keep the PNG's transparent background.
+3. Import both templates. In 8.5a, select the uploaded image in the
+   **Overlay Image** action. The web UI adds the size to the file name, for
+   example `8.5-blocklist-alert-1080p(1920x1080).ovl`, which is the template's
+   default.
+4. Enable both rules.
+
+**Alert on another camera:**
+
+- Set **Target Device** to that camera in all four overlay actions, two in
+  each rule.
+- Use a dedicated account on that camera rather than an administrator's.
+- Upload the image to that camera.
+
+The plate shown is the one ALPV read. Depending on its list settings, ALPV can
+match a list entry that differs by a character.
+
+**Templates:** [`templates/8.5a-alpv-blocklist-alert-show.json`](templates/8.5a-alpv-blocklist-alert-show.json) and [`templates/8.5b-alpv-blocklist-alert-clear.json`](templates/8.5b-alpv-blocklist-alert-clear.json)
 
 ---
 

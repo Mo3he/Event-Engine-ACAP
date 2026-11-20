@@ -1,0 +1,71 @@
+{
+  "name": "ALPV — Block List Alert on Video: Show",
+  "description": "When AXIS License Plate Verifier reads a plate from its Block list, show a full-screen alert image and the plate number on the video, once per vehicle. Pair with 8.5b, which clears it when ALPV loses the car. Requires Event Engine 1.9.28 or later. Upload 8.5-blocklist-alert-1080p.png (or -4k.png, matching the camera's full resolution) under Video > Overlays with scaling to the stream resolution on, then select it in the Overlay Image action. To show the alert on another camera, for example the operator's overview camera, set Target Device to that camera in the actions of both rules. Disabled on import.",
+  "enabled": false,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "vapix_event",
+      "topic0": {
+        "tnsaxis": "CameraApplicationPlatform"
+      },
+      "topic1": {
+        "": "ALPV.AllPlates"
+      }
+    }
+  ],
+  "conditions": [
+    {
+      "type": "trigger_data",
+      "key": "listMode",
+      "op": "eq",
+      "value": "block"
+    },
+    {
+      "type": "trigger_data",
+      "key": "carState",
+      "op": "ne",
+      "value": "lost"
+    },
+    {
+      "type": "trigger_data",
+      "key": "carID",
+      "op": "ne",
+      "value": "{{var.alpv_alert_car}}"
+    }
+  ],
+  "actions": [
+    {
+      "type": "set_variable",
+      "name": "alpv_alert_car",
+      "value": "{{trigger.carID}}"
+    },
+    {
+      "type": "overlay_image",
+      "overlay": "alpv_blocklist_alert",
+      "image": "8.5-blocklist-alert-1080p(1920x1080).ovl",
+      "position": "topLeft",
+      "channel": 1,
+      "duration": 0
+    },
+    {
+      "type": "overlay_text",
+      "overlay": "alpv_blocklist_alert",
+      "text": " {{trigger.text}} ",
+      "position": "custom",
+      "pos_x": -0.97,
+      "pos_y": 0.7,
+      "channel": 1,
+      "duration": 0,
+      "text_color": "white",
+      "font_size": 110,
+      "bg_color": "red",
+      "outline_color": "black"
+    }
+  ]
+}
