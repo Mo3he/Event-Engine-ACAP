@@ -22,8 +22,8 @@
   "conditions": [
     {
       "type": "trigger_data",
-      "key": "listName",
-      "op": "contains",
+      "key": "listMode",
+      "op": "eq",
       "value": "block"
     },
     {

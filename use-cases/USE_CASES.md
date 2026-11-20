@@ -727,7 +727,7 @@ ways to deliver them:
 - Useful fields (ALPV 3.1.7): `text` (the plate), `country`, `region`,
   `iso3166-2`, `carState`, `carMoveDirection`, `lpConfidence`,
   `capture_timestamp`, `vehicleType`, `vehicleMake`, `vehicleModel`,
-  `vehicleColor`, `listName`, `action` and `lpImage`, each available as
+  `vehicleColor`, `listName`, `listMode`, `action` and `lpImage`, each available as
   `{{trigger.KEY}}`. `lpImage` is the plate crop as a base64 JPEG, so
   `{{trigger_json}}` includes the image. **Attach camera snapshot** adds a
   separate full-frame JPEG as `{{trigger.snapshot_base64}}`.
@@ -828,8 +828,9 @@ Object columns stay empty.
 **How it works:**
 
 - A **Device Event** trigger fires on every `ALPV.AllPlates` event
-- A **Trigger Data** condition passes only when `listName` contains `block`
-  (ignoring case), so `Block list`, `Blocked` and `Block (Clifftest)` all match
+- A **Trigger Data** condition passes only when `listMode` = `block`, whatever
+  the list is called. `listMode` stays `block` for the whole visit, while
+  `listName` is empty on `lost` events
 - A second **Trigger Data** condition, `carID` ≠ `{{var.alpv_last_blocked_car}}`,
   and a **Set Variable** action that stores the `carID` give one alarm per
   vehicle, raised at its first block-list match. ALPV sends `new`, `reliable`,
@@ -863,8 +864,7 @@ Attach ALPV image). ALPV saves the vehicle image a few seconds after it first
 sees the car, so an alarm can arrive up to about 15 s after the plate is read.
 Replace `MILESTONE_EVENT_SERVER` with the Event Server address. If the cameras
 are added to Milestone on a port other than 80, change `Source/Name` to
-`{{camera.ip}}:PORT`. If the block list in AXIS Optimizer is not named with
-"block", change the condition value to match its `listName`. Milestone answers
+`{{camera.ip}}:PORT`. Milestone answers
 `200` with `Warning: Device not known` or `Warning: Event message not known`
 when the source or event name does not match; use **Test Event** in the
 Management Client to check the Milestone side first.
