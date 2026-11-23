@@ -1,5 +1,22 @@
 # Release Notes
 
+## Unreleased
+
+### New in the next release
+
+- **Modbus typed reads and writes:** read single values or register maps using
+  signed/unsigned integers, floats, strings, byte/word order, scaling and
+  offset. Write multiple registers or coils with FC16/FC15; adjacent values
+  are batched into requests.
+- **Modbus Error trigger:** fire when a device starts failing requests and
+  when it recovers, or on every failed request.
+
+### Fixes in the next release
+
+- **Modbus settings are preserved when editing a rule.** The rule editor was
+  dropping Modbus-specific fields when saving. The editor also now fits dense
+  trigger, condition and action forms without horizontal overflow.
+
 ## v1.9.29 - ALPV block list alert template
 
 A new ready-made use case from

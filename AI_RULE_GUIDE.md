@@ -1838,7 +1838,7 @@ Set `while_active: true` on recording, overlay, I/O output, siren, or speaker_di
 
 ## Trigger: `modbus_read`
 
-Polls a Modbus register at a configurable interval and fires when the value satisfies a threshold condition. Uses edge-triggered hysteresis — fires once when condition becomes true, does not re-fire until condition clears and becomes true again. Without `op`, it fires on the first read and then every time the value changes.
+Polls Modbus registers or bits at a configurable interval. Read one value or a `map` of values into variables in a single request. Numeric values support signed/unsigned 16/32/64-bit integers, 32/64-bit floats, word order, scale, offset and decimal rounding; strings use two ASCII characters per register. A threshold uses edge-triggered hysteresis — it fires once when the condition becomes true and does not re-fire until it clears. Without `op`, it fires on the first successful read and whenever any read value changes.
 
 ```json
 {
@@ -1849,7 +1849,33 @@ Polls a Modbus register at a configurable interval and fires when the value sati
   "slave_id": 1,
   "register_type": "holding",
   "register": 0,
+  "data_type": "float32",
+  "word_order": "CDAB",
+  "scale": 0.1,
+  "offset": -40,
+  "variable": "temperature",
   "poll_interval": 10,
+  "op": "gte",
+  "threshold": 100
+}
+```
+
+For a map, put `register`, `var`, `type`, `order`, and optional scaling fields in each entry. `compare` selects which mapped variable is used for the threshold; without it the first map value is compared. Without a threshold, any mapped value change fires the rule.
+
+```json
+{
+  "type": "modbus_read",
+  "connection_type": "tcp",
+  "host": "192.168.1.50",
+  "port": 502,
+  "slave_id": 1,
+  "register_type": "holding",
+  "poll_interval": 10,
+  "map": [
+    { "register": 0, "var": "temperature", "type": "float32", "order": "CDAB", "scale": 0.1 },
+    { "register": 2, "var": "status_text", "type": "string", "length": 8 }
+  ],
+  "compare": "temperature",
   "op": "gte",
   "threshold": 100
 }
@@ -1857,7 +1883,7 @@ Polls a Modbus register at a configurable interval and fires when the value sati
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `connection_type` | `"tcp"` \| `"rtu"` | `"tcp"` | Transport type |
+| `connection_type` | `"tcp"` \| `"serial_gateway"` \| `"rtu"` | `"tcp"` | Transport type |
 | `host` | string | `"127.0.0.1"` | TCP: hostname or IP of Modbus server |
 | `port` | integer | `502` | TCP: port number |
 | `device` | string | `"/dev/ttyS1"` | RTU: serial device path |
@@ -1865,19 +1891,43 @@ Polls a Modbus register at a configurable interval and fires when the value sati
 | `parity` | `"N"` \| `"E"` \| `"O"` | `"N"` | RTU: parity |
 | `slave_id` | integer | `1` | Modbus slave/unit ID |
 | `register_type` | `"holding"` \| `"input"` \| `"coil"` \| `"discrete"` | `"holding"` | Register type (FC03/FC04/FC01/FC02) |
-| `register` | integer | `0` | Register address (0-based) |
+| `register` | integer | `0` | Single-value register address (0-based); use `map` instead for multiple values |
+| `data_type` | string | `"uint16"` | Single value: `uint16`, `int16`, `uint32`, `int32`, `float32`, `uint64`, `int64`, `float64`, or `string`. Bit reads use 0/1 |
+| `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for multi-register values |
+| `scale` | number | `1` | Numeric values are reported as `raw × scale + offset`; must not be zero |
+| `offset` | number | `0` | Numeric value offset |
+| `decimals` | integer (0–10) | automatic | Optional rounding after scaling |
+| `length` | integer (1–125) | `8` | String length in registers (single value or map entry) |
+| `variable` | string | — | Optional variable updated by a single-value read |
+| `map` | array | — | Register-map entries; each requires `register` and a unique `var`, and may include `type`, `order`, `scale`, `offset`, `decimals`, or `length`. One read may span at most 125 registers or 2000 bits |
+| `compare` | string | first map variable | Map variable used by `op` and `threshold`; must name an entry in `map` |
 | `poll_interval` | integer | `30` | Seconds between polls (minimum 1) |
 | `op` | `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` \| `"eq"` \| `"between"` | — | Threshold comparison operator. Omit to fire on every change of value |
 | `threshold` | number | — | Lower threshold value |
 | `threshold2` | number | — | Upper threshold (required for `between`) |
 
-Template variables injected: `{{trigger.value}}`, `{{trigger.register}}`, `{{trigger.register_type}}`, `{{trigger.slave_id}}`
+Map values are also updated as named engine variables and injected as `{{trigger.<var>}}`; all values are available under `{{trigger.values}}`. Built-in trigger fields are `{{trigger.value}}`, `{{trigger.register}}`, `{{trigger.register_type}}`, `{{trigger.slave_id}}`, and, for register reads, `{{trigger.data_type}}`.
+
+## Trigger: `modbus_error`
+
+Fires when a Modbus device starts failing requests and when it recovers. By default it fires once on the transition to failing and once on recovery. Set `fire_on` to `"every"` to fire on each failed request as well. Optional `device` matches part of the device name/address; optional `slave_id` matches one unit.
+
+```json
+{
+  "type": "modbus_error",
+  "device": "192.168.1.50",
+  "slave_id": 1,
+  "fire_on": "every"
+}
+```
+
+The trigger data includes `state` (`"failing"` or `"recovered"`), `device`, `slave_id`, `register`, `function`, `operation` (`"read"` or `"write"`), `error`, `exception_code`, `exception_name`, `message`, and `fail_count`. The built-in `{{trigger.state}}` is useful for distinguishing failure from recovery.
 
 ---
 
 ## Action: `modbus_write`
 
-Writes a value to a Modbus register. Uses FC06 for holding registers, FC05 for coils.
+Writes one typed value or a block of values to Modbus. Automatic function selection uses FC06/FC05 for one register/coil and FC16/FC15 for multiple contiguous values. In block mode, adjacent values are batched into one request; gaps start a new request.
 
 ```json
 {
@@ -1888,13 +1938,35 @@ Writes a value to a Modbus register. Uses FC06 for holding registers, FC05 for c
   "slave_id": 1,
   "register_type": "holding",
   "register": 10,
-  "value": 1
+  "data_type": "float32",
+  "word_order": "CDAB",
+  "scale": 0.1,
+  "offset": -40,
+  "value": "{{trigger.temperature}}"
+}
+```
+
+For multiple values, use `values` instead of `register` and `value`. Each entry has a register, a value, and optional per-value type/encoding fields:
+
+```json
+{
+  "type": "modbus_write",
+  "connection_type": "tcp",
+  "host": "192.168.1.50",
+  "port": 502,
+  "slave_id": 1,
+  "register_type": "holding",
+  "function": "fc16",
+  "values": [
+    { "register": 10, "type": "uint32", "value": "{{trigger.count}}" },
+    { "register": 12, "type": "string", "length": 8, "value": "Running" }
+  ]
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `connection_type` | `"tcp"` \| `"rtu"` | `"tcp"` | Transport type |
+| `connection_type` | `"tcp"` \| `"serial_gateway"` \| `"rtu"` | `"tcp"` | Transport type |
 | `host` | string | `"127.0.0.1"` | TCP: hostname or IP |
 | `port` | integer | `502` | TCP: port number |
 | `device` | string | `"/dev/ttyS1"` | RTU: serial device path |
@@ -1902,5 +1974,12 @@ Writes a value to a Modbus register. Uses FC06 for holding registers, FC05 for c
 | `parity` | `"N"` \| `"E"` \| `"O"` | `"N"` | RTU: parity |
 | `slave_id` | integer | `1` | Modbus slave/unit ID |
 | `register_type` | `"holding"` \| `"coil"` | `"holding"` | Register type |
-| `register` | integer | `0` | Register address (0-based) |
-| `value` | number | — | Value to write. For coils: 0 or 1. For holding: 0–65535 |
+| `register` | integer | `0` | Single-value register address (0-based); use `values` instead for several values |
+| `data_type` | string | `"uint16"` | Single-value type: `uint16`, `int16`, `uint32`, `int32`, `float32`, `uint64`, `int64`, `float64`, or `string` |
+| `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for multi-register values |
+| `scale` | number | `1` | Input value is converted to raw form using `(value - offset) / scale` |
+| `offset` | number | `0` | Numeric value offset |
+| `length` | integer (1–125) | `8` | String length in registers |
+| `value` | number \| string | — | Value to write; supports templates. Coils accept `0`, `1`, `true`, `false`, `on`, or `off` |
+| `values` | array | — | Block entries with `register`, `value`, and optional `type`, `order`, `scale`, `offset`, and `length`. Overlapping entries are rejected; gaps create separate requests. Maximum per request: 123 registers or 1968 coils |
+| `function` | `"auto"` \| `"fc05"` \| `"fc15"` \| `"fc06"` \| `"fc16"` | `"auto"` | Force a compatible single/multiple-coil or register write function |

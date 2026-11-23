@@ -110,7 +110,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "modbus_read", "sparkplug_command"],
+            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "modbus_read", "modbus_error", "sparkplug_command"],
             "description": "Trigger type"
           }
         }
@@ -364,8 +364,8 @@
           { "$ref": "#/components/schemas/Trigger" },
           {
             "type": "object",
-            "description": "Polls a Modbus register (TCP or RTU/RS-485) and fires when the value crosses a threshold.",
-            "required": ["connection_type", "slave_id", "register_type", "register"],
+            "description": "Polls one Modbus value or a register map (TCP, serial gateway, or RTU/RS-485). Supports typed integers, floats and strings, word order, scaling and threshold/change triggers.",
+            "required": ["connection_type", "slave_id", "register_type"],
             "properties": {
               "type":            { "type": "string", "enum": ["modbus_read"] },
               "connection_type": { "type": "string", "enum": ["tcp", "serial_gateway", "rtu"], "description": "Transport: tcp=Modbus TCP, serial_gateway=RTU framing via PortManager GenericTCPServer, rtu=direct serial" },
@@ -376,11 +376,53 @@
               "parity":          { "type": "string", "enum": ["N", "E", "O"], "default": "N", "description": "RTU: parity (None/Even/Odd)" },
               "slave_id":        { "type": "integer", "minimum": 1, "maximum": 247, "description": "Modbus slave/device address" },
               "register_type":   { "type": "string", "enum": ["holding", "input", "coil", "discrete"], "description": "Register type to read" },
-              "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Register address (0-based)" },
+              "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Single-value register address (0-based); use map for multiple values" },
+              "data_type":       { "type": "string", "enum": ["uint16", "int16", "uint32", "int32", "float32", "uint64", "int64", "float64", "string"], "default": "uint16", "description": "Single-value type; bit registers return 0 or 1" },
+              "word_order":     { "type": "string", "enum": ["ABCD", "CDAB", "BADC", "DCBA"], "default": "ABCD", "description": "Byte/word order for multi-register values" },
+              "scale":           { "type": "number", "default": 1, "description": "Numeric decoded value = raw × scale + offset; cannot be zero" },
+              "offset":          { "type": "number", "default": 0, "description": "Numeric decoded value offset" },
+              "decimals":        { "type": "integer", "minimum": 0, "maximum": 10, "description": "Optional decimal rounding after scaling" },
+              "length":          { "type": "integer", "minimum": 1, "maximum": 125, "default": 8, "description": "String length in registers" },
+              "variable":        { "type": "string", "maxLength": 63, "description": "Optional variable updated by a single-value read" },
+              "map":             {
+                "type": "array",
+                "description": "Read mapped values in one request. A map spans at most 125 registers or 2000 bits.",
+                "items": {
+                  "type": "object",
+                  "required": ["register", "var"],
+                  "properties": {
+                    "register": { "type": "integer", "minimum": 0, "maximum": 65535 },
+                    "var": { "type": "string", "minLength": 1, "maxLength": 63 },
+                    "type": { "type": "string", "enum": ["uint16", "int16", "uint32", "int32", "float32", "uint64", "int64", "float64", "string"], "default": "uint16" },
+                    "order": { "type": "string", "enum": ["ABCD", "CDAB", "BADC", "DCBA"], "default": "ABCD" },
+                    "scale": { "type": "number", "default": 1 },
+                    "offset": { "type": "number", "default": 0 },
+                    "decimals": { "type": "integer", "minimum": 0, "maximum": 10 },
+                    "length": { "type": "integer", "minimum": 1, "maximum": 125, "default": 8 }
+                  }
+                }
+              },
+              "compare":         { "type": "string", "description": "Map variable used for threshold comparison; defaults to the first map entry" },
               "poll_interval":   { "type": "integer", "minimum": 1, "default": 30, "description": "Polling interval in seconds" },
               "op":              { "type": "string", "enum": ["gt", "lt", "gte", "lte", "eq", "between"], "description": "Comparison operator for threshold check. Omit to fire on the first read and on every change of value." },
               "threshold":       { "type": "number", "description": "Primary threshold value" },
               "threshold2":      { "type": "number", "description": "Upper bound for 'between' operator" }
+            }
+          }
+        ]
+      },
+
+      "TriggerModbusError": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "description": "Fires when Modbus requests start failing and when the device recovers; optionally fires on every failed request.",
+            "properties": {
+              "type": { "type": "string", "enum": ["modbus_error"] },
+              "device": { "type": "string", "description": "Optional substring filter for the device address or serial path" },
+              "slave_id": { "type": "integer", "minimum": 1, "maximum": 247, "description": "Optional Modbus slave/unit ID filter" },
+              "fire_on": { "type": "string", "enum": ["change", "every"], "default": "change", "description": "Fire on failure/recovery transitions, or on every failed request and on recovery" }
             }
           }
         ]
@@ -1170,8 +1212,8 @@
         "allOf": [
           { "$ref": "#/components/schemas/Action" },
           {
-            "description": "Write a value to a Modbus holding register or coil (TCP or RTU/RS-485).",
-            "required": ["connection_type", "slave_id", "register_type", "register", "value"],
+            "description": "Write one typed value or a block of values to Modbus holding registers or coils (TCP, serial gateway, or RTU/RS-485). Supports FC05/FC15 and FC06/FC16.",
+            "required": ["connection_type", "slave_id", "register_type"],
             "properties": {
               "type":            { "type": "string", "enum": ["modbus_write"] },
               "connection_type": { "type": "string", "enum": ["tcp", "serial_gateway", "rtu"], "description": "Transport: tcp=Modbus TCP, serial_gateway=RTU framing via PortManager GenericTCPServer, rtu=direct serial" },
@@ -1182,8 +1224,43 @@
               "parity":          { "type": "string", "enum": ["N", "E", "O"], "default": "N", "description": "RTU: parity (None/Even/Odd)" },
               "slave_id":        { "type": "integer", "minimum": 1, "maximum": 247, "description": "Modbus slave/device address" },
               "register_type":   { "type": "string", "enum": ["holding", "coil"], "description": "Register type to write" },
-              "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Register address (0-based)" },
-              "value":           { "type": "number", "description": "Value to write. For coils: 0 = off, non-zero = on. For holding registers: 16-bit unsigned integer." }
+              "register":        { "type": "integer", "minimum": 0, "maximum": 65535, "description": "Single-value register address (0-based); use values for block writes" },
+              "data_type":       { "type": "string", "enum": ["uint16", "int16", "uint32", "int32", "float32", "uint64", "int64", "float64", "string"], "default": "uint16", "description": "Single-value type; ignored for coils" },
+              "word_order":     { "type": "string", "enum": ["ABCD", "CDAB", "BADC", "DCBA"], "default": "ABCD", "description": "Byte/word order for multi-register values" },
+              "scale":           { "type": "number", "default": 1, "description": "Numeric input is converted to raw form using (value - offset) / scale; cannot be zero" },
+              "offset":          { "type": "number", "default": 0, "description": "Numeric value offset" },
+              "length":          { "type": "integer", "minimum": 1, "maximum": 125, "default": 8, "description": "String length in registers" },
+              "value": {
+                "oneOf": [
+                  { "type": "number" },
+                  { "type": "string" }
+                ],
+                "description": "Single value to write; strings support template expansion. Coils accept 0/1, true/false, or on/off."
+              },
+              "function": { "type": "string", "enum": ["auto", "fc05", "fc15", "fc06", "fc16"], "default": "auto", "description": "Write function; choose a coil function for coils and a register function for holding registers" },
+              "values": {
+                "type": "array",
+                "description": "Multiple typed values. Adjacent addresses are batched into one request; gaps start another. Each request supports at most 123 registers or 1968 coils.",
+                "items": {
+                  "type": "object",
+                  "required": ["register", "value"],
+                  "properties": {
+                    "register": { "type": "integer", "minimum": 0, "maximum": 65535 },
+                    "value": {
+                      "oneOf": [
+                        { "type": "number" },
+                        { "type": "string" }
+                      ],
+                      "description": "Value to write; strings support template expansion."
+                    },
+                    "type": { "type": "string", "enum": ["uint16", "int16", "uint32", "int32", "float32", "uint64", "int64", "float64", "string"], "default": "uint16" },
+                    "order": { "type": "string", "enum": ["ABCD", "CDAB", "BADC", "DCBA"], "default": "ABCD" },
+                    "scale": { "type": "number", "default": 1 },
+                    "offset": { "type": "number", "default": 0 },
+                    "length": { "type": "integer", "minimum": 1, "maximum": 125, "default": 8 }
+                  }
+                }
+              }
             }
           }
         ]
@@ -1698,7 +1775,8 @@
                   { "type": "io_input",           "label": "I/O Input",          "description": "Fire on digital input port state change" },
                   { "type": "counter_threshold",  "label": "Counter Threshold",  "description": "Fire when a counter crosses a value" },
                   { "type": "rule_fired",         "label": "Rule Chain",         "description": "Fire when another rule executes" },
-                  { "type": "modbus_read",        "label": "Modbus Read",        "description": "Poll a Modbus register and fire when value crosses a threshold" },
+                  { "type": "modbus_read",        "label": "Modbus Read",        "description": "Poll typed Modbus values or register maps and fire on thresholds or changes" },
+                  { "type": "modbus_error",       "label": "Modbus Error",       "description": "Fire when Modbus requests start failing and when they recover" },
                   { "type": "sparkplug_command",  "label": "Sparkplug Command",  "description": "Fires when a Sparkplug host writes a metric via NCMD/DCMD" }
                 ]
               }
