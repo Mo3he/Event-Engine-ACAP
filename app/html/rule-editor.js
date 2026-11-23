@@ -194,6 +194,12 @@ const TRIGGER_GROUPS = [
     { value: 'modbus_read',       label: 'Modbus Read' },
     { value: 'modbus_error',      label: 'Modbus Error' },
   ]},
+  { label: 'GPS', types: [
+    { value: 'gps_update',        label: 'GPS Update' },
+    { value: 'gps_speed',         label: 'GPS Speed' },
+    { value: 'gps_geofence',      label: 'GPS Geofence' },
+    { value: 'gps_fix',           label: 'GPS Fix' },
+  ]},
 ];
 
 function triggerTypeOptions(selected) {
@@ -563,6 +569,94 @@ function triggerFields(t, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <div class="form-hint" style="color:var(--text-muted);">This rule has no automatic trigger. Use the <strong>Fire</strong> button in the rule list to run it manually, or call <code>POST /local/acap_event_engine/fire</code> with <code>{"id":"&lt;rule_id&gt;"}</code>.</div>
+      </div>
+    </div>`;
+  if (type === 'gps_update') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Update interval (seconds)</label>
+        <input type="number" data-k="interval_s" value="${escHtml(t.interval_s || 1)}" min="1" max="3600">
+        <div class="form-hint">Fires on a valid fix, at most once per interval. GPS input must be enabled in Settings.</div>
+      </div>
+    </div>`;
+  if (type === 'gps_speed') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op" onchange="rerenderTrigger(this)">
+          <option value="gt" ${t.op==='gt'?'selected':''}>Greater than</option>
+          <option value="gte" ${t.op==='gte'?'selected':''}>At least</option>
+          <option value="lt" ${t.op==='lt'?'selected':''}>Less than</option>
+          <option value="lte" ${t.op==='lte'?'selected':''}>At most</option>
+          <option value="between" ${t.op==='between'?'selected':''}>Between</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Speed</label>
+        <input type="number" data-k="value" value="${escHtml(t.value ?? 20)}" step="any">
+      </div>
+      <div class="form-group" data-gps-value2 style="display:${t.op==='between'?'block':'none'}">
+        <label>Upper speed</label>
+        <input type="number" data-k="value2" value="${escHtml(t.value2 ?? 30)}" step="any">
+      </div>
+      <div class="form-group">
+        <label>Unit</label>
+        <select data-k="unit">
+          <option value="kmh" ${(!t.unit||t.unit==='kmh')?'selected':''}>km/h</option>
+          <option value="mph" ${t.unit==='mph'?'selected':''}>mph</option>
+          <option value="knots" ${t.unit==='knots'?'selected':''}>knots</option>
+          <option value="mps" ${t.unit==='mps'?'selected':''}>m/s</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Hysteresis</label>
+        <input type="number" data-k="hysteresis" value="${escHtml(t.hysteresis ?? 0)}" min="0" step="any">
+      </div>
+    </div>
+    <div class="form-hint">Fires when the threshold first becomes true; hysteresis prevents repeated firing near the limit.</div>`;
+  if (type === 'gps_geofence') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event</label>
+        <select data-k="event">
+          <option value="enter" ${(!t.event||t.event==='enter')?'selected':''}>Enter</option>
+          <option value="exit" ${t.event==='exit'?'selected':''}>Exit</option>
+          <option value="both" ${t.event==='both'?'selected':''}>Enter and exit</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Center latitude</label>
+        <input type="number" data-k="latitude" value="${escHtml(t.latitude ?? 0)}" min="-90" max="90" step="any">
+      </div>
+      <div class="form-group">
+        <label>Center longitude</label>
+        <input type="number" data-k="longitude" value="${escHtml(t.longitude ?? 0)}" min="-180" max="180" step="any">
+      </div>
+      <div class="form-group">
+        <label>Radius (m)</label>
+        <input type="number" data-k="radius_m" value="${escHtml(t.radius_m ?? 100)}" min="1" max="100000" step="any">
+      </div>
+      <div class="form-group" style="align-self:flex-end;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="gpsUseCurrentPosition(${rowIdx})">Use current position</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Polygon points <span style="font-weight:normal;opacity:.7">(optional JSON [[lat,lon],...], overrides circle)</span></label>
+        <input type="text" data-k="points_text" value="${escHtml(JSON.stringify(t.points || []))}" placeholder="[[59.9,10.7],[59.91,10.7],[59.9,10.71]]">
+      </div>
+    </div>
+    <div class="form-hint">Fires on transitions after the first valid GPS position. A polygon needs at least 3 points.</div>`;
+  if (type === 'gps_fix') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Fix event</label>
+        <select data-k="event">
+          <option value="acquired" ${(!t.event||t.event==='acquired')?'selected':''}>Fix acquired</option>
+          <option value="lost" ${t.event==='lost'?'selected':''}>Fix lost</option>
+          <option value="stale" ${t.event==='stale'?'selected':''}>Fix became stale</option>
+        </select>
+        <div class="form-hint">Stale timeout is set in GPS Settings.</div>
       </div>
     </div>`;
   if (type === 'modbus_read') {
@@ -978,6 +1072,24 @@ function modbusRowError(o) {
     if (missing >= 0) return `map row ${missing + 1} needs a variable name`;
   }
   return '';
+}
+
+async function gpsUseCurrentPosition(rowIdx) {
+  try {
+    const gps = await API.get('gps');
+    if (!gps.has_fix || !gps.fresh) {
+      toast('No fresh GPS fix is available', 'error');
+      return;
+    }
+    const row = document.getElementById(`trow-${rowIdx}`);
+    if (!row) return;
+    row.querySelector('[data-k="latitude"]').value = gps.latitude;
+    row.querySelector('[data-k="longitude"]').value = gps.longitude;
+    collectTriggerRow(rowIdx);
+    toast('Geofence center set to current GPS position', 'success');
+  } catch(e) {
+    toast('Could not read GPS position: ' + e.message, 'error');
+  }
 }
 
 function renderTriggerList() {
@@ -3739,6 +3851,26 @@ function normalizeTrigger(t) {
     const slave = parseInt(t.slave_id) || 0;
     if (slave > 0) out.slave_id = slave;
     out.fire_on = t.fire_on === 'every' ? 'every' : 'change';
+  } else if (t.type === 'gps_update') {
+    out.interval_s = Math.min(3600, Math.max(1, parseInt(t.interval_s) || 1));
+  } else if (t.type === 'gps_speed') {
+    out.op = t.op || 'gt';
+    out.unit = t.unit || 'kmh';
+    out.value = parseFloat(t.value);
+    if (out.op === 'between') out.value2 = parseFloat(t.value2);
+    out.hysteresis = Math.max(0, parseFloat(t.hysteresis) || 0);
+  } else if (t.type === 'gps_geofence') {
+    out.event = t.event || 'enter';
+    out.latitude = parseFloat(t.latitude);
+    out.longitude = parseFloat(t.longitude);
+    out.radius_m = parseFloat(t.radius_m);
+    const text = String(t.points_text || '').trim();
+    if (text && text !== '[]') {
+      try { out.points = JSON.parse(text); }
+      catch(e) { out.points = []; }
+    }
+  } else if (t.type === 'gps_fix') {
+    out.event = t.event || 'acquired';
   }
   /* manual trigger has no extra fields */
   return out;

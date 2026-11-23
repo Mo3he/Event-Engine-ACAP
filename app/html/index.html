@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Event Engine</title>
-  <link rel="stylesheet" href="style.css?v=1.9.30">
+  <link rel="stylesheet" href="style.css?v=1.10.0">
   <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_light.svg">
   <script>(function(){
     var stored=localStorage.getItem('theme');
@@ -159,6 +159,79 @@
       <div class="status-grid" id="status-grid"></div>
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
       <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
+
+      <div class="card" id="gps-card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">GPS / NMEA INPUT</h3>
+          <div id="gps-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+            <span id="gps-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
+            <span id="gps-status-text">Disabled</span>
+          </div>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Receive NMEA 0183 from a GPS. Use the camera serial port or forward data to a UDP/TCP port.
+          GPS fields are available as <code>{{gps.latitude}}</code>, <code>{{gps.longitude}}</code>,
+          and <code>{{gps.speed_kmh}}</code> in action templates.
+        </p>
+        <form id="gps-form" onsubmit="saveGpsSettings(event)" style="display:flex;flex-direction:column;gap:12px;">
+          <div class="form-row">
+            <div class="form-group" style="flex:0 0 auto;">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                <span style="font-size:13px;">Enabled</span>
+                <span class="toggle"><input type="checkbox" name="enabled"><span class="toggle-slider"></span></span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label>Input</label>
+              <select name="source" onchange="gpsSourceVisibility()">
+                <option value="serial">Camera serial / RS-485</option>
+                <option value="udp">UDP listener</option>
+                <option value="tcp_server">TCP listener</option>
+                <option value="tcp_client">TCP client</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" id="gps-serial-row">
+            <div class="form-group">
+              <label>Serial device</label>
+              <input type="text" name="device" value="auto" placeholder="auto or /dev/ttyPCC1">
+            </div>
+            <div class="form-group">
+              <label>Baud rate</label>
+              <select name="baud">
+                <option value="0">Use camera setting</option>
+                <option value="4800">4800</option>
+                <option value="9600">9600</option>
+                <option value="19200">19200</option>
+                <option value="38400">38400</option>
+                <option value="57600">57600</option>
+                <option value="115200">115200</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" id="gps-network-row" style="display:none;">
+            <div class="form-group" id="gps-host-group" style="display:none;">
+              <label>GPS server host</label>
+              <input type="text" name="host" value="127.0.0.1" placeholder="GPS server hostname or IP">
+            </div>
+            <div class="form-group">
+              <label id="gps-port-label">Listen port</label>
+              <input type="number" name="port" value="5010" min="1" max="65535">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:0 0 180px;">
+              <label>Mark fix stale after (seconds)</label>
+              <input type="number" name="stale_after_s" value="5" min="1" max="3600">
+            </div>
+            <div class="form-group" style="flex:0 0 auto;align-self:flex-end;">
+              <button type="submit" class="btn btn-primary">Save GPS Settings</button>
+            </div>
+          </div>
+        </form>
+        <div id="gps-live-status" style="margin-top:14px;font-size:12px;color:var(--text-muted);"></div>
+        <pre id="gps-raw-lines" style="margin-top:10px;max-height:120px;overflow:auto;background:var(--input-bg);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap;"></pre>
+      </div>
 
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -526,11 +599,11 @@
 
 <div class="toast-container" id="toast-container"></div>
 
-<script src="api.js?v=1.9.30" onerror="__scriptLoadError('api.js')"></script>
-<script src="app.js?v=1.9.30" onerror="__scriptLoadError('app.js')"></script>
-<script src="update-checker.js?v=1.9.30" onerror="__scriptLoadError('update-checker.js')"></script>
-<script src="device-capabilities.js?v=1.9.30" onerror="__scriptLoadError('device-capabilities.js')"></script>
-<script src="settings.js?v=1.9.30" onerror="__scriptLoadError('settings.js')"></script>
-<script src="rule-editor.js?v=1.9.30" onerror="__scriptLoadError('rule-editor.js')"></script>
+<script src="api.js?v=1.10.0" onerror="__scriptLoadError('api.js')"></script>
+<script src="app.js?v=1.10.0" onerror="__scriptLoadError('app.js')"></script>
+<script src="update-checker.js?v=1.10.0" onerror="__scriptLoadError('update-checker.js')"></script>
+<script src="device-capabilities.js?v=1.10.0" onerror="__scriptLoadError('device-capabilities.js')"></script>
+<script src="settings.js?v=1.10.0" onerror="__scriptLoadError('settings.js')"></script>
+<script src="rule-editor.js?v=1.10.0" onerror="__scriptLoadError('rule-editor.js')"></script>
 </body>
 </html>

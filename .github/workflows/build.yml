@@ -63,6 +63,21 @@ jobs:
              -o /tmp/gps_nmea_test tools/gps_nmea_test.c app/engine/gps_nmea.c -lm
           /tmp/gps_nmea_test
 
+  gps_reader:
+    name: GPS input reader tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install GLib headers
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libglib2.0-dev
+      - name: Build and run the UDP reader integration test
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+             $(pkg-config --cflags glib-2.0) -o /tmp/gps_reader_test \
+             tools/gps_reader_test.c app/engine/gps.c app/engine/gps_nmea.c app/cJSON.c \
+             $(pkg-config --libs glib-2.0) -lpthread -lm
+          /tmp/gps_reader_test
+
   certs:
     name: TLS profile store tests
     runs-on: ubuntu-latest

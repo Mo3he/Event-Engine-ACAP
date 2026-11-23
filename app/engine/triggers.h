@@ -2,6 +2,7 @@
 #define _ENGINE_TRIGGERS_H_
 
 #include "../cJSON.h"
+#include "gps_nmea.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,7 +18,8 @@ extern "C" {
  *
  * Trigger types: vapix_event, io_input, http_webhook, schedule,
  * counter_threshold, rule_fired, mqtt_message, sparkplug_command,
- * aoa_scenario, modbus_read, manual.
+ * aoa_scenario, modbus_read, gps_update, gps_speed, gps_geofence, gps_fix,
+ * manual.
  */
 
 typedef void (*Trigger_Fire_Fn)(const char* rule_id, int trigger_index, cJSON* trigger_data);
@@ -44,7 +46,10 @@ void Triggers_On_MQTT_Message(const char* topic, const char* payload, int payloa
 /* Dispatch a metric write received from a Sparkplug host (NCMD/DCMD) */
 void Triggers_On_Sparkplug_Command(const char* metric, const char* value);
 
-/* Called every 1s from main loop: scheduler, I/O hold timers, counter thresholds, Modbus polls */
+/* Called on the GLib main loop for each accepted GPS sentence. */
+void Triggers_On_GPS_Update(const gps_nmea_fix_t* fix);
+
+/* Called every 1s from main loop: scheduler, I/O hold timers, counter thresholds, GPS staleness and Modbus polls */
 void Triggers_Tick(void);
 
 /* Register a passive subscription for a vapix_query action (caches data, never fires rules).
