@@ -1604,7 +1604,7 @@ async function importSettings(input) {
     const resp = await API.post('settings', settings);
     toast('Settings imported — reloading…');
     setTimeout(loadStatus, 500);
-    setTimeout(loadMqttSettings, 600);
+    setTimeout(async () => { await loadUiSettings(); loadAllSettings(); }, 600);
   } catch(e) {
     toast('Import failed: ' + e.message, 'error');
   }

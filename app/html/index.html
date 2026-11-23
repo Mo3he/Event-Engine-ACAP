@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Event Engine</title>
-  <link rel="stylesheet" href="style.css?v=1.9.31">
+  <link rel="stylesheet" href="style.css?v=1.10.0">
   <link rel="icon" type="image/svg+xml" id="favicon" href="event_engine_icon_light.svg">
   <script>(function(){
     var stored=localStorage.getItem('theme');
@@ -40,7 +40,7 @@
 
   <header>
     <div style="display:flex;align-items:center;gap:12px;">
-      <img id="app-icon" src="event_engine_icon_light.svg" alt="" style="width:40px;height:40px;border-radius:10px;flex-shrink:0;">
+      <img id="app-icon" src="event_engine_icon_light.svg" alt="" style="width:28px;height:28px;border-radius:6px;flex-shrink:0;">
       <div>
         <h1>Event Engine</h1>
         <div class="subtitle" id="header-subtitle">Loading...</div>
@@ -49,14 +49,14 @@
     <button class="btn btn-ghost btn-sm btn-icon" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark theme" style="margin-left:auto;font-size:16px;"></button>
   </header>
 
-  <nav class="tabs" style="display:flex;align-items:center;">
+  <nav class="tabs">
     <button class="tab-btn active" data-tab="rules">Rules</button>
     <button class="tab-btn" data-tab="log">Event Log</button>
     <button class="tab-btn" data-tab="variables">Variables</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
-    <span style="flex:1;"></span>
-    <a class="tab-btn" href="swagger.html" target="_blank" style="text-decoration:none;">API Docs</a>
-    <a class="tab-btn" href="help.html" target="_blank" style="text-decoration:none;">Help</a>
+    <span class="tabs-spacer"></span>
+    <a class="tab-btn" href="swagger.html" target="_blank">API Docs</a>
+    <a class="tab-btn" href="help.html" target="_blank">Help</a>
   </nav>
 
   <!-- ===== Rules Tab ===== -->
@@ -158,28 +158,30 @@
       <!-- Status -->
       <div class="status-grid" id="status-grid"></div>
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
+      <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
+      <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
       <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
 
-      <div class="card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">MQTT BROKER</h3>
-          <div id="mqtt-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+      <h2 class="settings-group-title">Features</h2>
+      <p class="settings-group-hint">Click a heading to show or hide its settings.</p>
+
+      <div class="card opt-section" data-section="mqtt">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">MQTT</h3>
+            <div class="section-desc">Publish events to an MQTT broker and trigger rules from subscribed topics.</div>
+          </div>
+          <div class="section-status" id="mqtt-status-badge">
             <span id="mqtt-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
             <span id="mqtt-status-text">Loading…</span>
           </div>
+          <label class="toggle" title="Turn MQTT on or off">
+            <input type="checkbox" name="enabled" form="mqtt-form" onchange="onFeatureToggle('mqtt', this)">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
+        <div class="section-body">
         <form id="mqtt-form" onsubmit="saveMqttSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
-          <div class="form-row" style="align-items:center;">
-            <div class="form-group" style="flex:0 0 auto;">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                <span style="font-size:13px;">Enabled</span>
-                <label class="toggle">
-                  <input type="checkbox" name="enabled">
-                  <span class="toggle-slider"></span>
-                </label>
-              </label>
-            </div>
-          </div>
           <div class="form-row">
             <div class="form-group">
               <label>Broker Host</label>
@@ -246,16 +248,25 @@
             <button type="submit" class="btn btn-primary">Save MQTT Settings</button>
           </div>
         </form>
+        </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">SPARKPLUG B EDGE NODE</h3>
-          <div id="spb-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+      <div class="card opt-section" data-section="sparkplug">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">Sparkplug B</h3>
+            <div class="section-desc">Act as a Sparkplug edge node over MQTT for Ignition and other SCADA hosts.</div>
+          </div>
+          <div class="section-status" id="spb-status-badge">
             <span id="spb-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
             <span id="spb-status-text">Loading…</span>
           </div>
+          <label class="toggle" title="Turn Sparkplug B on or off">
+            <input type="checkbox" name="enabled" form="spb-form" onchange="onFeatureToggle('sparkplug', this)">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
+        <div class="section-body">
         <div class="form-hint" style="margin-bottom:14px;">
           Publishes device data as Sparkplug B over the MQTT broker configured above,
           so a Sparkplug host (Ignition, Honeywell EBI, …) can consume it without an
@@ -263,15 +274,6 @@
         </div>
         <form id="spb-form" onsubmit="saveSparkplugSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
           <div class="form-row" style="align-items:center;">
-            <div class="form-group" style="flex:0 0 auto;">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                <span style="font-size:13px;">Enabled</span>
-                <label class="toggle">
-                  <input type="checkbox" name="enabled">
-                  <span class="toggle-slider"></span>
-                </label>
-              </label>
-            </div>
             <div class="form-group" style="flex:0 0 180px;">
               <label>Specification</label>
               <select name="spec_version">
@@ -325,10 +327,18 @@
             <button type="submit" class="btn btn-primary">Save Sparkplug Settings</button>
           </div>
         </form>
+        </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;">
-        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">EMAIL (SMTP)</h3>
+      <div class="card opt-section" data-section="smtp">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">Email (SMTP)</h3>
+            <div class="section-desc">Mail server used by the Email action.</div>
+          </div>
+          <div class="section-status"><span id="smtp-summary"></span></div>
+        </div>
+        <div class="section-body">
         <form id="smtp-form" onsubmit="saveSmtpSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
           <div class="form-row">
             <div class="form-group">
@@ -380,10 +390,18 @@
             <button type="submit" class="btn btn-primary">Save SMTP Settings</button>
           </div>
         </form>
+        </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;">
-        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">LOCATION</h3>
+      <div class="card opt-section" data-section="location">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">Location</h3>
+            <div class="section-desc">Camera position for Sunrise / Sunset triggers.</div>
+          </div>
+          <div class="section-status"><span id="location-summary"></span></div>
+        </div>
+        <div class="section-body">
         <form id="engine-settings-form" onsubmit="saveEngineSettings(event)" style="display:flex;flex-direction:column;gap:14px;">
           <div class="form-row">
             <div class="form-group">
@@ -404,16 +422,25 @@
             <button type="submit" class="btn btn-primary">Save Location</button>
           </div>
         </form>
+        </div>
       </div>
 
-      <div class="card" id="gps-card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">GPS / NMEA INPUT</h3>
-          <div id="gps-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+      <div class="card opt-section" id="gps-card" data-section="gps">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">GPS / NMEA Input</h3>
+            <div class="section-desc">Read position from a GPS receiver for geofence triggers and templates.</div>
+          </div>
+          <div class="section-status" id="gps-status-badge">
             <span id="gps-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
             <span id="gps-status-text">Disabled</span>
           </div>
+          <label class="toggle" title="Turn GPS input on or off">
+            <input type="checkbox" name="enabled" form="gps-form" onchange="onFeatureToggle('gps', this)">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
+        <div class="section-body">
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
           Receive NMEA 0183 from a GPS. Use the camera serial port or forward data to a UDP/TCP port.
           GPS fields are available as <code>{{gps.latitude}}</code>, <code>{{gps.longitude}}</code>,
@@ -421,12 +448,6 @@
         </p>
         <form id="gps-form" onsubmit="saveGpsSettings(event)" style="display:flex;flex-direction:column;gap:12px;">
           <div class="form-row">
-            <div class="form-group" style="flex:0 0 auto;">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
-                <span style="font-size:13px;">Enabled</span>
-                <span class="toggle"><input type="checkbox" name="enabled"><span class="toggle-slider"></span></span>
-              </label>
-            </div>
             <div class="form-group">
               <label>Input</label>
               <select name="source" onchange="gpsSourceVisibility()">
@@ -477,26 +498,19 @@
         </form>
         <div id="gps-live-status" style="margin-top:14px;font-size:12px;color:var(--text-muted);"></div>
         <pre id="gps-raw-lines" style="margin-top:10px;max-height:120px;overflow:auto;background:var(--input-bg);border-radius:6px;padding:8px;font-size:11px;white-space:pre-wrap;"></pre>
-      </div>
-
-      <div class="card" style="margin-bottom:16px;">
-        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-          Export your rules and settings before uninstalling so you can restore them after reinstalling.
-        </p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
-          <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
-          <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
-          <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
         </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;" id="tls-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">TLS CERTIFICATES</h3>
+      <div class="card opt-section" id="tls-card" data-section="tls">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">TLS Certificates</h3>
+            <div class="section-desc">Private CAs and client certificates for HTTPS, MQTT and email.</div>
+          </div>
+          <div class="section-status"><span id="tls-summary"></span></div>
+        </div>
+        <div class="section-body">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
           <button class="btn btn-ghost btn-sm" onclick="tlsEditProfile()">+ Add profile</button>
         </div>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
@@ -506,16 +520,25 @@
         </p>
         <div id="tls-list"></div>
         <div id="tls-editor" style="display:none;"></div>
+        </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">ALERT STREAM</h3>
-          <div id="stream-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+      <div class="card opt-section" data-section="stream">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">Alert Stream</h3>
+            <div class="section-desc">HTTP endpoint that streams rule events to external software.</div>
+          </div>
+          <div class="section-status" id="stream-status-badge">
             <span id="stream-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
             <span id="stream-status-text">Loading…</span>
           </div>
+          <label class="toggle" title="Turn Alert Stream on or off">
+            <input type="checkbox" onchange="onFeatureToggle('stream', this)">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
+        <div class="section-body">
         <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
           A long-lived HTTP endpoint that streams rule-fire events in real-time as multipart JSON.
           External software connects with Digest Auth to receive events instantly as multipart/mixed JSON chunks.
@@ -527,16 +550,25 @@
         <div style="font-size:12px;color:var(--text-muted);">
           <strong>Usage:</strong> <code>curl --digest -u root:pass http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code>
         </div>
+        </div>
       </div>
 
-      <div class="card" id="serial-setup-card" style="margin-bottom:16px;display:none;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">RS-485 / SERIAL GATEWAY</h3>
-          <div id="serial-status-badge" style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+      <div class="card opt-section" id="serial-setup-card" data-section="serial" style="display:none;">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">RS-485 / Serial Gateway</h3>
+            <div class="section-desc">Expose the camera serial port for Modbus RTU devices.</div>
+          </div>
+          <div class="section-status" id="serial-status-badge">
             <span id="serial-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>
             <span id="serial-status-text">Checking…</span>
           </div>
+          <label class="toggle" title="Turn the RS-485 gateway on or off">
+            <input type="checkbox" onchange="onFeatureToggle('serial', this)">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
+        <div class="section-body">
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
           Configure this device's serial port for RS-485 and expose it via PortManager so Event Engine can communicate with Modbus RTU devices.
         </p>
@@ -544,6 +576,7 @@
           <div class="form-group" style="flex:0 0 140px;">
             <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px;">Baud Rate</label>
             <select id="serial-baud" style="width:100%;padding:7px 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;">
+              <option value="4800">4800</option>
               <option value="9600">9600</option>
               <option value="19200">19200</option>
               <option value="38400">38400</option>
@@ -556,13 +589,21 @@
             <input id="serial-port" type="number" value="4001" min="1024" max="65535"
               style="width:100%;padding:7px 10px;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;box-sizing:border-box;">
           </div>
-          <button class="btn btn-primary" onclick="configureSerial()" style="flex:0 0 auto;">Configure RS-485</button>
+          <button id="serial-configure-btn" class="btn btn-primary" onclick="configureSerial()" style="flex:0 0 auto;">Configure RS-485</button>
         </div>
         <div id="serial-log" style="font-size:12px;color:var(--text-muted);font-family:monospace;display:none;max-height:120px;overflow-y:auto;background:var(--input-bg);border-radius:6px;padding:8px 10px;white-space:pre-wrap;"></div>
+        </div>
       </div>
 
-      <div class="card" style="margin-bottom:16px;">
-        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">SOCKS5 PROXY</h3>
+      <div class="card opt-section" data-section="proxy">
+        <div class="section-head">
+          <div class="section-heading">
+            <h3 class="section-title">SOCKS5 Proxy</h3>
+            <div class="section-desc">Route outbound connections through a proxy, for example Tailscale.</div>
+          </div>
+          <div class="section-status"><span id="proxy-summary"></span></div>
+        </div>
+        <div class="section-body">
         <form id="proxy-form" onsubmit="saveProxySettings(event)" style="display:flex;flex-direction:column;gap:14px;">
           <div class="form-group">
             <label>Proxy Address <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
@@ -573,6 +614,7 @@
             <button type="submit" class="btn btn-primary">Save Proxy Settings</button>
           </div>
         </form>
+        </div>
       </div>
 
     </div>
@@ -599,11 +641,11 @@
 
 <div class="toast-container" id="toast-container"></div>
 
-<script src="api.js?v=1.9.31" onerror="__scriptLoadError('api.js')"></script>
-<script src="app.js?v=1.9.31" onerror="__scriptLoadError('app.js')"></script>
-<script src="update-checker.js?v=1.9.31" onerror="__scriptLoadError('update-checker.js')"></script>
-<script src="device-capabilities.js?v=1.9.31" onerror="__scriptLoadError('device-capabilities.js')"></script>
-<script src="settings.js?v=1.9.31" onerror="__scriptLoadError('settings.js')"></script>
-<script src="rule-editor.js?v=1.9.31" onerror="__scriptLoadError('rule-editor.js')"></script>
+<script src="api.js?v=1.10.0" onerror="__scriptLoadError('api.js')"></script>
+<script src="app.js?v=1.10.0" onerror="__scriptLoadError('app.js')"></script>
+<script src="update-checker.js?v=1.10.0" onerror="__scriptLoadError('update-checker.js')"></script>
+<script src="device-capabilities.js?v=1.10.0" onerror="__scriptLoadError('device-capabilities.js')"></script>
+<script src="settings.js?v=1.10.0" onerror="__scriptLoadError('settings.js')"></script>
+<script src="rule-editor.js?v=1.10.0" onerror="__scriptLoadError('rule-editor.js')"></script>
 </body>
 </html>

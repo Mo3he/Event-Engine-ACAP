@@ -228,10 +228,24 @@ ACAP_ENDPOINT_settings(const ACAP_HTTP_Response response, const ACAP_HTTP_Reques
         cJSON* settings = cJSON_GetObjectItem(app, "settings");
         cJSON* param = params->child;
         while (param) {
-            if (cJSON_GetObjectItem(settings, param->string)) {
-                cJSON_ReplaceItemInObject(settings, param->string, cJSON_Duplicate(param, 1));
+            cJSON* current = cJSON_GetObjectItem(settings, param->string);
+            if (current) {
+                if (cJSON_IsObject(current) && cJSON_IsObject(param)) {
+                    cJSON* subparam = param->child;
+                    while (subparam) {
+                        cJSON* current_subparam = cJSON_GetObjectItem(current, subparam->string);
+                        if (current_subparam)
+                            cJSON_ReplaceItemInObject(current, subparam->string, cJSON_Duplicate(subparam, 1));
+                        else
+                            cJSON_AddItemToObject(current, subparam->string, cJSON_Duplicate(subparam, 1));
+                        subparam = subparam->next;
+                    }
+                } else {
+                    cJSON_ReplaceItemInObject(settings, param->string, cJSON_Duplicate(param, 1));
+                    current = cJSON_GetObjectItem(settings, param->string);
+                }
                 if (ACAP_UpdateCallback)
-                    ACAP_UpdateCallback(param->string, cJSON_GetObjectItem(settings, param->string));
+                    ACAP_UpdateCallback(param->string, current);
             }
             param = param->next;
         }

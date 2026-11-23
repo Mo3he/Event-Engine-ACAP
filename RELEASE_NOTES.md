@@ -1,5 +1,24 @@
 # Release Notes
 
+## v1.10.0 - Settings redesign and feature controls
+
+The Settings page has been reorganized into collapsible sections with concise
+status summaries. Hiding a section does not disable its feature. MQTT,
+Sparkplug B, GPS, Alert Stream, and RS-485 now have separate enable switches;
+turning a feature off keeps its configuration. Backup and Restore controls are
+in the Device section, and the rule editor uses a centered dialog that keeps
+scrolling within the dialog. Turning an existing RS-485 gateway off and back on
+leaves its serial port mode and line settings unchanged.
+
+Alert Stream can now be disabled from Settings. Disabling it closes existing
+streams and rejects new connections. The setting defaults to enabled, including
+on installations whose saved settings do not yet contain the new flag.
+
+### Upgrading to 1.10.0
+
+In-place upgrades keep existing rules and settings. Existing Alert Stream
+configurations remain enabled unless explicitly turned off after upgrading.
+
 ## v1.9.31 - GPS / NMEA input and triggers
 
 Event Engine can now read NMEA 0183 GPS data and use it in rules and video

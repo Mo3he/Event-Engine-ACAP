@@ -1241,7 +1241,7 @@ Content-Type: application/json
 
       <!-- ═══════════════════════════════════════════ MQTT -->
       <h2 id="mqtt-setup">MQTT Setup</h2>
-      <p>Configure the MQTT broker in <strong>Settings → MQTT Broker</strong>. The built-in client supports MQTT 3.1.1.</p>
+      <p>Configure the MQTT broker in <strong>Settings → MQTT</strong>. The built-in client supports MQTT 3.1.1.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>Broker Host</strong></td><td>Hostname or IP of the MQTT broker (e.g. <code>192.168.1.100</code> or <code>broker.hivemq.com</code>).</td></tr>
@@ -1327,6 +1327,8 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
 
       <!-- ═══════════════════════════════════════════ SETTINGS -->
       <h2 id="settings">Application Settings</h2>
+      <p>Click a section heading to show or hide its settings; this does not change whether a feature is enabled. The page remembers open sections in this browser. MQTT, Sparkplug B, GPS, Alert Stream and RS-485 have separate on/off switches that keep their configuration when turned off. Email, Location, TLS Certificates and Proxy show a summary of their configuration instead of a switch.</p>
+      <p>Configure and save MQTT or Sparkplug B before enabling it. For an existing RS-485 setup, its switch only enables or disables the TCP listener; use <strong>Configure RS-485</strong> when you intend to change the serial port settings.</p>
 
       <h3>Location</h3>
       <p>Set the camera's latitude and longitude (decimal degrees). This is required for Sunrise/Sunset triggers and the Day/Night condition to work correctly.</p>
@@ -1403,7 +1405,7 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
 
       <!-- ═══════════════════════════════════════════ BACKUP -->
       <h2 id="backup-restore">Backup &amp; Restore</h2>
-      <p>Use the <strong>Settings → Backup &amp; Restore</strong> section to export your configuration before performing updates or camera replacements.</p>
+      <p>Use the Backup &amp; Restore controls in the <strong>Settings → Device</strong> section to export your configuration before performing updates or camera replacements.</p>
       <ul>
         <li><strong>Export Rules</strong> — download all rules as a JSON file</li>
         <li><strong>Import Rules</strong> — upload a previously exported rules JSON</li>
@@ -1438,7 +1440,7 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
       <h3 id="alert-stream">Alert Stream</h3>
       <p>A long-lived HTTP endpoint that streams rule-fire events in real-time as <code>multipart/mixed</code> JSON chunks. External software connects with Digest Auth and receives a new chunk every time a rule fires — with no polling required.</p>
       <pre><code>GET http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code></pre>
-      <p>The connection stays open indefinitely. The first chunk is sent immediately on connect:</p>
+      <p>The connection stays open until the client disconnects or Alert Stream is turned off in Settings. The first chunk is sent immediately on connect:</p>
       <pre><code>--AxisEventBoundary
 Content-Type: application/json
 Content-Length: 18

@@ -2,6 +2,22 @@
 
 let gpsPollTimer = null;
 
+function deviceBackupMarkup() {
+  return `
+    <div class="device-backup">
+      <div>
+        <div class="device-backup-title">Backup &amp; Restore</div>
+        <div class="form-hint">Export rules and settings before uninstalling so you can restore them later.</div>
+      </div>
+      <div class="device-backup-actions">
+        <button class="btn btn-ghost btn-sm" onclick="exportRules()">Export Rules</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportSettings()">Export Settings</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
+      </div>
+    </div>`;
+}
+
 async function loadStatus() {
   try {
     const s = await API.getStatus();
@@ -30,7 +46,8 @@ async function loadStatus() {
             <td style="padding:5px 0;color:var(--text-muted);width:120px;">${k}</td>
             <td style="padding:5px 0;">${escHtml(v)}</td>
           </tr>` : '').join('')}
-      </table>`;
+      </table>
+      ${deviceBackupMarkup()}`;
 
     document.getElementById('header-subtitle').textContent =
       `${dev.model || ''} · ${dev.serial || ''} · ${s.rules_enabled}/${s.rules_total} rules active`;
@@ -44,6 +61,13 @@ async function loadStatus() {
     checkSerialPort();
     if (!gpsPollTimer) gpsPollTimer = setInterval(loadGpsStatus, 2000);
   } catch(e) {
+    const card = document.getElementById('device-card');
+    if (card) {
+      card.innerHTML = `
+        <h3 style="font-size:13px;color:var(--text-muted);margin:0;">DEVICE</h3>
+        <div class="form-hint" style="margin-top:8px;">Device status unavailable.</div>
+        ${deviceBackupMarkup()}`;
+    }
     toast('Failed to load status', 'error');
   }
 }
@@ -141,7 +165,12 @@ function updateStreamStatusBadge(status) {
   const urlEl = document.getElementById('stream-url');
   if (!dot || !text) return;
   const clients = status.stream_clients || 0;
-  if (clients > 0) {
+  const on = status.stream_enabled !== false;
+  setFeatureSwitch('stream', on);
+  if (!on) {
+    dot.style.background = 'var(--text-dim, #555)';
+    text.textContent = 'Disabled';
+  } else if (clients > 0) {
     dot.style.background = 'var(--accent-success)';
     text.textContent = `${clients} client${clients !== 1 ? 's' : ''} connected`;
   } else {
@@ -270,7 +299,8 @@ async function saveProxySettings(event) {
   const proxyEl = document.getElementById('engine-proxy');
   const proxy = proxyEl ? proxyEl.value.trim() : '';
   try {
-    const r = await API.post('settings', { engine: { socks5_proxy: proxy } });
+    await postSettingsPatch('engine', { socks5_proxy: proxy });
+    refreshSectionSummary('proxy');
     toast(proxy ? 'Proxy settings saved' : 'Proxy cleared');
   } catch(e) {
     toast('Failed to save proxy settings: ' + e.message, 'error');
@@ -282,9 +312,10 @@ async function saveEngineSettings(event) {
   const lat = parseFloat(document.getElementById('engine-lat').value) || 0;
   const lon = parseFloat(document.getElementById('engine-lon').value) || 0;
   try {
-    const r = await API.post('settings', { engine: { latitude: lat, longitude: lon } });
+    await postSettingsPatch('engine', { latitude: lat, longitude: lon });
     engineLat = lat;
     engineLon = lon;
+    refreshSectionSummary('location');
     toast('Location saved');
     refreshSolarPreview(lat, lon, 'engine-solar-preview');
   } catch(e) {
@@ -324,7 +355,9 @@ async function saveSmtpSettings(event) {
   const pw = el('smtp-pass') ? el('smtp-pass').value : '';
   if (pw) data.password = pw;
   try {
-    const r = await API.post('settings', { smtp: data });
+    await API.post('settings', { smtp: data });
+    if (_savedSettings) _savedSettings.smtp = Object.assign({}, data, { password: '' });
+    refreshSectionSummary('smtp');
     toast('SMTP settings saved');
     if (el('smtp-pass')) el('smtp-pass').value = '';
     if (el('smtp-tls-profile')) el('smtp-tls-profile').dataset.value = data.tls_profile;
@@ -350,7 +383,8 @@ async function loadMqttSettings(settings) {
     form.querySelector('[name="tls_profile"]').dataset.value = mq.tls_profile || '';
     fillSettingsTlsSelects();
     mqttTlsRowVisibility();
-    form.querySelector('[name="enabled"]').checked = !!mq.enabled;
+    setFeatureSwitch('mqtt', mq.enabled);
+    initSectionOpen('mqtt', !!mq.enabled);
     form.querySelector('[name="servers"]').value = (mq.servers || []).join('\n');
     /* Don't pre-fill password — leave placeholder "(unchanged)" */
 
@@ -367,7 +401,7 @@ async function saveMqttSettings(event) {
   const pw = form.querySelector('[name="password"]').value;
   const payload = {
     mqtt: {
-      enabled:   form.querySelector('[name="enabled"]').checked,
+      enabled:   form.elements.enabled.checked,
       host:      form.querySelector('[name="host"]').value.trim(),
       port:      parseInt(form.querySelector('[name="port"]').value, 10) || 1883,
       client_id: form.querySelector('[name="client_id"]').value.trim(),
@@ -659,7 +693,8 @@ async function loadSparkplugSettings(settings) {
     const form = document.getElementById('spb-form');
     if (!form) return;
 
-    form.querySelector('[name="enabled"]').checked       = !!sp.enabled;
+    setFeatureSwitch('sparkplug', sp.enabled);
+    initSectionOpen('sparkplug', !!sp.enabled);
     form.querySelector('[name="spec_version"]').value    = sp.spec_version || '3.0';
     form.querySelector('[name="group_id"]').value        = sp.group_id || '';
     form.querySelector('[name="edge_node_id"]').value    = sp.edge_node_id || '';
@@ -729,7 +764,7 @@ async function saveSparkplugSettings(event) {
   collectSparkplugMetrics();
 
   const form = document.getElementById('spb-form');
-  const enabled = form.querySelector('[name="enabled"]').checked;
+  const enabled = form.elements.enabled.checked;
   const groupId = form.querySelector('[name="group_id"]').value.trim();
 
   if (enabled && !groupId) { toast('Group ID is required', 'error'); return; }
@@ -781,6 +816,8 @@ async function saveSparkplugSettings(event) {
 async function loadAllSettings() {
   try {
     const settings = await API.get('settings');
+    _savedSettings = settings || {};
+    initOptionalSections();
     loadEngineSettings(settings);
     loadProxySettings(settings);
     loadSmtpSettings(settings);
@@ -788,7 +825,187 @@ async function loadAllSettings() {
     loadSparkplugSettings(settings);
     loadGpsSettings(settings);
     loadTlsProfiles();
+    ['smtp', 'location', 'proxy'].forEach(refreshSectionSummary);
+    initSectionOpen('stream', (settings.engine || {}).alert_stream_enabled !== false);
   } catch(e) { /* non-fatal — individual loaders will show errors as needed */ }
+}
+
+/* ===== Optional settings sections =====
+ * Clicking a section heading only shows or hides it (remembered per browser).
+ * Features that run in the background (MQTT, Sparkplug, GPS, Alert Stream,
+ * RS-485) also have an on/off switch in the heading that changes the setting
+ * right away. A section starts open when it is in use. */
+let _savedSettings = null;
+let _serialModeRS485 = false;
+const _sectionInitDone = {};
+const _SECTION_OPEN_KEY = 'eventEngine.settingsOpen';
+
+const _FEATURE_LABELS = {
+  mqtt:      'MQTT',
+  sparkplug: 'Sparkplug B',
+  gps:       'GPS input',
+  stream:    'the Alert Stream',
+  serial:    'the RS-485 gateway',
+};
+
+function _sectionCard(id) {
+  return document.querySelector(`.opt-section[data-section="${id}"]`);
+}
+
+function _sectionOpenPrefs() {
+  try { return JSON.parse(localStorage.getItem(_SECTION_OPEN_KEY)) || {}; } catch(_) { return {}; }
+}
+
+function setSectionOpen(id, open, remember) {
+  const card = _sectionCard(id);
+  if (!card) return;
+  card.classList.toggle('open', !!open);
+  const btn = card.querySelector('.section-chevron');
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (remember) {
+    const prefs = _sectionOpenPrefs();
+    prefs[id] = !!open;
+    try { localStorage.setItem(_SECTION_OPEN_KEY, JSON.stringify(prefs)); } catch(_) {}
+  }
+}
+
+/* Sets the initial open state once per page load, so status polling never
+ * opens or closes a section under the user. */
+function initSectionOpen(id, inUse) {
+  if (_sectionInitDone[id]) return;
+  _sectionInitDone[id] = true;
+  const pref = _sectionOpenPrefs()[id];
+  setSectionOpen(id, typeof pref === 'boolean' ? pref : inUse);
+}
+
+function setFeatureSwitch(id, on) {
+  const t = _sectionCard(id) && _sectionCard(id).querySelector('.section-head .toggle input');
+  if (t) t.checked = !!on;
+}
+
+function initOptionalSections() {
+  document.querySelectorAll('.opt-section').forEach(card => {
+    const head = card.querySelector('.section-head');
+    if (!head || head.dataset.ready) return;
+    head.dataset.ready = '1';
+    const id = card.dataset.section;
+    const title = card.querySelector('.section-title');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'section-chevron';
+    btn.setAttribute('aria-expanded', card.classList.contains('open') ? 'true' : 'false');
+    btn.setAttribute('aria-label', 'Show or hide ' + (title ? title.textContent : id));
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>';
+    head.appendChild(btn);
+    head.addEventListener('click', e => {
+      if (e.target.closest('.toggle, a')) return;
+      setSectionOpen(id, !card.classList.contains('open'), true);
+    });
+  });
+}
+
+function _setSummary(id, text, on) {
+  const el = document.getElementById(id + '-summary');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = on ? 'var(--text)' : '';
+}
+
+function refreshSectionSummary(id) {
+  const s = _savedSettings || {};
+  const eng = s.engine || {};
+  let inUse = false;
+  if (id === 'smtp') {
+    const server = (s.smtp || {}).server || '';
+    inUse = !!server;
+    _setSummary(id, server || 'Not set up', inUse);
+  } else if (id === 'location') {
+    const lat = Number(eng.latitude) || 0, lon = Number(eng.longitude) || 0;
+    inUse = !!(lat || lon);
+    _setSummary(id, inUse ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : 'Not set', inUse);
+  } else if (id === 'proxy') {
+    inUse = !!eng.socks5_proxy;
+    _setSummary(id, eng.socks5_proxy || 'Direct connection', inUse);
+  } else if (id === 'tls') {
+    const n = Array.isArray(tlsProfiles) ? tlsProfiles.length : 0;
+    inUse = n > 0;
+    _setSummary(id, n ? `${n} profile${n !== 1 ? 's' : ''}` : 'No profiles', inUse);
+  }
+  initSectionOpen(id, inUse);
+}
+
+/* POST replaces a whole top-level settings object, so merge with what is
+ * stored to avoid dropping sibling keys (e.g. engine.latitude vs socks5_proxy). */
+async function postSettingsPatch(key, patch) {
+  const cur = (await API.get('settings')) || {};
+  const merged = Object.assign({}, cur[key] || {}, patch);
+  await API.post('settings', { [key]: merged });
+  cur[key] = merged;
+  _savedSettings = cur;
+  return merged;
+}
+
+/* A feature that needs fields filled in before it can run is switched on by
+ * its Save button instead; the switch then only opens the form. */
+function _featureNeedsSetup(id) {
+  const s = _savedSettings || {};
+  if (id === 'mqtt')      return !(s.mqtt && s.mqtt.host);
+  if (id === 'sparkplug') return !(s.sparkplug && s.sparkplug.group_id);
+  return false;
+}
+
+async function onFeatureToggle(id, input) {
+  const on = input.checked;
+  const label = _FEATURE_LABELS[id];
+  const Label = label.charAt(0).toUpperCase() + label.slice(1);
+  try { _savedSettings = (await API.get('settings')) || _savedSettings; } catch(_) {}
+
+  if (on && _featureNeedsSetup(id)) {
+    input.checked = false;
+    setSectionOpen(id, true, true);
+    const first = _sectionCard(id).querySelector('.section-body input:not([type="checkbox"]):not([type="file"])');
+    if (first) first.focus();
+    toast(`Configure and save ${label} before turning it on`);
+    return;
+  }
+
+  if (id === 'serial') {
+    if (on) {
+      const baud = document.getElementById('serial-baud').value;
+      const port = document.getElementById('serial-port').value;
+      const message = _serialModeRS485
+        ? `Enable the existing RS-485 gateway on TCP port ${port}? Serial settings will not be changed.`
+        : `Set the serial port to RS-485 at ${baud} baud and open TCP port ${port} for it?`;
+      if (!confirm(message)) { input.checked = false; return; }
+      setSectionOpen(id, true, true);
+      const succeeded = _serialModeRS485 ? await enableSerialListener() : await configureSerial();
+      if (!succeeded) await checkSerialPort();
+    } else {
+      if (!confirm('Turn off the RS-485 gateway? The serial port settings are kept.')) { input.checked = true; return; }
+      await disableSerial();
+    }
+    return;
+  }
+
+  if (!on && !confirm(`Turn off ${label}? Its settings are kept so you can turn it back on later.`)) {
+    input.checked = true;
+    return;
+  }
+
+  try {
+    if (id === 'stream') await postSettingsPatch('engine', { alert_stream_enabled: on });
+    else                 await postSettingsPatch(id, { enabled: on });
+    if (on) setSectionOpen(id, true, true);
+    toast(`${Label} turned ${on ? 'on' : 'off'}`);
+    if (id === 'mqtt')      setTimeout(() => API.getStatus().then(s => updateMqttStatusBadge((s && s.mqtt) || {})).catch(() => {}), 1500);
+    if (id === 'sparkplug') setTimeout(() => API.getStatus()
+      .then(s => updateSparkplugStatusBadge((s && s.sparkplug) || {})).catch(() => {}), 1500);
+    if (id === 'gps')       setTimeout(loadGpsStatus, 500);
+    if (id === 'stream')    API.getStatus().then(updateStreamStatusBadge).catch(() => {});
+  } catch(e) {
+    input.checked = !on;
+    toast(`Failed to turn ${on ? 'on' : 'off'}: ` + e.message, 'error');
+  }
 }
 
 function gpsSourceVisibility() {
@@ -807,7 +1024,8 @@ function loadGpsSettings(settings) {
   const cfg = (settings && settings.gps) || {};
   const form = document.getElementById('gps-form');
   if (!form) return;
-  form.elements.enabled.checked = !!cfg.enabled;
+  setFeatureSwitch('gps', cfg.enabled);
+  initSectionOpen('gps', !!cfg.enabled);
   form.elements.source.value = cfg.source || 'serial';
   form.elements.device.value = cfg.device || 'auto';
   form.elements.baud.value = String(cfg.baud === undefined ? 0 : cfg.baud);
@@ -888,6 +1106,7 @@ async function loadTlsProfiles() {
   }
   renderTlsProfiles();
   fillSettingsTlsSelects();
+  refreshSectionSummary('tls');
   return tlsProfiles;
 }
 
@@ -1150,6 +1369,10 @@ async function checkSerialPort() {
     card.style.display = 'block';
     const isRS485   = serRes.includes('PortMode=RS485');
     const isEnabled = pmRes.includes('GenericTCPServer.Enabled=yes') && pmRes.includes('Listener.Enabled=yes');
+    _serialModeRS485 = isRS485;
+    const isConfigured = isRS485 && isEnabled;
+    setFeatureSwitch('serial', isConfigured);
+    initSectionOpen('serial', isConfigured);
     if (isRS485 && isEnabled) {
       dot.style.background = 'var(--accent-success)';
       text.textContent = 'Configured';
@@ -1160,11 +1383,19 @@ async function checkSerialPort() {
     const m = serRes.match(/BaudRate=(\d+)/);
     if (m) {
       const sel = document.getElementById('serial-baud');
+      if (![...sel.options].some(opt => opt.value === m[1])) {
+        const opt = document.createElement('option');
+        opt.value = m[1];
+        opt.textContent = m[1];
+        sel.appendChild(opt);
+      }
       for (const opt of sel.options) { if (opt.value === m[1]) { opt.selected = true; break; } }
     }
     const pm = pmRes.match(/Listener\.Port=(\d+)/);
     if (pm) document.getElementById('serial-port').value = pm[1];
   } catch(e) {
+    _serialModeRS485 = false;
+    setFeatureSwitch('serial', false);
     /* Not supported or not authenticated -- hide silently */
     card.style.display = 'none';
   }
@@ -1174,9 +1405,9 @@ async function configureSerial() {
   const baud = document.getElementById('serial-baud').value;
   const port = parseInt(document.getElementById('serial-port').value, 10);
   const log  = document.getElementById('serial-log');
-  const btn  = event.currentTarget;
+  const btn  = document.getElementById('serial-configure-btn');
 
-  if (!port || port < 1024 || port > 65535) { toast('Invalid TCP port', 'error'); return; }
+  if (!port || port < 1024 || port > 65535) { toast('Invalid TCP port', 'error'); return false; }
 
   log.style.display = 'block';
   log.textContent = '';
@@ -1213,10 +1444,70 @@ async function configureSerial() {
     emit('Done. Use connection type "Serial Gateway", host 127.0.0.1, port ' + port + ' in rules.');
     toast('RS-485 configured', 'success');
     await checkSerialPort();
+    return true;
   } catch(e) {
     emit('Error: ' + e.message);
     toast('Configuration failed', 'error');
+    await checkSerialPort();
+    return false;
   } finally {
     btn.disabled = false;
   }
+}
+
+async function enableSerialListener() {
+  const port = parseInt(document.getElementById('serial-port').value, 10);
+  const log = document.getElementById('serial-log');
+  const emit = (msg) => { log.textContent += msg + '\n'; log.scrollTop = log.scrollHeight; };
+  if (!port || port < 1024 || port > 65535) { toast('Invalid TCP port', 'error'); return false; }
+
+  log.style.display = 'block';
+  log.textContent = '';
+  try {
+    emit('Enabling the existing RS-485 TCP listener on port ' + port + '...');
+    await vapixParam({
+      action: 'update',
+      'PortManager.P0.GenericTCPServer.Enabled':          'yes',
+      'PortManager.P0.GenericTCPServer.Listener.Enabled': 'yes',
+      'PortManager.P0.GenericTCPServer.Listener.Port':    String(port)
+    });
+    emit('OK');
+    emit('Restarting PortManager...');
+    await vapixParam({ action: 'update', 'PortManager.P0.PortEnabled': 'no' });
+    await new Promise(r => setTimeout(r, 800));
+    await vapixParam({ action: 'update', 'PortManager.P0.PortEnabled': 'yes' });
+    emit('OK');
+    toast('RS-485 gateway turned on');
+    await checkSerialPort();
+    return true;
+  } catch(e) {
+    emit('Error: ' + e.message);
+    toast('Failed to turn on: ' + e.message, 'error');
+    await checkSerialPort();
+    return false;
+  }
+}
+
+/* Closes the TCP listener and keeps the serial port settings (baud, RS-485
+ * mode, port number), so turning it back on restores the same setup. */
+async function disableSerial() {
+  const log = document.getElementById('serial-log');
+  const emit = (msg) => { log.textContent += msg + '\n'; log.scrollTop = log.scrollHeight; };
+  log.style.display = 'block';
+  log.textContent = '';
+  try {
+    emit('Disabling PortManager GenericTCPServer listener...');
+    await vapixParam({ action: 'update', 'PortManager.P0.GenericTCPServer.Listener.Enabled': 'no' });
+    emit('OK');
+    emit('Restarting PortManager...');
+    await vapixParam({ action: 'update', 'PortManager.P0.PortEnabled': 'no' });
+    await new Promise(r => setTimeout(r, 800));
+    await vapixParam({ action: 'update', 'PortManager.P0.PortEnabled': 'yes' });
+    emit('OK');
+    toast('RS-485 gateway turned off');
+  } catch(e) {
+    emit('Error: ' + e.message);
+    toast('Failed to turn off: ' + e.message, 'error');
+  }
+  await checkSerialPort();
 }

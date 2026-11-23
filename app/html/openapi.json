@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{gps.latitude}}`, `{{gps.longitude}}` | Latest coordinates from a fresh GPS fix |\n| `{{gps.speed_kmh}}`, `{{gps.speed_mph}}`, `{{gps.speed_knots}}`, `{{gps.speed_mps}}` | Latest speed in the named units |\n| `{{gps.heading}}`, `{{gps.heading_cardinal}}`, `{{gps.altitude_m}}` | Heading, compass direction, and altitude |\n| `{{gps.age}}` | Seconds since the latest valid fix |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`. GPS values other than age resolve to `--` unless GPS is enabled and a fresh fix is available.\n",
-    "version": "1.9.31",
+    "version": "1.10.0",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -1355,6 +1355,8 @@
           "rules_total":    { "type": "integer" },
           "rules_enabled":  { "type": "integer" },
           "events_today":   { "type": "integer" },
+          "stream_clients": { "type": "integer" },
+          "stream_enabled": { "type": "boolean" },
           "time":           { "type": "string", "format": "date-time" },
           "engine_version": { "type": "string", "example": "1.8.2" },
           "mqtt": {
@@ -1391,6 +1393,11 @@
                 "default": 0,
                 "description": "Latitude in decimal degrees (North positive). Used as the default for Sunrise/Sunset schedule triggers.",
                 "example": 59.3293
+              },
+              "alert_stream_enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Enable the Alert Stream endpoint. Missing from older saved settings is treated as enabled."
               },
               "longitude": {
                 "type": "number",

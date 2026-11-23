@@ -29,6 +29,7 @@ typedef struct {
     int              fd;             /* accepted TCP socket */
     pthread_t        thread;
     int              has_pending;    /* new event waiting to be written */
+    int              closing;        /* stream turned off: thread should exit */
     char*            pending_json;   /* JSON string to write */
 } StreamClient;
 
@@ -39,6 +40,7 @@ static pthread_cond_t  broadcast_cond = PTHREAD_COND_INITIALIZER;
 static int             server_sock   = -1;
 static pthread_t       accept_thread;
 static int             accept_running = 0;
+static int             stream_enabled = 1;
 
 /*-----------------------------------------------------
  * JSON body for one rule-fire event
@@ -107,10 +109,10 @@ static void* client_thread_fn(void* arg) {
     while (1) {
         pthread_mutex_lock(&clients_lock);
 
-        while (c->active && !c->has_pending)
+        while (c->active && !c->closing && !c->has_pending)
             pthread_cond_wait(&broadcast_cond, &clients_lock);
 
-        if (!c->active) {
+        if (!c->active || c->closing) {
             pthread_mutex_unlock(&clients_lock);
             break;
         }
@@ -186,6 +188,18 @@ static void* accept_thread_fn(void* arg) {
         }
 
         pthread_mutex_lock(&clients_lock);
+        if (!stream_enabled) {
+            pthread_mutex_unlock(&clients_lock);
+            const char* off =
+                "HTTP/1.1 503 Service Unavailable\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: 41\r\n\r\n"
+                "Alert stream is turned off in Settings.\r\n";
+            send(fd, off, strlen(off), MSG_NOSIGNAL);
+            close(fd);
+            continue;
+        }
+
         int slot = -1;
         for (int i = 0; i < MAX_STREAM_CLIENTS; i++) {
             if (!clients[i].active) { slot = i; break; }
@@ -206,6 +220,7 @@ static void* accept_thread_fn(void* arg) {
         c->fd          = fd;
         c->active      = 1;
         c->has_pending = 0;
+        c->closing     = 0;
         c->pending_json = NULL;
         pthread_mutex_unlock(&clients_lock);
 
@@ -338,6 +353,34 @@ void AlertStream_Broadcast(const char* rule_id, const char* rule_name,
     free(json);
     pthread_cond_broadcast(&broadcast_cond);
     pthread_mutex_unlock(&clients_lock);
+}
+
+void AlertStream_Set_Enabled(int enabled) {
+    enabled = !!enabled;
+    pthread_mutex_lock(&clients_lock);
+    if (stream_enabled == enabled) {
+        pthread_mutex_unlock(&clients_lock);
+        return;
+    }
+    stream_enabled = enabled;
+    if (!enabled) {
+        /* Each client thread exits and releases its own slot. */
+        for (int i = 0; i < MAX_STREAM_CLIENTS; i++)
+            if (clients[i].active) {
+                clients[i].closing = 1;
+                shutdown(clients[i].fd, SHUT_RDWR);
+            }
+        pthread_cond_broadcast(&broadcast_cond);
+    }
+    pthread_mutex_unlock(&clients_lock);
+    LOG("alert stream turned %s", enabled ? "on" : "off");
+}
+
+int AlertStream_Is_Enabled(void) {
+    pthread_mutex_lock(&clients_lock);
+    int enabled = stream_enabled;
+    pthread_mutex_unlock(&clients_lock);
+    return enabled;
 }
 
 int AlertStream_Client_Count(void) {

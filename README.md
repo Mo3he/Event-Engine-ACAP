@@ -612,8 +612,8 @@ use-cases/
 ./build.sh armv7hf    # build only armv7hf
 ```
 
-Requires Docker. The build pulls `axisecp/acap-native-sdk:12.10.0` automatically
-and produces `.eap` files.
+Requires Docker or Podman. The build pulls `axisecp/acap-native-sdk:12.10.0`
+automatically and produces `.eap` files.
 
 ## Roadmap
 

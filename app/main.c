@@ -411,6 +411,12 @@ static void apply_sparkplug_config(cJSON* cfg) {
     if (cfg) Sparkplug_Configure(cfg);
 }
 
+/* On/off flags added after their settings: a missing flag (older settings
+ * file or backup) means on. */
+static int setting_enabled(cJSON* cfg, const char* key) {
+    return !cJSON_IsFalse(cJSON_GetObjectItem(cfg, key));
+}
+
 static void apply_proxy_config(cJSON* engine_cfg) {
     const char* proxy = cJSON_GetStringValue(cJSON_GetObjectItem(engine_cfg, "socks5_proxy"));
     if (!proxy) proxy = "";
@@ -433,6 +439,11 @@ static void apply_proxy_config(cJSON* engine_cfg) {
         }
     }
     MQTT_Set_Proxy(ph[0] ? ph : NULL, pp);
+}
+
+static void apply_engine_config(cJSON* engine_cfg) {
+    apply_proxy_config(engine_cfg);
+    AlertStream_Set_Enabled(setting_enabled(engine_cfg, "alert_stream_enabled"));
 }
 
 #define SMTP_PASS_FILE "localdata/smtp_password.txt"
@@ -478,7 +489,7 @@ static void Settings_Updated(const char* service, cJSON* data) {
     if (strcmp(service, "mqtt") == 0)
         apply_mqtt_config(data);
     else if (strcmp(service, "engine") == 0)
-        apply_proxy_config(data);
+        apply_engine_config(data);
     else if (strcmp(service, "smtp") == 0)
         apply_smtp_config(data);
     else if (strcmp(service, "sparkplug") == 0)
@@ -1172,6 +1183,7 @@ static void HTTP_Status(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
     cJSON_AddNumberToObject(obj, "rules_enabled",  RuleEngine_Count_Enabled());
     cJSON_AddNumberToObject(obj, "events_today",   EventLog_Count_Today());
     cJSON_AddNumberToObject(obj, "stream_clients", AlertStream_Client_Count());
+    cJSON_AddBoolToObject(obj,   "stream_enabled", AlertStream_Is_Enabled());
     cJSON_AddStringToObject(obj, "time",           ACAP_DEVICE_ISOTime());
     cJSON_AddStringToObject(obj, "engine_version", app_version());
 

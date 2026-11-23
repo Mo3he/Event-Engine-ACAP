@@ -24,6 +24,11 @@ void AlertStream_Cleanup(void);
 void AlertStream_Broadcast(const char* rule_id, const char* rule_name,
                            cJSON* trigger_data);
 
+/* Turn the stream on or off (engine.alert_stream_enabled). While off, new
+ * connections get 503 and open streams are closed. */
+void AlertStream_Set_Enabled(int enabled);
+int  AlertStream_Is_Enabled(void);
+
 /* Returns the number of currently connected stream clients. */
 int  AlertStream_Client_Count(void);
 
