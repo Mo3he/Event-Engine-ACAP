@@ -20,6 +20,7 @@
 #include "engine/sparkplug.h"
 #include "engine/alert_stream.h"
 #include "engine/certs.h"
+#include "engine/modbus_codec.h"
 
 #define APP_PACKAGE "acap_event_engine"
 
@@ -77,7 +78,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
     static const char* const trigger_types[] = {
         "vapix_event", "schedule", "mqtt_message", "http_webhook", "io_input",
         "counter_threshold", "rule_fired", "aoa_scenario", "manual", "modbus_read",
-        "sparkplug_command", NULL
+        "modbus_error", "sparkplug_command", NULL
     };
     static const char* const condition_types[] = {
         "time_window", "io_state", "counter", "variable_compare", "http_check",
@@ -164,6 +165,7 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         cJSON* triggers = cJSON_GetObjectItem(rule_json, "triggers");
         int tidx = 0;
         cJSON* t;
+        char mb_err[200];
         cJSON_ArrayForEach(t, triggers) {
             const char* ttype = cJSON_GetStringValue(cJSON_GetObjectItem(t, "type"));
             if (ttype && strcmp(ttype, "vapix_event") == 0) {
@@ -171,6 +173,10 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
                     snprintf(error, error_size, "trigger %d (%s) is missing topic0 — select a device event", tidx + 1, ttype);
                     return 0;
                 }
+            }
+            if (ttype && strcmp(ttype, "modbus_read") == 0 && !mb_validate_read(t, mb_err, sizeof(mb_err))) {
+                snprintf(error, error_size, "trigger %d (modbus_read): %s", tidx + 1, mb_err);
+                return 0;
             }
             tidx++;
         }
@@ -180,6 +186,20 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
         return 0;
     if (!validate_rule_steps("actions", cJSON_GetObjectItem(rule_json, "actions"), action_types, 1, error, error_size))
         return 0;
+
+    {
+        int aidx = 0;
+        cJSON* a;
+        char mb_err[200];
+        cJSON_ArrayForEach(a, cJSON_GetObjectItem(rule_json, "actions")) {
+            const char* atype = cJSON_GetStringValue(cJSON_GetObjectItem(a, "type"));
+            if (atype && strcmp(atype, "modbus_write") == 0 && !mb_validate_write(a, mb_err, sizeof(mb_err))) {
+                snprintf(error, error_size, "action %d (modbus_write): %s", aidx + 1, mb_err);
+                return 0;
+            }
+            aidx++;
+        }
+    }
 
     return 1;
 }
@@ -767,7 +787,7 @@ static void HTTP_Actions(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         {"acap_control",      "ACAP Control",      "Start, stop, or restart another ACAP application"},
         {"influxdb_write",    "InfluxDB Write",    "Write a data point to InfluxDB (v1 or v2) in line protocol"},
         {"aoa_get_counts",    "AOA Get Counts",    "Fetch accumulated crossline counts from an Object Analytics scenario"},
-        {"modbus_write",      "Modbus Write",      "Write a value to a Modbus register via TCP or RTU/RS-485"},
+        {"modbus_write",      "Modbus Write",      "Write typed values to Modbus registers or coils via TCP or RTU/RS-485 (FC05/06/15/16)"},
         {NULL, NULL, NULL}
     };
 

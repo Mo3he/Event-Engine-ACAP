@@ -195,12 +195,16 @@ void Variables_Flush(void) {
 int Variables_Set(const char* name, const char* value) {
     if (!name || !value) return 0;
     pthread_mutex_lock(&lock);
-    Variable* v = find_or_create(name);
+    Variable* existing = find_var(name);
+    Variable* v = existing ? existing : find_or_create(name);
     if (!v) { pthread_mutex_unlock(&lock); return 0; }
+    /* Only write the file when it would change: the value of a volatile
+     * variable isn't kept, and Modbus polls set the same value often. */
+    int changed = v->is_counter || strncmp(v->value, value, VAR_VALUE_LEN - 1) != 0;
+    if (!existing || (changed && v->persistent) || v->is_counter) dirty = 1;
     snprintf(v->value, VAR_VALUE_LEN, "%s", value);
     v->is_counter = 0;
     v->numeric = 0;
-    dirty = 1;
     pthread_mutex_unlock(&lock);
     return 1;
 }

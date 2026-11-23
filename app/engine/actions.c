@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <ctype.h>
 #include <syslog.h>
 #include <glib.h>
@@ -15,6 +16,7 @@
 #include "sparkplug.h"
 #include "event_log.h"
 #include "rule_engine.h"
+#include "modbus_codec.h"
 #include "modbus_pool.h"
 #include "certs.h"
 #include "../ACAP.h"
@@ -4615,11 +4617,140 @@ void Actions_Digest_Tick(void) {
     }
 }
 
-/* modbus_write — write a value to a Modbus register (TCP or RTU/RS-485). Runs
- * on the Modbus worker thread so a device that doesn't answer can't stall the
- * main loop; writes keep their order. */
-static void action_modbus_write(cJSON* cfg) {
-    modbus_submit_write(cfg);
+/* A value to write as text: templates expanded, numbers as written. */
+static char* mb_value_text(cJSON* v, cJSON* trigger_data) {
+    char buf[64];
+    if (cJSON_IsNumber(v)) {
+        snprintf(buf, sizeof(buf), "%.17g", v->valuedouble);
+        return strdup(buf);
+    }
+    if (cJSON_IsBool(v)) return strdup(cJSON_IsTrue(v) ? "1" : "0");
+    if (cJSON_IsString(v)) return Actions_Expand_Template(v->valuestring, trigger_data);
+    return strdup("0");
+}
+
+static int mb_parse_number(const char* text, double* out) {
+    while (*text == ' ') text++;
+    char* end;
+    *out = strtod(text, &end);
+    while (*end == ' ') end++;
+    return end != text && *end == '\0' ? 0 : -1;
+}
+
+/* Encode one value into f->nregs registers (one 0/1 for a coil). */
+static int mb_encode_value(cJSON* v, const mb_field_t* f, int bits, cJSON* trigger_data,
+                           uint16_t* regs, char* err, size_t err_size) {
+    char* text = mb_value_text(v, trigger_data);
+    if (!text) { snprintf(err, err_size, "out of memory"); return -1; }
+    int rc = 0;
+    double d;
+    if (bits) {
+        if (strcasecmp(text, "true") == 0 || strcasecmp(text, "on") == 0) regs[0] = 1;
+        else if (strcasecmp(text, "false") == 0 || strcasecmp(text, "off") == 0 || !text[0]) regs[0] = 0;
+        else if (mb_parse_number(text, &d) == 0) regs[0] = d != 0;
+        else { snprintf(err, err_size, "'%.40s' is not on/off or a number", text); rc = -1; }
+    } else if (f->type == MB_T_STRING) {
+        if (mb_encode_string(text, f->nregs, f->order, regs) != 0) {
+            snprintf(err, err_size, "text is %d characters; %d registers hold %d",
+                     (int)strlen(text), f->nregs, f->nregs * 2);
+            rc = -1;
+        }
+    } else if (mb_parse_number(text, &d) != 0) {
+        snprintf(err, err_size, "'%.40s' is not a number", text);
+        rc = -1;
+    } else if (mb_encode_field(d, f, regs) != 0) {
+        snprintf(err, err_size, "%.40s is out of range for %s", text, mb_type_name(f->type));
+        rc = -1;
+    }
+    free(text);
+    return rc;
+}
+
+typedef struct {
+    mb_field_t f;
+    uint16_t   regs[MB_MAX_STRING_REGS];
+} MbWriteValue;
+
+static int mb_write_value_cmp(const void* a, const void* b) {
+    return ((const MbWriteValue*)a)->f.reg - ((const MbWriteValue*)b)->f.reg;
+}
+
+/* modbus_write — write one typed value, or a block of "values", to Modbus
+ * holding registers or coils (TCP or RTU/RS-485). Values are encoded here on
+ * the main loop; the requests run on the Modbus worker thread so a device that
+ * doesn't answer can't stall the main loop. Writes keep their order. Each run
+ * of adjacent registers is one request (FC16/FC15), or FC06/FC05 for a single
+ * register or coil unless the function says otherwise. */
+static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
+    char err[160], ferr[160];
+    if (!mb_validate_write(cfg, err, sizeof(err))) {
+        LOG_ACTION_ERR("modbus_write: %s", err);
+        return;
+    }
+    const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "register_type"));
+    int bits = rtype && strcmp(rtype, "coil") == 0;
+    cJSON* slave_j = cJSON_GetObjectItem(cfg, "slave_id");
+    int slave_id = cJSON_IsNumber(slave_j) ? (int)slave_j->valuedouble
+                 : cJSON_IsString(slave_j) ? atoi(slave_j->valuestring) : 1;
+    const char* fn = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "function"));
+    int force_multi = fn && (strcmp(fn, "fc15") == 0 || strcmp(fn, "fc16") == 0);
+
+    cJSON* values = cJSON_GetObjectItem(cfg, "values");
+    int block = cJSON_IsArray(values) && cJSON_GetArraySize(values) > 0;
+    int n = block ? cJSON_GetArraySize(values) : 1;
+    MbWriteValue* wv = calloc((size_t)n, sizeof(*wv));
+    if (!wv) { LOG_ACTION_ERR("modbus_write: out of memory"); return; }
+    int ok = 1;
+    if (block) {
+        int i = 0;
+        cJSON* e;
+        cJSON_ArrayForEach(e, values) {
+            if (mb_field_parse(e, "type", "order", bits, &wv[i].f, ferr, sizeof(ferr)) != 0 ||
+                mb_encode_value(cJSON_GetObjectItem(e, "value"), &wv[i].f, bits, trigger_data,
+                                wv[i].regs, ferr, sizeof(ferr)) != 0) {
+                snprintf(err, sizeof(err), "values entry %d: %.120s", i + 1, ferr);
+                ok = 0;
+                break;
+            }
+            i++;
+        }
+        qsort(wv, (size_t)n, sizeof(*wv), mb_write_value_cmp);
+    } else if (mb_field_parse(cfg, "data_type", "word_order", bits, &wv[0].f, ferr, sizeof(ferr)) != 0 ||
+               mb_encode_value(cJSON_GetObjectItem(cfg, "value"), &wv[0].f, bits, trigger_data,
+                               wv[0].regs, ferr, sizeof(ferr)) != 0) {
+        snprintf(err, sizeof(err), "%s", ferr);
+        ok = 0;
+    }
+    if (!ok) {
+        LOG_ACTION_ERR("modbus_write: register %d not written: %s", wv[0].f.reg, err);
+        free(wv);
+        return;
+    }
+
+    /* Join adjacent values into runs, one request each. */
+    int max = bits ? MB_MAX_WRITE_BITS : MB_MAX_WRITE_REGS;
+    uint16_t* run = malloc((size_t)max * sizeof(uint16_t));
+    if (!run) { LOG_ACTION_ERR("modbus_write: out of memory"); free(wv); return; }
+    int run_start = 0, run_len = 0;
+    for (int i = 0; i <= n; i++) {
+        int flush = i == n || (run_len > 0 && (wv[i].f.reg != run_start + run_len ||
+                                               run_len + wv[i].f.nregs > max));
+        if (flush && run_len > 0) {
+            int fc = bits ? (run_len == 1 && !force_multi ? 0x05 : 0x0F)
+                          : (run_len == 1 && !force_multi ? 0x06 : 0x10);
+            if (modbus_submit_write(cfg, slave_id, fc, run_start, run_len, run) != 0) {
+                LOG_ACTION_ERR("modbus_write: could not queue write to register %d", run_start);
+                break;
+            }
+            run_len = 0;
+        }
+        if (i == n) break;
+        if (run_len == 0) run_start = wv[i].f.reg;
+        memcpy(run + run_len, wv[i].regs, (size_t)wv[i].f.nregs * sizeof(uint16_t));
+        run_len += wv[i].f.nregs;
+    }
+    free(run);
+    free(wv);
 }
 
 static void execute_from(const char* rule_id, cJSON* actions_array,
@@ -4725,7 +4856,7 @@ static void execute_from_ex(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "acap_control")      == 0) action_acap_control(action);
         else if (strcmp(type, "aoa_get_counts")    == 0) action_aoa_get_counts(action, trigger_data);
         else if (strcmp(type, "speaker_display")    == 0) action_speaker_display(rule_id, action, trigger_data);
-        else if (strcmp(type, "modbus_write")       == 0) action_modbus_write(action);
+        else if (strcmp(type, "modbus_write")       == 0) action_modbus_write(action, trigger_data);
         else LOG_WARN("unknown action type '%s'", type);
     }
 }

@@ -123,7 +123,8 @@ The web UI is accessible at
 | **Rule Chain** | Fires when another named rule executes |
 | **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}`, `{{trigger.active}}`, and `{{trigger.reason}}` |
 | **Manual** | Fired via the **Fire Now** button in the UI or `POST /fire` with a rule ID. Useful for testing and one-shot actions |
-| **Modbus Read** | Poll a Modbus register on a configurable interval and fire when the value crosses a threshold. Supports Modbus TCP and RTU/RS-485. Register types: holding (FC03), input (FC04), coil (FC01), discrete (FC02). Threshold operators: `gt`, `gte`, `lt`, `lte`, `eq`, `between`, or none to fire on every change of value. Port 502 works on all firmware versions |
+| **Modbus Read** | Poll Modbus TCP or RTU/RS-485 registers and coils on an interval. Read single values or a register map into variables; supports signed/unsigned 16/32/64-bit integers, 32/64-bit floats, strings, word order, scale and offset. Fires on a threshold edge or whenever values change |
+| **Modbus Error** | Fire when a Modbus device starts failing requests, or on every failed request, and again when it recovers. Can filter by device and slave ID; the trigger includes the error details |
 | **Sparkplug Command** | Fires when a Sparkplug B host writes a metric to this edge node via `NCMD`/`DCMD`. Optional metric-name and exact-value filters. Injects `{{trigger.metric}}` and `{{trigger.value}}`. Lets a SCADA host command the device, not just read from it |
 
 ## Conditions
@@ -221,7 +222,7 @@ stop a siren when motion ends).
 
 | Type | Description |
 |------|-------------|
-| **Modbus Write** | Write a value to a Modbus register via TCP or RTU/RS-485. Supports FC06 (write single holding register) and FC05 (write single coil). Uses the same connection parameters as Modbus Read |
+| **Modbus Write** | Write typed values or blocks over Modbus TCP or RTU/RS-485. Supports FC05/FC15 coil writes and FC06/FC16 register writes, including adjacent-register batching, data types, word order, scaling and strings |
 
 ### Industrial
 

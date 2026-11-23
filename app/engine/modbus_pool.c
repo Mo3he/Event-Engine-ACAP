@@ -3,7 +3,8 @@
  *
  * serial_gateway connects via TCP but speaks RTU framing (CRC, no MBAP), for
  * use with an Axis PortManager GenericTCPServer exposing a local RS-485 port.
- * Supports FC 0x01-0x04 (reads) and 0x05-0x06 (single writes).
+ * Supports FC 0x01-0x04 (reads, blocks of registers/bits) and 0x05, 0x06,
+ * 0x0F, 0x10 (single and multiple writes).
  *
  * All I/O runs on one worker thread (modbus_submit_*), never on the GLib main
  * loop: a device that doesn't answer blocks for the socket timeout.
@@ -38,6 +39,7 @@ __asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.4");
 #endif
 
 #include "event_log.h"
+#include "modbus_codec.h"
 #include "modbus_pool.h"
 
 #define LOG(fmt, args...)      syslog(LOG_INFO,    "modbus_pool: " fmt, ## args)
@@ -48,6 +50,10 @@ __asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.4");
 #define MB_RTU_VTIME    10   /* termios VTIME units (0.1s each) → 1s */
 #define MB_RETRY_S       5   /* after a failed connect, wait before trying again */
 #define MB_QUEUE_MAX    64   /* queued writes; reads are one per trigger at most */
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
 
 typedef enum { MB_TCP, MB_RTU, MB_SERIAL_GW } mb_transport_t;
 
@@ -179,11 +185,64 @@ static int ensure_connected(struct mb_ctx* c) {
 /* Transport-level request/response                                    */
 /* ------------------------------------------------------------------ */
 
+const char* mb_err_kind_name(mb_err_kind_t kind) {
+    switch (kind) {
+        case MB_ERR_NONE:       return "none";
+        case MB_ERR_CONNECTION: return "connection";
+        case MB_ERR_TIMEOUT:    return "timeout";
+        case MB_ERR_CRC:        return "crc";
+        case MB_ERR_EXCEPTION:  return "exception";
+        case MB_ERR_INVALID:    return "invalid_response";
+        case MB_ERR_CONFIG:     return "config";
+    }
+    return "unknown";
+}
+
+void mb_err_describe(const mb_err_t* err, char* buf, size_t size) {
+    switch (err->kind) {
+        case MB_ERR_NONE:
+            snprintf(buf, size, "ok");
+            break;
+        case MB_ERR_CONNECTION:
+            snprintf(buf, size, "connection failed: %s", strerror(err->sys_errno ? err->sys_errno : EIO));
+            break;
+        case MB_ERR_TIMEOUT:
+            snprintf(buf, size, "no response (timeout)");
+            break;
+        case MB_ERR_CRC:
+            snprintf(buf, size, "CRC error in response");
+            break;
+        case MB_ERR_EXCEPTION:
+            snprintf(buf, size, "exception %02d %s", err->exception, mb_exception_name(err->exception));
+            break;
+        case MB_ERR_INVALID:
+            snprintf(buf, size, "invalid response");
+            break;
+        case MB_ERR_CONFIG:
+            snprintf(buf, size, "no connection available (pool full)");
+            break;
+    }
+}
+
+static int fail(mb_err_t* err, mb_err_kind_t kind, int e) {
+    err->kind = kind;
+    err->sys_errno = e;
+    return -1;
+}
+
+/* recv()/read() error or short read: closed connection or timeout. */
+static int io_fail(mb_err_t* err, ssize_t n) {
+    if (n == 0) return fail(err, MB_ERR_CONNECTION, ECONNRESET);
+    if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != ETIMEDOUT && errno != EINTR)
+        return fail(err, MB_ERR_CONNECTION, errno);
+    return fail(err, MB_ERR_TIMEOUT, ETIMEDOUT);
+}
+
 /* Send PDU over TCP (wraps in MBAP header), receive response PDU.
  * resp_pdu must be at least 256 bytes. Returns 0 on success. */
 static int tcp_request(struct mb_ctx* c, int slave_id,
                        const uint8_t* pdu, int pdu_len,
-                       uint8_t* resp_pdu, int* resp_pdu_len) {
+                       uint8_t* resp_pdu, int* resp_pdu_len, mb_err_t* err) {
     uint8_t frame[264];
     uint16_t txid = g_txid++;
     frame[0] = (txid >> 8) & 0xFF;
@@ -195,182 +254,226 @@ static int tcp_request(struct mb_ctx* c, int slave_id,
     frame[6] = (uint8_t)slave_id;
     memcpy(frame + 7, pdu, pdu_len);
     int total = 7 + pdu_len;
-    if (send(c->fd, frame, total, 0) != total) return -1;
+    if (send(c->fd, frame, total, MSG_NOSIGNAL) != total) return fail(err, MB_ERR_CONNECTION, errno ? errno : EIO);
     /* receive MBAP header (6 bytes) */
     uint8_t hdr[6];
-    if (recv(c->fd, hdr, 6, MSG_WAITALL) != 6) return -1;
+    ssize_t n = recv(c->fd, hdr, 6, MSG_WAITALL);
+    if (n != 6) return io_fail(err, n);
+    uint16_t rxid = ((uint16_t)hdr[0] << 8) | hdr[1];
     uint16_t rlen = ((uint16_t)hdr[4] << 8) | hdr[5];
-    if (rlen < 2 || rlen > 253) return -1;
+    if (rxid != txid || hdr[2] || hdr[3] || rlen < 2 || rlen > 254)
+        return fail(err, MB_ERR_INVALID, EBADMSG);
     /* receive unit_id (1) + PDU (rlen-1) */
     uint8_t rbuf[256];
-    if (recv(c->fd, rbuf, rlen, MSG_WAITALL) != (int)rlen) return -1;
+    n = recv(c->fd, rbuf, rlen, MSG_WAITALL);
+    if (n != (ssize_t)rlen) return io_fail(err, n);
     *resp_pdu_len = rlen - 1;
     memcpy(resp_pdu, rbuf + 1, *resp_pdu_len);
     return 0;
+}
+
+/* Length of the RTU response frame (addr .. CRC) from its first 3 bytes. */
+static int rtu_expected_len(const uint8_t* rbuf) {
+    if (rbuf[1] & 0x80) return 5;                /* addr + fc + code + CRC */
+    if (rbuf[1] <= 0x04) return 3 + rbuf[2] + 2;  /* addr + fc + count + data + CRC */
+    return 8;                                     /* write echo (5, 6, 15, 16) */
+}
+
+/* Check an RTU response frame and copy out its PDU. */
+static int rtu_finish(int slave_id, const uint8_t* rbuf, int got,
+                      uint8_t* resp_pdu, int* resp_pdu_len, mb_err_t* err) {
+    if (got == 0) return fail(err, MB_ERR_TIMEOUT, ETIMEDOUT);
+    if (got < 5 || got < rtu_expected_len(rbuf)) return fail(err, MB_ERR_TIMEOUT, ETIMEDOUT);
+    got = rtu_expected_len(rbuf);
+    uint16_t rx_crc = ((uint16_t)rbuf[got - 1] << 8) | rbuf[got - 2];
+    if (crc16(rbuf, got - 2) != rx_crc) return fail(err, MB_ERR_CRC, EBADMSG);
+    if (rbuf[0] != (uint8_t)slave_id)   return fail(err, MB_ERR_INVALID, EBADMSG);
+    *resp_pdu_len = got - 3;   /* strip addr + 2-byte CRC */
+    memcpy(resp_pdu, rbuf + 1, *resp_pdu_len);
+    return 0;
+}
+
+static int rtu_frame(int slave_id, const uint8_t* pdu, int pdu_len, uint8_t* frame) {
+    frame[0] = (uint8_t)slave_id;
+    memcpy(frame + 1, pdu, pdu_len);
+    uint16_t crc = crc16(frame, 1 + pdu_len);
+    frame[1 + pdu_len]     =  crc & 0xFF;
+    frame[1 + pdu_len + 1] = (crc >> 8) & 0xFF;
+    return 1 + pdu_len + 2;
 }
 
 /* Send PDU over RTU serial (adds addr + CRC), receive and validate response PDU.
  * resp_pdu must be at least 256 bytes. Returns 0 on success. */
 static int rtu_request(struct mb_ctx* c, int slave_id,
                        const uint8_t* pdu, int pdu_len,
-                       uint8_t* resp_pdu, int* resp_pdu_len) {
-    uint8_t frame[256];
-    frame[0] = (uint8_t)slave_id;
-    memcpy(frame + 1, pdu, pdu_len);
-    uint16_t crc = crc16(frame, 1 + pdu_len);
-    frame[1 + pdu_len]     =  crc & 0xFF;
-    frame[1 + pdu_len + 1] = (crc >> 8) & 0xFF;
+                       uint8_t* resp_pdu, int* resp_pdu_len, mb_err_t* err) {
+    uint8_t frame[260];
+    int flen = rtu_frame(slave_id, pdu, pdu_len, frame);
     tcflush(c->fd, TCIOFLUSH);
-    int flen = 1 + pdu_len + 2;
-    if (write(c->fd, frame, flen) != flen) return -1;
+    if (write(c->fd, frame, flen) != flen) return fail(err, MB_ERR_CONNECTION, errno ? errno : EIO);
     /* read response with timeout via VTIME */
     uint8_t rbuf[256];
     int got = 0;
-    while (got < 256) {
+    while (got < (int)sizeof(rbuf)) {
         int n = (int)read(c->fd, rbuf + got, sizeof(rbuf) - got);
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) break;
         got += n;
-        /* estimate expected frame length once we have enough bytes */
-        if (got >= 5) {
-            uint8_t fc = rbuf[1] & 0x7F;
-            int expected;
-            if (rbuf[1] & 0x80) {
-                expected = 5;   /* exception: addr+FC+code+CRC = 5 */
-            } else if (fc <= 0x04) {
-                expected = (got >= 3) ? 3 + rbuf[2] + 2 : 5;
-            } else {
-                expected = 8;   /* write echo responses */
-            }
-            if (got >= expected) break;
-        }
+        if (got >= 5 && got >= rtu_expected_len(rbuf)) break;
     }
-    if (got < 4) { errno = ETIMEDOUT; return -1; }
-    uint16_t rx_crc = ((uint16_t)rbuf[got - 1] << 8) | rbuf[got - 2];
-    if (crc16(rbuf, got - 2) != rx_crc) { errno = EBADMSG; return -1; }
-    if (rbuf[0] != (uint8_t)slave_id)   { errno = EBADMSG; return -1; }
-    *resp_pdu_len = got - 3;   /* strip addr + 2-byte CRC */
-    memcpy(resp_pdu, rbuf + 1, *resp_pdu_len);
-    return 0;
+    return rtu_finish(slave_id, rbuf, got, resp_pdu, resp_pdu_len, err);
 }
 
 /* Send RTU-framed PDU over a raw TCP socket (serial_gateway mode).
  * Same framing as rtu_request() but no tcflush; uses send()/recv(). */
 static int sgw_request(struct mb_ctx* c, int slave_id,
                        const uint8_t* pdu, int pdu_len,
-                       uint8_t* resp_pdu, int* resp_pdu_len) {
-    uint8_t frame[256];
-    frame[0] = (uint8_t)slave_id;
-    memcpy(frame + 1, pdu, pdu_len);
-    uint16_t crc = crc16(frame, 1 + pdu_len);
-    frame[1 + pdu_len]     =  crc & 0xFF;
-    frame[1 + pdu_len + 1] = (crc >> 8) & 0xFF;
-    int flen = 1 + pdu_len + 2;
-    if (send(c->fd, frame, flen, 0) != flen) return -1;
+                       uint8_t* resp_pdu, int* resp_pdu_len, mb_err_t* err) {
+    uint8_t frame[260];
+    int flen = rtu_frame(slave_id, pdu, pdu_len, frame);
+    if (send(c->fd, frame, flen, MSG_NOSIGNAL) != flen) return fail(err, MB_ERR_CONNECTION, errno ? errno : EIO);
     uint8_t rbuf[256];
     int got = 0;
     while (got < (int)sizeof(rbuf)) {
-        int n = (int)recv(c->fd, rbuf + got, sizeof(rbuf) - got, 0);
+        ssize_t n = recv(c->fd, rbuf + got, sizeof(rbuf) - got, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n == 0 && got == 0) return fail(err, MB_ERR_CONNECTION, ECONNRESET);
         if (n <= 0) break;
-        got += n;
-        if (got >= 5) {
-            uint8_t fc = rbuf[1] & 0x7F;
-            int expected;
-            if (rbuf[1] & 0x80) {
-                expected = 5;
-            } else if (fc <= 0x04) {
-                expected = (got >= 3) ? 3 + rbuf[2] + 2 : 5;
-            } else {
-                expected = 8;
-            }
-            if (got >= expected) break;
-        }
+        got += (int)n;
+        if (got >= 5 && got >= rtu_expected_len(rbuf)) break;
     }
-    if (got < 4) { errno = ETIMEDOUT; return -1; }
-    uint16_t rx_crc = ((uint16_t)rbuf[got - 1] << 8) | rbuf[got - 2];
-    if (crc16(rbuf, got - 2) != rx_crc) { errno = EBADMSG; return -1; }
-    if (rbuf[0] != (uint8_t)slave_id)   { errno = EBADMSG; return -1; }
-    *resp_pdu_len = got - 3;
-    memcpy(resp_pdu, rbuf + 1, *resp_pdu_len);
-    return 0;
+    return rtu_finish(slave_id, rbuf, got, resp_pdu, resp_pdu_len, err);
 }
 
-static int do_request(struct mb_ctx* c, int slave_id,
-                      const uint8_t* pdu, int pdu_len,
-                      uint8_t* resp_pdu, int* resp_pdu_len) {
-    if (c->transport == MB_TCP)       return tcp_request(c, slave_id, pdu, pdu_len, resp_pdu, resp_pdu_len);
-    if (c->transport == MB_SERIAL_GW) return sgw_request(c, slave_id, pdu, pdu_len, resp_pdu, resp_pdu_len);
-    return rtu_request(c, slave_id, pdu, pdu_len, resp_pdu, resp_pdu_len);
+/* Connect if needed, send the request and check the response is for this
+ * function: an exception gives MB_ERR_EXCEPTION. On a transport error the
+ * connection is closed so the next request starts clean. */
+static int transact(struct mb_ctx* c, int slave_id, const uint8_t* pdu, int pdu_len,
+                    uint8_t* resp, int* rlen, mb_err_t* err) {
+    memset(err, 0, sizeof(*err));
+    pthread_mutex_lock(&pool_mutex);
+    if (ensure_connected(c) != 0) {
+        int e = errno;
+        pthread_mutex_unlock(&pool_mutex);
+        return fail(err, MB_ERR_CONNECTION, e ? e : EIO);
+    }
+    int rc;
+    if (c->transport == MB_TCP)            rc = tcp_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+    else if (c->transport == MB_SERIAL_GW) rc = sgw_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+    else                                   rc = rtu_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+    if (rc != 0 && (c->transport != MB_RTU || err->kind == MB_ERR_CONNECTION)) {
+        /* A late answer would be read as the response to the next request */
+        if (c->fd >= 0) close(c->fd);
+        c->fd = -1;
+        c->connected = 0;
+    }
+    pthread_mutex_unlock(&pool_mutex);
+    if (rc != 0) return -1;
+    if (*rlen < 1) return fail(err, MB_ERR_INVALID, EBADMSG);
+    if (resp[0] == (pdu[0] | 0x80)) {
+        if (*rlen < 2) return fail(err, MB_ERR_INVALID, EBADMSG);
+        err->kind = MB_ERR_EXCEPTION;
+        err->exception = resp[1];
+        return -1;
+    }
+    if (resp[0] != pdu[0]) return fail(err, MB_ERR_INVALID, EBADMSG);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
 /* Public API                                                          */
 /* ------------------------------------------------------------------ */
 
-int mb_read_register(mb_ctx_t* ctx, int slave_id, int fc, int address, uint16_t* out) {
-    if (!ctx || !out) return -1;
-    pthread_mutex_lock(&pool_mutex);
-    if (ensure_connected(ctx) != 0) { pthread_mutex_unlock(&pool_mutex); return -1; }
-    uint8_t pdu[5] = {
-        (uint8_t)fc,
-        (address >> 8) & 0xFF, address & 0xFF,
-        0x00, 0x01
-    };
-    uint8_t resp[256]; int rlen = 0;
-    int rc = do_request(ctx, slave_id, pdu, 5, resp, &rlen);
-    pthread_mutex_unlock(&pool_mutex);
-    if (rc != 0 || rlen < 4) return -1;
-    if (resp[0] & 0x80) { errno = EIO; return -1; }  /* Modbus exception */
-    *out = ((uint16_t)resp[2] << 8) | resp[3];
+static void put16(uint8_t* p, int v) {
+    p[0] = (uint8_t)((v >> 8) & 0xFF);
+    p[1] = (uint8_t)(v & 0xFF);
+}
+
+static int get16(const uint8_t* p) {
+    return ((int)p[0] << 8) | p[1];
+}
+
+static int read_request(mb_ctx_t* ctx, int slave_id, int fc, int address, int count,
+                        int data_bytes, uint8_t* resp, mb_err_t* err) {
+    uint8_t pdu[5] = { (uint8_t)fc };
+    put16(pdu + 1, address);
+    put16(pdu + 3, count);
+    int rlen = 0;
+    if (transact(ctx, slave_id, pdu, 5, resp, &rlen, err) != 0) return -1;
+    if (rlen != 2 + data_bytes || resp[1] != data_bytes) return fail(err, MB_ERR_INVALID, EBADMSG);
     return 0;
 }
 
-int mb_read_bit(mb_ctx_t* ctx, int slave_id, int fc, int address, uint8_t* out) {
-    if (!ctx || !out) return -1;
-    pthread_mutex_lock(&pool_mutex);
-    if (ensure_connected(ctx) != 0) { pthread_mutex_unlock(&pool_mutex); return -1; }
-    uint8_t pdu[5] = {
-        (uint8_t)fc,
-        (address >> 8) & 0xFF, address & 0xFF,
-        0x00, 0x01
-    };
-    uint8_t resp[256]; int rlen = 0;
-    int rc = do_request(ctx, slave_id, pdu, 5, resp, &rlen);
-    pthread_mutex_unlock(&pool_mutex);
-    if (rc != 0 || rlen < 3) return -1;
-    if (resp[0] & 0x80) { errno = EIO; return -1; }
-    *out = resp[2] & 0x01;
+int mb_read_registers(mb_ctx_t* ctx, int slave_id, int fc, int address, int count,
+                      uint16_t* out, mb_err_t* err) {
+    memset(err, 0, sizeof(*err));
+    if (!ctx || !out || count < 1 || count > 125 || address < 0 || address + count > 65536)
+        return fail(err, MB_ERR_CONFIG, EINVAL);
+    uint8_t resp[256];
+    if (read_request(ctx, slave_id, fc, address, count, count * 2, resp, err) != 0) return -1;
+    for (int i = 0; i < count; i++) out[i] = (uint16_t)get16(resp + 2 + i * 2);
     return 0;
 }
 
-int mb_write_register(mb_ctx_t* ctx, int slave_id, int address, uint16_t value) {
-    if (!ctx) return -1;
-    pthread_mutex_lock(&pool_mutex);
-    if (ensure_connected(ctx) != 0) { pthread_mutex_unlock(&pool_mutex); return -1; }
-    uint8_t pdu[5] = {
-        0x06,
-        (address >> 8) & 0xFF, address & 0xFF,
-        (value >> 8) & 0xFF, value & 0xFF
-    };
-    uint8_t resp[256]; int rlen = 0;
-    int rc = do_request(ctx, slave_id, pdu, 5, resp, &rlen);
-    pthread_mutex_unlock(&pool_mutex);
-    return rc;
+int mb_read_bits(mb_ctx_t* ctx, int slave_id, int fc, int address, int count,
+                 uint16_t* out, mb_err_t* err) {
+    memset(err, 0, sizeof(*err));
+    if (!ctx || !out || count < 1 || count > 2000 || address < 0 || address + count > 65536)
+        return fail(err, MB_ERR_CONFIG, EINVAL);
+    uint8_t resp[256];
+    if (read_request(ctx, slave_id, fc, address, count, (count + 7) / 8, resp, err) != 0) return -1;
+    for (int i = 0; i < count; i++) out[i] = (resp[2 + i / 8] >> (i % 8)) & 1;
+    return 0;
 }
 
-int mb_write_bit(mb_ctx_t* ctx, int slave_id, int address, int value) {
-    if (!ctx) return -1;
-    pthread_mutex_lock(&pool_mutex);
-    if (ensure_connected(ctx) != 0) { pthread_mutex_unlock(&pool_mutex); return -1; }
-    uint16_t v = value ? 0xFF00 : 0x0000;
-    uint8_t pdu[5] = {
-        0x05,
-        (address >> 8) & 0xFF, address & 0xFF,
-        (v >> 8) & 0xFF, v & 0xFF
-    };
-    uint8_t resp[256]; int rlen = 0;
-    int rc = do_request(ctx, slave_id, pdu, 5, resp, &rlen);
-    pthread_mutex_unlock(&pool_mutex);
-    return rc;
+/* Write responses echo the address and the value (fc 5/6) or count (15/16). */
+static int write_request(mb_ctx_t* ctx, int slave_id, const uint8_t* pdu, int pdu_len, mb_err_t* err) {
+    uint8_t resp[256];
+    int rlen = 0;
+    if (transact(ctx, slave_id, pdu, pdu_len, resp, &rlen, err) != 0) return -1;
+    if (rlen != 5 || memcmp(resp, pdu, 5) != 0) return fail(err, MB_ERR_INVALID, EBADMSG);
+    return 0;
+}
+
+int mb_write_registers(mb_ctx_t* ctx, int slave_id, int fc, int address, int count,
+                       const uint16_t* values, mb_err_t* err) {
+    memset(err, 0, sizeof(*err));
+    if (!ctx || !values || count < 1 || address < 0 || address + count > 65536 ||
+        (fc == 0x06 && count != 1) || (fc == 0x10 && count > 123) || (fc != 0x06 && fc != 0x10))
+        return fail(err, MB_ERR_CONFIG, EINVAL);
+    uint8_t pdu[256];
+    pdu[0] = (uint8_t)fc;
+    put16(pdu + 1, address);
+    if (fc == 0x06) {
+        put16(pdu + 3, values[0]);
+        return write_request(ctx, slave_id, pdu, 5, err);
+    }
+    put16(pdu + 3, count);
+    pdu[5] = (uint8_t)(count * 2);
+    for (int i = 0; i < count; i++) put16(pdu + 6 + i * 2, values[i]);
+    return write_request(ctx, slave_id, pdu, 6 + count * 2, err);
+}
+
+int mb_write_bits(mb_ctx_t* ctx, int slave_id, int fc, int address, int count,
+                  const uint16_t* values, mb_err_t* err) {
+    memset(err, 0, sizeof(*err));
+    if (!ctx || !values || count < 1 || address < 0 || address + count > 65536 ||
+        (fc == 0x05 && count != 1) || (fc == 0x0F && count > 1968) || (fc != 0x05 && fc != 0x0F))
+        return fail(err, MB_ERR_CONFIG, EINVAL);
+    uint8_t pdu[256];
+    pdu[0] = (uint8_t)fc;
+    put16(pdu + 1, address);
+    if (fc == 0x05) {
+        put16(pdu + 3, values[0] ? 0xFF00 : 0x0000);
+        return write_request(ctx, slave_id, pdu, 5, err);
+    }
+    int nbytes = (count + 7) / 8;
+    put16(pdu + 3, count);
+    pdu[5] = (uint8_t)nbytes;
+    memset(pdu + 6, 0, nbytes);
+    for (int i = 0; i < count; i++)
+        if (values[i]) pdu[6 + i / 8] |= (uint8_t)(1 << (i % 8));
+    return write_request(ctx, slave_id, pdu, 6 + nbytes, err);
 }
 
 mb_ctx_t* modbus_pool_get(cJSON* cfg) {
@@ -471,80 +574,78 @@ typedef struct {
     mb_job_kind_t    kind;
     cJSON*           cfg;
     int              slave_id;
+    int              function;
     int              address;
-    char             reg_type[16];
-    mb_read_done_fn  done;
-    mb_read_result_t res;
+    int              count;
+    mb_read_done_fn  done;      /* reads only */
+    mb_read_result_t res;       /* status for both; data = values to write */
 } mb_job_t;
 
 static GAsyncQueue*    jobs        = NULL;
 static GThread*        worker      = NULL;
 static int             pending_writes = 0;   /* queued or running, under worker_lock */
 static pthread_mutex_t worker_lock = PTHREAD_MUTEX_INITIALIZER;
+static mb_status_fn    status_fn   = NULL;   /* main loop only */
+
+void modbus_set_status_callback(mb_status_fn fn) {
+    status_fn = fn;
+}
 
 static void job_free(mb_job_t* j) {
     if (j->cfg) cJSON_Delete(j->cfg);
     free(j);
 }
 
-static gboolean deliver_read(gpointer data) {
+/* Main loop: report the outcome, then hand a read result to its owner. */
+static gboolean deliver(gpointer data) {
     mb_job_t* j = data;
-    j->done(&j->res);
+    if (status_fn) status_fn(&j->res.status);
+    if (j->kind == JOB_READ && j->done) j->done(&j->res);
     job_free(j);
     return G_SOURCE_REMOVE;
 }
 
-static void run_read(mb_job_t* j) {
-    mb_ctx_t* ctx = modbus_pool_get(j->cfg);
-    int rc = -1;
-    errno = 0;
-    if (!ctx) {
-        errno = ENOSPC;
-    } else if (strcmp(j->reg_type, "holding") == 0 || strcmp(j->reg_type, "input") == 0) {
-        uint16_t v = 0;
-        int fc = strcmp(j->reg_type, "holding") == 0 ? 0x03 : 0x04;
-        rc = mb_read_register(ctx, j->slave_id, fc, j->address, &v);
-        if (rc == 0) j->res.value = (double)v;
-    } else if (strcmp(j->reg_type, "coil") == 0 || strcmp(j->reg_type, "discrete") == 0) {
-        uint8_t b = 0;
-        int fc = strcmp(j->reg_type, "coil") == 0 ? 0x01 : 0x02;
-        rc = mb_read_bit(ctx, j->slave_id, fc, j->address, &b);
-        if (rc == 0) j->res.value = (double)b;
-    } else {
-        errno = EINVAL;
-    }
-    j->res.ok = rc == 0;
-    if (rc != 0) {
-        j->res.err = errno ? errno : EIO;
-        if (ctx) modbus_pool_invalidate(ctx);
-    }
-}
-
-static void run_write(mb_job_t* j) {
-    cJSON* cfg = j->cfg;
-    mb_ctx_t* ctx = modbus_pool_get(cfg);
-    if (!ctx) {
-        LOG_WARN("modbus_write: no connection available");
+/* "192.168.1.50:502", "192.168.1.50:4001 (RTU)" or "/dev/ttyS1", as the user
+ * entered it, for the event log and the modbus_error trigger. */
+static void describe_cfg(cJSON* cfg, char* buf, size_t size) {
+    const char* ctype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "connection_type"));
+    if (ctype && strcmp(ctype, "rtu") == 0) {
+        const char* dev = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "device"));
+        snprintf(buf, size, "%s", (dev && dev[0]) ? dev : "/dev/ttyS1");
         return;
     }
-    cJSON* slave_j = cJSON_GetObjectItem(cfg, "slave_id");
-    int slave_id   = slave_j ? (int)slave_j->valuedouble : 1;
-    cJSON* reg_j   = cJSON_GetObjectItem(cfg, "register");
-    int reg        = reg_j ? (int)reg_j->valuedouble : 0;
-    cJSON* val_j   = cJSON_GetObjectItem(cfg, "value");
-    double val     = val_j ? val_j->valuedouble : 0.0;
-    const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "register_type"));
-    if (!rtype) rtype = "holding";
+    const char* host = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "host"));
+    cJSON* port_j = cJSON_GetObjectItem(cfg, "port");
+    int port = cJSON_IsNumber(port_j) && port_j->valuedouble > 0 ? (int)port_j->valuedouble : 502;
+    snprintf(buf, size, "%s:%d%s", (host && host[0]) ? host : "127.0.0.1", port,
+             (ctype && strcmp(ctype, "serial_gateway") == 0) ? " (RTU)" : "");
+}
 
+static void run_job(mb_job_t* j) {
+    mb_status_t* st = &j->res.status;
+    describe_cfg(j->cfg, st->device, sizeof(st->device));
+    st->slave_id = j->slave_id;
+    st->function = j->function;
+    st->address  = j->address;
+    st->count    = j->count;
+    st->write    = j->kind == JOB_WRITE;
+
+    mb_ctx_t* ctx = modbus_pool_get(j->cfg);
     int rc;
-    if (strcmp(rtype, "coil") == 0)
-        rc = mb_write_bit(ctx, slave_id, reg, (int)val ? 1 : 0);
-    else
-        rc = mb_write_register(ctx, slave_id, reg, (uint16_t)(int)val);
-    if (rc < 0) {
-        LOG_WARN("modbus_write: write failed (reg %d): %s", reg, strerror(errno));
-        modbus_pool_invalidate(ctx);
+    if (!ctx) {
+        st->err.kind = MB_ERR_CONFIG;
+        rc = -1;
+    } else if (j->function == 0x03 || j->function == 0x04) {
+        rc = mb_read_registers(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
+    } else if (j->function == 0x01 || j->function == 0x02) {
+        rc = mb_read_bits(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
+    } else if (j->function == 0x06 || j->function == 0x10) {
+        rc = mb_write_registers(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
+    } else {
+        rc = mb_write_bits(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
     }
+    st->ok = rc == 0;
+    j->res.count = rc == 0 && !st->write ? j->count : 0;
 }
 
 static gpointer worker_main(gpointer unused) {
@@ -552,18 +653,15 @@ static gpointer worker_main(gpointer unused) {
     for (;;) {
         mb_job_t* j = g_async_queue_pop(jobs);
         if (j->kind == JOB_STOP) { job_free(j); break; }
+        run_job(j);
+        cJSON_Delete(j->cfg);
+        j->cfg = NULL;
         if (j->kind == JOB_WRITE) {
-            run_write(j);
-            job_free(j);
             pthread_mutex_lock(&worker_lock);
             pending_writes--;
             pthread_mutex_unlock(&worker_lock);
-        } else {
-            run_read(j);
-            cJSON_Delete(j->cfg);
-            j->cfg = NULL;
-            g_idle_add_full(G_PRIORITY_DEFAULT, deliver_read, j, NULL);
         }
+        g_idle_add_full(G_PRIORITY_DEFAULT, deliver, j, NULL);
     }
     return NULL;
 }
@@ -589,27 +687,41 @@ static int submit(mb_job_t* j) {
 }
 
 void modbus_submit_read(cJSON* conn, int slave_id, const char* reg_type,
-                        int address, unsigned tag, mb_read_done_fn done) {
+                        int address, int count, unsigned tag, mb_read_done_fn done) {
     mb_job_t* j = calloc(1, sizeof(*j));
     if (!j) { cJSON_Delete(conn); return; }
+    if (!reg_type) reg_type = "holding";
     j->kind     = JOB_READ;
     j->cfg      = conn;
     j->slave_id = slave_id;
+    j->function = strcmp(reg_type, "input") == 0    ? 0x04
+                : strcmp(reg_type, "coil") == 0     ? 0x01
+                : strcmp(reg_type, "discrete") == 0 ? 0x02 : 0x03;
     j->address  = address;
+    j->count    = count;
     j->done     = done;
     j->res.tag  = tag;
-    snprintf(j->reg_type, sizeof(j->reg_type), "%s", reg_type ? reg_type : "holding");
     submit(j);
 }
 
-void modbus_submit_write(cJSON* action_cfg) {
+int modbus_submit_write(cJSON* conn, int slave_id, int function, int address,
+                        int count, const uint16_t* values) {
+    if (count < 1 || count > MB_READ_MAX) return -1;
     mb_job_t* j = calloc(1, sizeof(*j));
-    if (!j) return;
-    j->kind = JOB_WRITE;
-    j->cfg  = cJSON_Duplicate(action_cfg, 1);
-    if (!j->cfg) { free(j); return; }
-    if (submit(j) != 0)
+    if (!j) return -1;
+    j->kind     = JOB_WRITE;
+    j->cfg      = cJSON_Duplicate(conn, 1);
+    j->slave_id = slave_id;
+    j->function = function;
+    j->address  = address;
+    j->count    = count;
+    memcpy(j->res.data, values, (size_t)count * sizeof(uint16_t));
+    if (!j->cfg) { free(j); return -1; }
+    if (submit(j) != 0) {
         LOG_WARN("modbus_write: queue full (%d writes waiting), write dropped", MB_QUEUE_MAX);
+        return -1;
+    }
+    return 0;
 }
 
 void modbus_worker_stop(void) {

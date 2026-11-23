@@ -11,6 +11,7 @@
 #include "variables.h"
 #include "mqtt_client.h"
 #include "actions.h"
+#include "modbus_codec.h"
 #include "modbus_pool.h"
 #include "../ACAP.h"
 
@@ -48,6 +49,15 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 #define TRIG_MANUAL            8
 #define TRIG_MODBUS_READ       9
 #define TRIG_SPARKPLUG_COMMAND 10
+#define TRIG_MODBUS_ERROR      11
+
+#define VAR_TEXT_LEN 512   /* longest variable value */
+
+/* One value of a modbus_read: the single register, or a map entry. */
+typedef struct {
+    mb_field_t f;
+    char       var[64];   /* variable to store it in; "" = none */
+} MbEntry;
 
 typedef struct {
     int    type;
@@ -117,13 +127,23 @@ typedef struct {
     char   modbus_parity[4];          /* RTU: "N", "E", "O" */
     int    modbus_slave_id;           /* Modbus slave/device address (1-247) */
     char   modbus_reg_type[16];       /* "holding", "input", "coil", "discrete" */
-    int    modbus_register;           /* register address (0-65535) */
+    int    modbus_register;           /* first register of the read (0-65535) */
+    int    modbus_count;              /* registers (or bits) in the read */
     int    modbus_poll_interval;      /* seconds between polls */
     time_t modbus_last_poll;          /* timestamp of last poll */
-    double modbus_last_value;         /* no threshold: last value, to fire on change */
-    int    modbus_have_value;
+    MbEntry* modbus_map;              /* heap: values decoded from the read */
+    int    modbus_map_count;
+    int    modbus_block;              /* 1 = "map" given */
+    int    modbus_bits;               /* coils / discrete inputs */
+    int    modbus_compare;            /* map entry for the threshold and trigger.value */
+    char*  modbus_last_sig;           /* heap: no threshold: values last time, to fire on change */
     unsigned modbus_serial;           /* identifies this subscription to the worker */
     int    modbus_busy;               /* a read is queued or running */
+
+    /* modbus_error */
+    char   mberr_device[128];         /* substring of the device; "" = any */
+    int    mberr_slave;               /* 0 = any */
+    int    mberr_every;               /* 1 = every failed request, 0 = when failing starts */
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
@@ -225,6 +245,19 @@ static int event_topic_matches(Subscription* s, cJSON* event) {
     return next == '\0' || next == '/';
 }
 
+static void free_sub(Subscription* s) {
+    if (s->topic_filter) cJSON_Delete(s->topic_filter);
+    if (s->cached_data)  cJSON_Delete(s->cached_data);
+    free(s->modbus_map);
+    free(s->modbus_last_sig);
+    s->topic_filter = NULL;
+    s->cached_data = NULL;
+    s->modbus_map = NULL;
+    s->modbus_last_sig = NULL;
+}
+
+static void modbus_status(const mb_status_t* st);
+
 /*-----------------------------------------------------
  * Public API
  *-----------------------------------------------------*/
@@ -234,6 +267,7 @@ int Triggers_Init(Trigger_Fire_Fn fn) {
     sub_count = 0;
     fire_fn = fn;
     Scheduler_Init(sched_fired);
+    modbus_set_status_callback(modbus_status);
     return 1;
 }
 
@@ -241,8 +275,7 @@ void Triggers_Cleanup(void) {
     for (int i = 0; i < sub_count; i++) {
         if (subs[i].acap_subscription_id > 0)
             ACAP_EVENTS_Unsubscribe(subs[i].acap_subscription_id);
-        if (subs[i].topic_filter) cJSON_Delete(subs[i].topic_filter);
-        if (subs[i].cached_data)  cJSON_Delete(subs[i].cached_data);
+        free_sub(&subs[i]);
     }
     sub_count = 0;
     Scheduler_Cleanup();
@@ -260,8 +293,7 @@ void Triggers_Unsubscribe_Rule(const char* rule_id) {
                 ACAP_EVENTS_Unsubscribe(subs[i].acap_subscription_id);
             if (subs[i].type == TRIG_MQTT_MESSAGE && subs[i].mqtt_topic_filter[0])
                 MQTT_Unsubscribe(subs[i].mqtt_topic_filter);
-            if (subs[i].topic_filter) cJSON_Delete(subs[i].topic_filter);
-            if (subs[i].cached_data)  cJSON_Delete(subs[i].cached_data);
+            free_sub(&subs[i]);
             if (i < sub_count - 1)
                 subs[i] = subs[sub_count - 1];
             sub_count--;
@@ -269,6 +301,62 @@ void Triggers_Unsubscribe_Rule(const char* rule_id) {
             i++;
         }
     }
+}
+
+/* The values a modbus_read decodes: the "map" entries, or the single register
+ * with its data_type. Sets the span to read and creates the variables. */
+static int modbus_parse_values(Subscription* s, cJSON* trig) {
+    s->modbus_bits = strcmp(s->modbus_reg_type, "coil") == 0 || strcmp(s->modbus_reg_type, "discrete") == 0;
+    cJSON* map = cJSON_GetObjectItem(trig, "map");
+    int n = cJSON_IsArray(map) ? cJSON_GetArraySize(map) : 0;
+    s->modbus_block = n > 0;
+    s->modbus_map = calloc((size_t)(n > 0 ? n : 1), sizeof(MbEntry));
+    if (!s->modbus_map) return -1;
+    char err[160];
+    if (n > 0) {
+        const char* cmp = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "compare"));
+        cJSON* e;
+        cJSON_ArrayForEach(e, map) {
+            MbEntry* m = &s->modbus_map[s->modbus_map_count];
+            if (mb_field_parse(e, "type", "order", s->modbus_bits, &m->f, err, sizeof(err)) != 0) {
+                LOG_WARN("modbus_read: rule %s, map entry %d: %s", s->rule_id, s->modbus_map_count + 1, err);
+                return -1;
+            }
+            const char* var = cJSON_GetStringValue(cJSON_GetObjectItem(e, "var"));
+            snprintf(m->var, sizeof(m->var), "%s", var ? var : "");
+            if (cmp && cmp[0] && strcmp(cmp, m->var) == 0) s->modbus_compare = s->modbus_map_count;
+            s->modbus_map_count++;
+        }
+    } else {
+        MbEntry* m = &s->modbus_map[0];
+        if (mb_field_parse(trig, "data_type", "word_order", s->modbus_bits, &m->f, err, sizeof(err)) != 0) {
+            LOG_WARN("modbus_read: rule %s: %s", s->rule_id, err);
+            return -1;
+        }
+        const char* var = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "variable"));
+        snprintf(m->var, sizeof(m->var), "%s", var ? var : "");
+        s->modbus_map_count = 1;
+    }
+    int lo = 65536, hi = -1;
+    for (int i = 0; i < s->modbus_map_count; i++) {
+        const mb_field_t* f = &s->modbus_map[i].f;
+        if (f->reg < lo) lo = f->reg;
+        if (f->reg + f->nregs - 1 > hi) hi = f->reg + f->nregs - 1;
+        /* Modbus variables are volatile unless the user made them persistent */
+        const char* var = s->modbus_map[i].var;
+        if (var[0]) {
+            char* cur = Variables_Get(var);
+            if (cur) free(cur);
+            else Variables_Set_Options(var, 0, NULL);
+        }
+    }
+    s->modbus_register = lo;
+    s->modbus_count = hi - lo + 1;
+    if (s->modbus_count > (s->modbus_bits ? MB_MAX_READ_BITS : MB_MAX_READ_REGS)) {
+        LOG_WARN("modbus_read: rule %s: the map spans %d registers, more than one read", s->rule_id, s->modbus_count);
+        return -1;
+    }
+    return 0;
 }
 
 int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
@@ -455,8 +543,11 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             s->modbus_slave_id = slave_j ? (int)slave_j->valuedouble : 1;
             const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "register_type"));
             snprintf(s->modbus_reg_type, sizeof(s->modbus_reg_type), "%s", rtype ? rtype : "holding");
-            cJSON* reg_j = cJSON_GetObjectItem(trig, "register");
-            s->modbus_register = reg_j ? (int)reg_j->valuedouble : 0;
+            if (modbus_parse_values(s, trig) != 0) {
+                free_sub(s);
+                idx++;
+                continue;
+            }
             cJSON* poll_j = cJSON_GetObjectItem(trig, "poll_interval");
             s->modbus_poll_interval = poll_j ? (int)poll_j->valuedouble : 30;
             if (s->modbus_poll_interval < 1) s->modbus_poll_interval = 1;
@@ -470,6 +561,15 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             s->modbus_last_poll = 0; /* force immediate first poll */
             s->modbus_serial = ++modbus_serial_next;
             /* No VAPIX subscription — polled via Triggers_Tick */
+
+        } else if (strcmp(type, "modbus_error") == 0) {
+            s->type = TRIG_MODBUS_ERROR;
+            const char* dev = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "device"));
+            snprintf(s->mberr_device, sizeof(s->mberr_device), "%s", dev ? dev : "");
+            cJSON* slave_j = cJSON_GetObjectItem(trig, "slave_id");
+            s->mberr_slave = cJSON_IsNumber(slave_j) ? (int)slave_j->valuedouble : 0;
+            const char* fire_on = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "fire_on"));
+            s->mberr_every = fire_on && strcmp(fire_on, "every") == 0;
 
         } else {
             LOG_WARN("unknown trigger type '%s' for rule %s", type, rule_id);
@@ -750,7 +850,8 @@ void Triggers_On_Sparkplug_Command(const char* metric, const char* value) {
 }
 
 /* Main loop: result of a Modbus read queued by Triggers_Tick. Results for
- * subscriptions removed or replaced in the meantime are dropped. */
+ * subscriptions removed or replaced in the meantime are dropped. Failures are
+ * logged by modbus_status(). */
 static void modbus_read_done(const mb_read_result_t* r) {
     Subscription* s = NULL;
     for (int i = 0; i < sub_count; i++) {
@@ -758,35 +859,170 @@ static void modbus_read_done(const mb_read_result_t* r) {
     }
     if (!s) return;
     s->modbus_busy = 0;
-    if (!r->ok) {
-        LOG_WARN("modbus_read: read error for rule %s (reg %d): %s",
-                 s->rule_id, s->modbus_register, strerror(r->err));
-        return;
-    }
-    double value = r->value;
+    if (!r->status.ok || r->count != s->modbus_count) return;
 
+    /* Decode every value, store the variables, and collect the values for
+     * the trigger data and the change check. */
+    cJSON* values = cJSON_CreateObject();
+    cJSON* sig = cJSON_CreateArray();
+    double cmp_num = 0;
+    cJSON* cmp_item = NULL;
+    char text[VAR_TEXT_LEN];
+    for (int i = 0; i < s->modbus_map_count; i++) {
+        const MbEntry* m = &s->modbus_map[i];
+        const mb_field_t* f = &m->f;
+        const uint16_t* regs = r->data + (f->reg - s->modbus_register);
+        cJSON* item;
+        if (!s->modbus_bits && f->type == MB_T_STRING) {
+            mb_decode_string(regs, f->nregs, f->order, text, sizeof(text));
+            item = cJSON_CreateString(text);
+        } else {
+            double v = s->modbus_bits ? (double)(regs[0] ? 1 : 0)
+                     : mb_scale(mb_decode_number(regs, f->type, f->order), f->scale, f->offset, f->decimals);
+            mb_format_number(v, s->modbus_bits ? -1 : f->decimals, text, sizeof(text));
+            item = cJSON_CreateNumber(v);
+            if (i == s->modbus_compare) cmp_num = v;
+        }
+        if (m->var[0]) Variables_Set(m->var, text);
+        if (i == s->modbus_compare) cmp_item = cJSON_Duplicate(item, 1);
+        cJSON_AddItemToArray(sig, cJSON_Duplicate(item, 1));
+        if (m->var[0] && !cJSON_GetObjectItem(values, m->var))
+            cJSON_AddItemToObject(values, m->var, item);
+        else
+            cJSON_Delete(item);
+    }
+
+    int fire = 0;
     if (!s->value_op[0]) {
         /* No threshold: fire on the first read, then on every change */
-        if (s->modbus_have_value && value == s->modbus_last_value) return;
-        s->modbus_have_value = 1;
-        s->modbus_last_value = value;
-    } else {
-        if (!value_passes(value, s->value_op, s->value_threshold, s->value_threshold2)) {
-            if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
-            s->value_hysteresis = 0;
-            return;
+        char* now = cJSON_PrintUnformatted(sig);
+        if (now && (!s->modbus_last_sig || strcmp(now, s->modbus_last_sig) != 0)) {
+            free(s->modbus_last_sig);
+            s->modbus_last_sig = now;
+            fire = 1;
+        } else {
+            free(now);
         }
-        if (s->value_hysteresis) return; /* already fired; wait for condition to clear */
-        s->value_hysteresis = 1;
+    } else if (!value_passes(cmp_num, s->value_op, s->value_threshold, s->value_threshold2)) {
+        if (s->value_hysteresis) Actions_Stop_Active_Siren(s->rule_id);
+        s->value_hysteresis = 0;
+    } else if (!s->value_hysteresis) {
+        s->value_hysteresis = 1; /* fire once; wait for the condition to clear */
+        fire = 1;
     }
-    cJSON* tdata = cJSON_CreateObject();
-    cJSON_AddStringToObject(tdata, "type",          "modbus_read");
-    cJSON_AddNumberToObject(tdata,  "value",         value);
-    cJSON_AddNumberToObject(tdata,  "register",      s->modbus_register);
-    cJSON_AddStringToObject(tdata, "register_type",  s->modbus_reg_type);
-    cJSON_AddNumberToObject(tdata,  "slave_id",      s->modbus_slave_id);
-    fire_fn(s->rule_id, s->trigger_index, tdata);
-    cJSON_Delete(tdata);
+    cJSON_Delete(sig);
+
+    if (fire) {
+        const mb_field_t* cf = &s->modbus_map[s->modbus_compare].f;
+        cJSON* tdata = cJSON_CreateObject();
+        cJSON_AddStringToObject(tdata, "type",          "modbus_read");
+        cJSON_AddItemToObject(tdata,    "value",         cmp_item ? cmp_item : cJSON_CreateNull());
+        cmp_item = NULL;
+        cJSON_AddNumberToObject(tdata,  "register",      cf->reg);
+        cJSON_AddStringToObject(tdata, "register_type",  s->modbus_reg_type);
+        cJSON_AddNumberToObject(tdata,  "slave_id",      s->modbus_slave_id);
+        if (!s->modbus_bits) cJSON_AddStringToObject(tdata, "data_type", mb_type_name(cf->type));
+        /* Map values as trigger.<var>; names that clash with the fields above
+         * are only in trigger.values */
+        cJSON* v;
+        cJSON_ArrayForEach(v, values) {
+            if (!cJSON_GetObjectItem(tdata, v->string))
+                cJSON_AddItemToObject(tdata, v->string, cJSON_Duplicate(v, 1));
+        }
+        cJSON_AddItemToObject(tdata, "values", values);
+        values = NULL;
+        fire_fn(s->rule_id, s->trigger_index, tdata);
+        cJSON_Delete(tdata);
+    }
+    cJSON_Delete(cmp_item);
+    cJSON_Delete(values);
+}
+
+/* Last outcome per device and slave, for the modbus_error trigger. */
+#define MB_DEV_MAX 64
+typedef struct {
+    char   device[160];
+    int    slave_id;
+    int    failing;
+    int    fail_count;
+    time_t used;
+} MbDevState;
+static MbDevState mb_dev[MB_DEV_MAX];
+
+static MbDevState* mb_dev_state(const char* device, int slave_id) {
+    MbDevState* free_slot = NULL;
+    MbDevState* oldest = NULL;
+    for (int i = 0; i < MB_DEV_MAX; i++) {
+        MbDevState* d = &mb_dev[i];
+        if (!d->device[0]) { if (!free_slot) free_slot = d; continue; }
+        if (d->slave_id == slave_id && strcmp(d->device, device) == 0) return d;
+        if (!d->failing && (!oldest || d->used < oldest->used)) oldest = d;
+    }
+    MbDevState* d = free_slot ? free_slot : oldest;
+    if (!d) return NULL;
+    memset(d, 0, sizeof(*d));
+    snprintf(d->device, sizeof(d->device), "%s", device);
+    d->slave_id = slave_id;
+    return d;
+}
+
+static void fire_modbus_error(const mb_status_t* st, int recovered, int started,
+                              int fail_count, const char* msg) {
+    if (!fire_fn) return;
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->type != TRIG_MODBUS_ERROR) continue;
+        if (s->mberr_device[0] && !strstr(st->device, s->mberr_device)) continue;
+        if (s->mberr_slave && s->mberr_slave != st->slave_id) continue;
+        if (!recovered && !started && !s->mberr_every) continue;
+        cJSON* tdata = cJSON_CreateObject();
+        cJSON_AddStringToObject(tdata, "type",       "modbus_error");
+        cJSON_AddStringToObject(tdata, "state",      recovered ? "recovered" : "failing");
+        cJSON_AddStringToObject(tdata, "device",     st->device);
+        cJSON_AddNumberToObject(tdata, "slave_id",   st->slave_id);
+        cJSON_AddNumberToObject(tdata, "register",   st->address);
+        cJSON_AddNumberToObject(tdata, "function",   st->function);
+        cJSON_AddStringToObject(tdata, "operation",  st->write ? "write" : "read");
+        cJSON_AddStringToObject(tdata, "error",      recovered ? "" : mb_err_kind_name(st->err.kind));
+        cJSON_AddNumberToObject(tdata, "exception_code",
+                                !recovered && st->err.kind == MB_ERR_EXCEPTION ? st->err.exception : 0);
+        cJSON_AddStringToObject(tdata, "exception_name",
+                                !recovered && st->err.kind == MB_ERR_EXCEPTION ? mb_exception_name(st->err.exception) : "");
+        cJSON_AddStringToObject(tdata, "message",    msg);
+        cJSON_AddNumberToObject(tdata, "fail_count", fail_count);
+        fire_fn(s->rule_id, s->trigger_index, tdata);
+        cJSON_Delete(tdata);
+    }
+}
+
+/* Main loop: outcome of every Modbus request, read or write. */
+static void modbus_status(const mb_status_t* st) {
+    MbDevState* d = mb_dev_state(st->device, st->slave_id);
+    MbDevState scratch;
+    if (!d) {
+        memset(&scratch, 0, sizeof(scratch));
+        d = &scratch;
+    }
+    d->used = time(NULL);
+    if (!st->ok) {
+        char msg[200];
+        mb_err_describe(&st->err, msg, sizeof(msg));
+        int started = !d->failing;
+        d->failing = 1;
+        d->fail_count++;
+        LOG_WARN("Modbus %s %s slave %d, function %d, register %d: %s",
+                 st->write ? "write to" : "read from", st->device, st->slave_id,
+                 st->function, st->address, msg);
+        fire_modbus_error(st, 0, started, d->fail_count, msg);
+    } else if (d->failing) {
+        char msg[200];
+        snprintf(msg, sizeof(msg), "recovered after %d failed request%s",
+                 d->fail_count, d->fail_count == 1 ? "" : "s");
+        EventLog_System("modbus", "info", "%s slave %d %s", st->device, st->slave_id, msg);
+        fire_modbus_error(st, 1, 0, d->fail_count, msg);
+        d->failing = 0;
+        d->fail_count = 0;
+    }
 }
 
 void Triggers_Tick(void) {
@@ -849,7 +1085,7 @@ void Triggers_Tick(void) {
         cJSON_AddStringToObject(cfg, "parity",          s->modbus_parity);
         s->modbus_busy = 1;
         modbus_submit_read(cfg, s->modbus_slave_id, s->modbus_reg_type, s->modbus_register,
-                           s->modbus_serial, modbus_read_done);
+                           s->modbus_count, s->modbus_serial, modbus_read_done);
     }
 }
 
@@ -981,7 +1217,8 @@ int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index) 
             active = Counter_Compare(s->counter_name, s->counter_op, s->counter_threshold);
         } else {
             /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual,
-             * modbus_read, sparkplug_command) count only as the firing trigger. */
+             * modbus_read, modbus_error, sparkplug_command) count only as the
+             * firing trigger. */
             active = 0;
         }
 
@@ -1051,7 +1288,13 @@ cJSON* Triggers_Catalog(void) {
     t = cJSON_CreateObject();
     cJSON_AddStringToObject(t, "type", "modbus_read");
     cJSON_AddStringToObject(t, "label", "Modbus Read");
-    cJSON_AddStringToObject(t, "description", "Polls a Modbus register (TCP or RTU/RS-485) and fires when the value crosses a threshold");
+    cJSON_AddStringToObject(t, "description", "Polls Modbus registers (TCP or RTU/RS-485), decodes typed values into variables, and fires on a change or a threshold");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "modbus_error");
+    cJSON_AddStringToObject(t, "label", "Modbus Error");
+    cJSON_AddStringToObject(t, "description", "Fires when Modbus requests to a device start failing (timeout, exception, CRC) and when it recovers");
     cJSON_AddItemToArray(arr, t);
 
     t = cJSON_CreateObject();

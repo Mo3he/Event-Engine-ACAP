@@ -345,6 +345,8 @@
       <a href="#trig-counter" class="sub">Counter Threshold</a>
       <a href="#trig-chain" class="sub">Rule Chain</a>
       <a href="#trig-aoa" class="sub">AOA Scenario</a>
+      <a href="#trig-modbus-read" class="sub">Modbus Read</a>
+      <a href="#trig-modbus-error" class="sub">Modbus Error</a>
       <a href="#trig-sparkplug" class="sub">Sparkplug Command</a>
 
       <div class="sidebar-group-label">Conditions</div>
@@ -397,6 +399,7 @@
       <a href="#act-acap" class="sub">ACAP Control</a>
       <a href="#act-influx" class="sub">InfluxDB Write</a>
       <a href="#act-aoa-counts" class="sub">AOA Get Counts</a>
+      <a href="#act-modbus-write" class="sub">Modbus Write</a>
 
       <div class="sidebar-group-label">Advanced</div>
       <a href="#remote-device">Remote Device Actions</a>
@@ -570,6 +573,24 @@ Content-Type: application/json
         <tr><td><strong>Object class filter</strong></td><td>Optionally limit to a specific class: Human, Car, Truck, Bus, Bike, Other Vehicle, or Any.</td></tr>
       </table>
       <p>Variables injected: <span class="var">{{trigger.scenario_id}}</span>, <span class="var">{{trigger.active}}</span>, <span class="var">{{trigger.reason}}</span> (detected object class, e.g. <code>Human</code>).</p>
+
+      <h3 id="trig-modbus-read">Modbus Read</h3>
+      <p>Poll a Modbus device over TCP, a serial gateway, or direct RTU/RS-485. Select holding registers, input registers, coils, or discrete inputs. A read can decode one value or a register map; map values are updated as variables and are available to later actions.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Connection</strong></td><td>TCP connects to the device host and port. Serial Gateway uses the camera's configured PortManager service. RTU direct selects a serial device, baud rate and parity.</td></tr>
+        <tr><td><strong>Read</strong></td><td><em>One value</em> reads a single value; <em>Block of values</em> reads a register map in one request. A map spans at most 125 registers or 2000 bits.</td></tr>
+        <tr><td><strong>Data type</strong></td><td>Registers support unsigned/signed 16-, 32- and 64-bit integers, 32- and 64-bit floats, and ASCII strings (two characters per register). Bit reads return 0 or 1.</td></tr>
+        <tr><td><strong>Word order</strong></td><td><code>ABCD</code>, <code>CDAB</code>, <code>BADC</code>, or <code>DCBA</code> for multi-register values.</td></tr>
+        <tr><td><strong>Scale / offset</strong></td><td>Numeric values are reported as <code>raw × scale + offset</code>. Optional decimal rounding is applied after scaling.</td></tr>
+        <tr><td><strong>Store in variable</strong></td><td>Optional for a single value. Every map row has its own variable; variables are volatile unless made persistent separately.</td></tr>
+        <tr><td><strong>Compare / threshold</strong></td><td>For a map, select which variable to compare. Threshold operators are <code>gt</code>, <code>gte</code>, <code>lt</code>, <code>lte</code>, <code>eq</code>, and <code>between</code>. Thresholds fire on a false-to-true edge. Without a threshold, the rule fires on the first successful read and whenever any value changes.</td></tr>
+      </table>
+      <p>Values are available as <span class="var">{{trigger.value}}</span> and <span class="var">{{trigger.NAME}}</span> for each mapped variable; the complete map is under <span class="var">{{trigger.values}}</span>. Built-in fields include <span class="var">{{trigger.register}}</span>, <span class="var">{{trigger.register_type}}</span>, <span class="var">{{trigger.slave_id}}</span>, and <span class="var">{{trigger.data_type}}</span> for register values.</p>
+
+      <h3 id="trig-modbus-error">Modbus Error</h3>
+      <p>Monitor failed Modbus reads and writes. By default the trigger fires when a device starts failing and again when it recovers. Choose <em>Every failed request</em> to fire for each failure. Optionally filter by part of the device address/name and by slave ID.</p>
+      <p>Trigger data includes <span class="var">{{trigger.state}}</span> (<code>failing</code> or <code>recovered</code>), <span class="var">{{trigger.device}}</span>, <span class="var">{{trigger.slave_id}}</span>, <span class="var">{{trigger.operation}}</span>, <span class="var">{{trigger.error}}</span>, <span class="var">{{trigger.message}}</span>, and <span class="var">{{trigger.fail_count}}</span>. Modbus exception details are available as <span class="var">{{trigger.exception_code}}</span> and <span class="var">{{trigger.exception_name}}</span>.</p>
 
       <h3 id="trig-sparkplug">Sparkplug Command</h3>
       <p>Fires when a <strong>Sparkplug B</strong> host writes a metric to this device via <code>NCMD</code> or <code>DCMD</code>. This is how a SCADA system commands the device rather than just reading from it. Requires Sparkplug B to be enabled in Settings.</p>
@@ -1069,6 +1090,10 @@ Content-Type: application/json
         <tr><td><span class="var">{{aoa_timestamp}}</span></td><td>Timestamp of latest count</td></tr>
       </table>
       <p>Enable <strong>Reset after fetch</strong> to zero the counters after reading them.</p>
+
+      <h3 id="act-modbus-write">Modbus Write</h3>
+      <p>Write one typed value or several values to holding registers or coils over TCP, serial gateway, or direct RTU/RS-485. The automatic function uses FC06/FC05 for one value and FC16/FC15 for several. Adjacent entries are batched; gaps start another request. Coils accept <code>0</code>, <code>1</code>, <code>true</code>, <code>false</code>, <code>on</code>, or <code>off</code>.</p>
+      <p>Register types include signed/unsigned 16-, 32- and 64-bit integers, 32-/64-bit floats, and ASCII strings (two characters per register). Set byte/word order for multi-register values. Scale and offset convert the requested value to raw form using <code>(value - offset) / scale</code>. Values can contain templates such as <code>{{trigger.temperature}}</code>. Each request supports at most 123 registers or 1968 coils.</p>
 
       <!-- ═══════════════════════════════════════════ REMOTE DEVICE -->
       <hr class="section-rule">

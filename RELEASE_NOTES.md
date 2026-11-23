@@ -1,5 +1,51 @@
 # Release Notes
 
+## v1.9.30 - Modbus data types, maps, and error triggers
+
+Modbus reads and writes now support typed values, register maps, block
+operations, and error/recovery triggers. The rule editor preserves Modbus
+settings, and the Rules, Settings and Event Log layouts have been improved.
+
+### Upgrading to 1.9.30
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.9.30
+
+- **Modbus typed reads and writes:** read single values or register maps using
+  signed/unsigned integers, floats, strings, byte/word order, scaling and
+  offset. Map entries can be edited in a table and stored in variables.
+  Strings use ASCII, two bytes per register, with NUL padding on writes.
+- **Modbus block writes:** write multiple registers or coils with FC16/FC15;
+  adjacent values are batched into requests. FC16 can also be selected for a
+  single register.
+- **Modbus Error trigger:** fire when a device starts failing requests and
+  when it recovers, or on every failed request, with details including the
+  exception code and failure count.
+- **Roomier layouts:** Rules and Settings are wider, Event Log uses the
+  available width, and Settings puts common options first.
+
+### Fixes in 1.9.30
+
+- **Modbus settings are preserved when editing a rule.** The rule editor was
+  dropping Modbus-specific fields when saving. The editor also now fits dense
+  trigger, condition and action forms without horizontal overflow.
+- **Modbus writes are validated before encoding.** Oversized strings and
+  incompatible functions are rejected; invalid values and writes that cannot
+  be queued report an action error.
+- **Negative `uint16` writes remain compatible.** Values from -32768 to -1
+  are written as two's complement, as in 1.9.29.
+
+Positive fractional integer writes now round to the nearest integer instead of
+truncating, so check existing rules that write fractional values. Integer
+values above 2^53 may lose precision because numeric values use doubles.
+
+Verified on a P3288-LV (AXIS OS 12.11.77) with a Modbus test server: typed and
+scaled reads, register maps, block writes, error and recovery events, and editor
+save/reload. The signed 1.9.30 package was installed and checked on the camera;
+oversized string writes were rejected and the app remained running.
+
 ## v1.9.29 - ALPV block list alert template
 
 A new ready-made use case from
