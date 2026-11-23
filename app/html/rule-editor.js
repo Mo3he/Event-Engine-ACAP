@@ -192,6 +192,7 @@ const TRIGGER_GROUPS = [
   ]},
   { label: 'Modbus', types: [
     { value: 'modbus_read',       label: 'Modbus Read' },
+    { value: 'modbus_error',      label: 'Modbus Error' },
   ]},
 ];
 
@@ -565,47 +566,12 @@ function triggerFields(t, rowIdx) {
       </div>
     </div>`;
   if (type === 'modbus_read') {
-    const ctype = t.connection_type || 'tcp';
+    const rtype = t.register_type || 'holding';
+    const bits = mbIsBits(rtype);
+    const mapRows = mbRowsFrom(t, 'map');
+    const mode = t.read_mode || (mapRows.length ? 'map' : 'single');
     return `
-    <div class="form-row">
-      <div class="form-group">
-        <label>Connection Type</label>
-        <select data-k="connection_type" onchange="rerenderTrigger(this)">
-          <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
-          <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
-          ${ctype==='rtu'?'<option value="rtu" selected>RTU direct (advanced)</option>':''}
-        </select>
-      </div>
-      ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
-      <div class="form-group">
-        <label>Host</label>
-        <input type="text" data-k="host" value="${escHtml(t.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
-        ${ctype==='serial_gateway'?'<div class="form-hint">Use host 127.0.0.1 and port 4001. Configure RS-485 first via the Settings tab.</div>':''}
-      </div>
-      <div class="form-group">
-        <label>Port</label>
-        <input type="number" data-k="port" value="${escHtml(t.port||(ctype==='serial_gateway'?4001:502))}" min="1" max="65535">
-      </div>` : ''}
-    </div>
-    ${ctype === 'rtu' ? `
-    <div class="form-row">
-      <div class="form-group">
-        <label>Device</label>
-        <input type="text" data-k="device" value="${escHtml(t.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
-      </div>
-      <div class="form-group">
-        <label>Baud Rate</label>
-        <input type="number" data-k="baud" value="${escHtml(t.baud||9600)}" min="1200">
-      </div>
-      <div class="form-group">
-        <label>Parity</label>
-        <select data-k="parity">
-          <option value="N" ${(!t.parity||t.parity==='N')?'selected':''}>None</option>
-          <option value="E" ${t.parity==='E'?'selected':''}>Even</option>
-          <option value="O" ${t.parity==='O'?'selected':''}>Odd</option>
-        </select>
-      </div>
-    </div>` : ''}
+    ${mbConnFields(t, 'rerenderTrigger(this)')}
     <div class="form-row">
       <div class="form-group">
         <label>Slave ID</label>
@@ -614,23 +580,47 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Register Type</label>
-        <select data-k="register_type">
-          <option value="holding"  ${(!t.register_type||t.register_type==='holding') ?'selected':''}>Holding Register</option>
-          <option value="input"    ${t.register_type==='input'   ?'selected':''}>Input Register</option>
-          <option value="coil"     ${t.register_type==='coil'    ?'selected':''}>Coil</option>
-          <option value="discrete" ${t.register_type==='discrete'?'selected':''}>Discrete Input</option>
+        <select data-k="register_type" onchange="rerenderTrigger(this)">
+          <option value="holding"  ${rtype==='holding' ?'selected':''}>Holding Register</option>
+          <option value="input"    ${rtype==='input'   ?'selected':''}>Input Register</option>
+          <option value="coil"     ${rtype==='coil'    ?'selected':''}>Coil</option>
+          <option value="discrete" ${rtype==='discrete'?'selected':''}>Discrete Input</option>
         </select>
       </div>
       <div class="form-group">
-        <label>Register Address</label>
-        <input type="number" data-k="register" value="${escHtml(t.register||0)}" min="0" max="65535">
-        <div class="form-hint">0-based register address</div>
+        <label>Read</label>
+        <select data-k="read_mode" onchange="rerenderTrigger(this)">
+          <option value="single" ${mode==='single'?'selected':''}>One value</option>
+          <option value="map"    ${mode==='map'   ?'selected':''}>Block of values (register map)</option>
+        </select>
       </div>
       <div class="form-group">
         <label>Poll Interval (s)</label>
         <input type="number" data-k="poll_interval" value="${escHtml(t.poll_interval||30)}" min="1">
       </div>
     </div>
+    ${mode === 'map' ? `
+    ${mbTable('map', mapRows, bits)}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Compare <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="compare" value="${escHtml(t.compare||'')}" placeholder="first variable in the map">
+        <div class="form-hint">Variable used for the threshold and <code>{{trigger.value}}</code>. Without a threshold the rule fires when any value changes.</div>
+      </div>
+    </div>` : `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Register Address</label>
+        <input type="number" data-k="register" value="${escHtml(t.register||0)}" min="0" max="65535">
+        <div class="form-hint">0-based register address</div>
+      </div>
+      <div class="form-group">
+        <label>Store in Variable <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="variable" value="${escHtml(t.variable||'')}" placeholder="e.g. tank_level">
+        <div class="form-hint">Every poll updates <code>{{var.NAME}}</code>.</div>
+      </div>
+    </div>
+    ${bits ? '' : mbTypeFields(t, 'data_type', 'word_order', 'rerenderTrigger(this)', true)}`}
     <div class="form-row">
       <div class="form-group">
         <label>Threshold Operator</label>
@@ -643,16 +633,335 @@ function triggerFields(t, rowIdx) {
           <option value="eq"     ${t.op==='eq'     ?'selected':''}>Equal</option>
           <option value="between"${t.op==='between'?'selected':''}>Between</option>
         </select>
+        <div class="form-hint">Compares the scaled value. Text values fire on any change.</div>
       </div>
       <div class="form-group">
         <label>Threshold</label>
-        <input type="number" data-k="threshold" value="${escHtml(t.threshold!==undefined?t.threshold:'')}" placeholder="0">
+        <input type="number" data-k="threshold" value="${escHtml(t.threshold!==undefined?t.threshold:'')}" placeholder="0" step="any">
       </div>
       <div class="form-group">
         <label>Threshold 2 <span style="font-weight:normal;opacity:.7">(between only)</span></label>
-        <input type="number" data-k="threshold2" value="${escHtml(t.threshold2!==undefined?t.threshold2:'')}" placeholder="100">
+        <input type="number" data-k="threshold2" value="${escHtml(t.threshold2!==undefined?t.threshold2:'')}" placeholder="100" step="any">
       </div>
     </div>`;
+  }
+  if (type === 'modbus_error') {
+    const fireOn = t.fire_on || 'change';
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="device" value="${escHtml(t.device||'')}" placeholder="any device, or e.g. 192.168.1.200">
+        <div class="form-hint">Matches part of the device: <code>host:port</code>, or the serial device path. Empty = any.</div>
+      </div>
+      <div class="form-group">
+        <label>Slave ID <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="number" data-k="slave_id" value="${escHtml(t.slave_id||'')}" min="0" max="247" placeholder="any">
+      </div>
+      <div class="form-group">
+        <label>Fire</label>
+        <select data-k="fire_on">
+          <option value="change" ${fireOn==='change'?'selected':''}>When it starts failing, and on recovery</option>
+          <option value="every"  ${fireOn==='every' ?'selected':''}>On every failed request, and on recovery</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-hint">Covers the reads and writes of all Modbus rules: timeouts, refused connections, CRC errors and exceptions such as <em>02 Illegal Data Address</em>. <code>{{trigger.state}}</code> is <code>failing</code> or <code>recovered</code>.</div>`;
+  }
+  return '';
+}
+
+/* ===== Modbus helpers ===== */
+const MB_TYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32', 'uint64', 'int64', 'float64', 'string'];
+const MB_ORDERS = [
+  ['ABCD', 'ABCD (big-endian)'], ['CDAB', 'CDAB (word swap)'],
+  ['BADC', 'BADC (byte swap)'], ['DCBA', 'DCBA (little-endian)'],
+];
+const MB_TYPE_REGS = { uint16: 1, int16: 1, uint32: 2, int32: 2, float32: 2, uint64: 4, int64: 4, float64: 4 };
+
+function mbIsBits(rtype) { return rtype === 'coil' || rtype === 'discrete'; }
+
+function mbRegs(type, length) {
+  return type === 'string' ? (parseInt(length) || 8) : (MB_TYPE_REGS[type] || 1);
+}
+
+/* Rows of a map / values table: from the hidden JSON input after a re-render,
+ * or the array of a saved rule. */
+function mbRowsFrom(o, key) {
+  const j = o[key + '_json'];
+  if (typeof j === 'string' && j) {
+    try { const v = JSON.parse(j); if (Array.isArray(v)) return v; } catch (_) {}
+  }
+  return Array.isArray(o[key]) ? o[key] : [];
+}
+
+function mbConnFields(o, rerender) {
+  const ctype = o.connection_type || 'tcp';
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Connection Type</label>
+        <select data-k="connection_type" onchange="${rerender}">
+          <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
+          <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
+          ${ctype==='rtu'?'<option value="rtu" selected>RTU direct (advanced)</option>':''}
+        </select>
+      </div>
+      ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
+      <div class="form-group">
+        <label>Host</label>
+        <input type="text" data-k="host" value="${escHtml(o.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
+        ${ctype==='serial_gateway'?'<div class="form-hint">Use host 127.0.0.1 and port 4001. Configure RS-485 first via the Settings tab.</div>':''}
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" data-k="port" value="${escHtml(o.port||(ctype==='serial_gateway'?4001:502))}" min="1" max="65535">
+      </div>` : ''}
+    </div>
+    ${ctype === 'rtu' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device</label>
+        <input type="text" data-k="device" value="${escHtml(o.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
+      </div>
+      <div class="form-group">
+        <label>Baud Rate</label>
+        <input type="number" data-k="baud" value="${escHtml(o.baud||9600)}" min="1200">
+      </div>
+      <div class="form-group">
+        <label>Parity</label>
+        <select data-k="parity">
+          <option value="N" ${(!o.parity||o.parity==='N')?'selected':''}>None</option>
+          <option value="E" ${o.parity==='E'?'selected':''}>Even</option>
+          <option value="O" ${o.parity==='O'?'selected':''}>Odd</option>
+        </select>
+      </div>
+    </div>` : ''}`;
+}
+
+function mbTypeOptions(sel) {
+  return MB_TYPES.map(v => `<option value="${v}" ${(sel||'uint16')===v?'selected':''}>${v}</option>`).join('');
+}
+function mbOrderOptions(sel) {
+  return MB_ORDERS.map(([v, l]) => `<option value="${v}" ${(sel||'ABCD')===v?'selected':''}>${l}</option>`).join('');
+}
+
+/* Data type, word order, scaling and string length of a single value. */
+function mbTypeFields(o, typeKey, orderKey, rerender, withDecimals) {
+  const type = o[typeKey] || 'uint16';
+  const num = (k, def, ph, hint) => `
+      <div class="form-group">
+        <label>${k[0].toUpperCase() + k.slice(1)}</label>
+        <input type="number" data-k="${k}" value="${escHtml(o[k]!==undefined?o[k]:def)}" placeholder="${ph}" step="any">
+        ${hint ? `<div class="form-hint">${hint}</div>` : ''}
+      </div>`;
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Data Type</label>
+        <select data-k="${typeKey}" onchange="${rerender}">${mbTypeOptions(type)}</select>
+        <div class="form-hint">${type === 'string' ? 'ASCII text, 2 characters per register' : `${mbRegs(type)} register${mbRegs(type) > 1 ? 's' : ''}`}</div>
+      </div>
+      <div class="form-group">
+        <label>Word Order</label>
+        <select data-k="${orderKey}">${mbOrderOptions(o[orderKey])}</select>
+        <div class="form-hint">Byte order of the value as the device sends it; A = most significant.</div>
+      </div>
+      ${type === 'string' ? num('length', 8, '8', 'Registers') : `
+      ${num('scale', '', '1', 'value = raw × scale + offset')}
+      ${num('offset', '', '0', '')}
+      ${withDecimals ? num('decimals', '', 'auto', 'Rounding') : ''}`}
+    </div>`;
+}
+
+/* Editable table of map entries (modbus_read) or values (modbus_write). The
+ * rows are kept as JSON in a hidden data-k input so they survive re-renders. */
+const MB_COLS = {
+  register: { label: 'Register', w: 80,  input: 'number' },
+  var:      { label: 'Variable', w: 130, input: 'text', ph: 'name' },
+  value:    { label: 'Value',    w: 140, input: 'text', ph: '0 or {{trigger.value}}' },
+  type:     { label: 'Type',     w: 90 },
+  order:    { label: 'Order',    w: 80 },
+  scale:    { label: 'Scale',    w: 70,  input: 'number', ph: '1' },
+  offset:   { label: 'Offset',   w: 70,  input: 'number', ph: '0' },
+  decimals: { label: 'Decimals', w: 70,  input: 'number', ph: 'auto' },
+  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8' },
+};
+
+function mbTableCols(kind, bits) {
+  if (kind === 'map') return bits ? ['register', 'var'] : ['register', 'var', 'type', 'order', 'scale', 'offset', 'decimals', 'length'];
+  return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length'];
+}
+
+function mbTableRow(kind, r, bits) {
+  const cells = mbTableCols(kind, bits).map(c => {
+    const def = MB_COLS[c];
+    const v = r[c] !== undefined ? r[c] : '';
+    let ctl;
+    if (c === 'type') ctl = `<select data-mk="type" onchange="mbTableSync(this)">${mbTypeOptions(v)}</select>`;
+    else if (c === 'order') ctl = `<select data-mk="order" onchange="mbTableSync(this)">${MB_ORDERS.map(([o]) => `<option ${(v||'ABCD')===o?'selected':''}>${o}</option>`).join('')}</select>`;
+    else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${escHtml(def.ph || '')}" ${def.input === 'number' ? 'step="any"' : ''}
+                 ${c === 'length' && (r.type || 'uint16') !== 'string' ? 'disabled' : ''} oninput="mbTableSync(this)">`;
+    return `<td>${ctl}</td>`;
+  }).join('');
+  return `<tr class="mb-row">${cells}<td><button type="button" class="tca-remove" onclick="mbTableRemove(this)" title="Remove">&times;</button></td></tr>`;
+}
+
+function mbTable(kind, rows, bits) {
+  const cols = mbTableCols(kind, bits);
+  const head = cols.map(c => `<th style="min-width:${MB_COLS[c].w}px;text-align:left;font-weight:500;padding:2px 4px;">${MB_COLS[c].label}</th>`).join('');
+  const hint = kind === 'map'
+    ? `Read in one request (up to ${bits ? '2000 bits' : '125 registers'} from the lowest to the highest address). Each value is stored in its variable and is <code>{{trigger.NAME}}</code> in actions.`
+    : `Adjacent registers are written in one request (${bits ? 'FC15' : 'FC16'}); a gap starts a new one. Values can use placeholders.`;
+  return `
+    <div class="form-group mb-wrap" data-kind="${kind}" data-bits="${bits ? 1 : 0}">
+      <label>${kind === 'map' ? 'Register Map' : 'Values'}</label>
+      <div style="overflow-x:auto;">
+        <table class="mb-table" style="border-collapse:collapse;font-size:12px;">
+          <thead><tr>${head}<th></th></tr></thead>
+          <tbody>${rows.map(r => mbTableRow(kind, r, bits)).join('')}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="mbTableAdd(this)" style="margin-top:4px;">+ Add ${kind === 'map' ? 'value' : 'register'}</button>
+      <input type="hidden" data-k="${kind}_json" value="${escHtml(JSON.stringify(rows))}">
+      <div class="form-hint">${hint}</div>
+    </div>`;
+}
+
+function mbTableSync(el) {
+  const wrap = el.closest('.mb-wrap');
+  const rows = [...wrap.querySelectorAll('tr.mb-row')].map(tr => {
+    const o = {};
+    tr.querySelectorAll('[data-mk]').forEach(i => { if (i.value !== '') o[i.dataset.mk] = i.value; });
+    const len = tr.querySelector('[data-mk="length"]');
+    if (len) {
+      len.disabled = (o.type || 'uint16') !== 'string';
+      if (len.disabled) delete o.length;
+    }
+    return o;
+  });
+  wrap.querySelector(`[data-k="${wrap.dataset.kind}_json"]`).value = JSON.stringify(rows);
+}
+
+function mbTableAdd(btn) {
+  const wrap = btn.closest('.mb-wrap');
+  const kind = wrap.dataset.kind, bits = wrap.dataset.bits === '1';
+  const rows = mbRowsFrom({ x_json: wrap.querySelector(`[data-k="${kind}_json"]`).value }, 'x');
+  const last = rows[rows.length - 1];
+  const r = { register: last ? (parseInt(last.register) || 0) + (bits ? 1 : mbRegs(last.type, last.length)) : 0 };
+  if (last && !bits && last.type) r.type = last.type;
+  if (last && !bits && last.order) r.order = last.order;
+  if (kind === 'values') r.value = '';
+  wrap.querySelector('tbody').insertAdjacentHTML('beforeend', mbTableRow(kind, r, bits));
+  mbTableSync(btn);
+}
+
+function mbTableRemove(btn) {
+  const wrap = btn.closest('.mb-wrap');
+  btn.closest('tr').remove();
+  mbTableSync(wrap);
+}
+
+function mbNum(v) {
+  if (typeof v === 'number') return v;
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  return s !== '' && !isNaN(Number(s)) ? Number(s) : undefined;
+}
+
+/* Copies the typed-value fields that differ from the defaults. */
+function mbNormField(src, out, typeKey, orderKey, withDecimals) {
+  const type = src[typeKey] || 'uint16';
+  if (type !== 'uint16') out[typeKey] = type;
+  if (src[orderKey] && src[orderKey] !== 'ABCD') out[orderKey] = src[orderKey];
+  if (type === 'string') {
+    out.length = parseInt(src.length) || 8;
+    return;
+  }
+  const scale = mbNum(src.scale), offset = mbNum(src.offset), decimals = mbNum(src.decimals);
+  if (scale !== undefined && scale !== 1) out.scale = scale;
+  if (offset !== undefined && offset !== 0) out.offset = offset;
+  if (withDecimals && decimals !== undefined) out.decimals = Math.round(decimals);
+}
+
+function mbNormConn(src, out) {
+  out.connection_type = src.connection_type || 'tcp';
+  if (out.connection_type === 'rtu') {
+    out.device = src.device || '/dev/ttyS1';
+    out.baud   = parseInt(src.baud) || 9600;
+    out.parity = src.parity || 'N';
+  } else {
+    out.host = (src.host || '').trim() || '127.0.0.1';
+    out.port = parseInt(src.port) || (out.connection_type === 'serial_gateway' ? 4001 : 502);
+  }
+  out.slave_id = parseInt(src.slave_id) || 1;
+}
+
+/* A value to write: a number when it is one, else text (a string or a template). */
+function mbWriteValue(v, type) {
+  if (type === 'string') return v === undefined || v === null ? '' : String(v);
+  const n = mbNum(v);
+  return n !== undefined ? n : String(v === undefined || v === null ? '' : v).trim();
+}
+
+function normalizeModbusRead(t, out) {
+  mbNormConn(t, out);
+  out.register_type = t.register_type || 'holding';
+  out.poll_interval = parseInt(t.poll_interval) || 30;
+  const bits = mbIsBits(out.register_type);
+  const rows = mbRowsFrom(t, 'map');
+  const mode = t.read_mode || (rows.length ? 'map' : 'single');
+  if (mode === 'map') {
+    out.map = rows.map(r => {
+      const e = { register: parseInt(r.register) || 0, var: String(r.var || '').trim() };
+      if (!bits) mbNormField(r, e, 'type', 'order', true);
+      return e;
+    });
+    const cmp = String(t.compare || '').trim();
+    if (cmp) out.compare = cmp;
+  } else {
+    out.register = parseInt(t.register) || 0;
+    if (!bits) mbNormField(t, out, 'data_type', 'word_order', true);
+    const v = String(t.variable || '').trim();
+    if (v) out.variable = v;
+  }
+  if (t.op) {
+    out.op = t.op;
+    out.threshold = parseFloat(t.threshold) || 0;
+    if (t.op === 'between') out.threshold2 = parseFloat(t.threshold2) || 0;
+  }
+}
+
+function normalizeModbusWrite(a) {
+  const out = { type: a.type };
+  mbNormConn(a, out);
+  out.register_type = a.register_type || 'holding';
+  const bits = out.register_type === 'coil';
+  if (a.function && a.function !== 'auto') out.function = a.function;
+  const rows = mbRowsFrom(a, 'values');
+  const mode = a.write_mode || (rows.length ? 'block' : 'single');
+  if (mode === 'block') {
+    out.values = rows.map(r => {
+      const e = { register: parseInt(r.register) || 0 };
+      if (!bits) mbNormField(r, e, 'type', 'order', false);
+      e.value = mbWriteValue(r.value, bits ? 'uint16' : (r.type || 'uint16'));
+      return e;
+    });
+  } else {
+    out.register = parseInt(a.register) || 0;
+    if (!bits) mbNormField(a, out, 'data_type', 'word_order', false);
+    out.value = mbWriteValue(a.value, bits ? 'uint16' : (a.data_type || 'uint16'));
+  }
+  return out;
+}
+
+/* Problems the editor can spot before saving (the engine checks the rest). */
+function modbusRowError(o) {
+  const rows = o.type === 'modbus_read' ? o.map : o.values;
+  if (!rows) return '';
+  if (!rows.length) return o.type === 'modbus_read' ? 'add at least one value to the register map' : 'add at least one register to write';
+  if (o.type === 'modbus_read') {
+    const missing = rows.findIndex(r => !r.var);
+    if (missing >= 0) return `map row ${missing + 1} needs a variable name`;
   }
   return '';
 }
@@ -1333,7 +1642,21 @@ function getTriggerTokens() {
     } else if (t.type === 'rule_fired') {
       tokens.push('{{trigger.fired_rule_id}}');
     } else if (t.type === 'modbus_read') {
-      tokens.push('{{trigger.value}}', '{{trigger.register}}', '{{trigger.register_type}}', '{{trigger.slave_id}}');
+      tokens.push('{{trigger.value}}', '{{trigger.register}}', '{{trigger.register_type}}', '{{trigger.slave_id}}',
+                  '{{trigger.data_type}}');
+      const mode = t.read_mode || (mbRowsFrom(t, 'map').length ? 'map' : 'single');
+      if (mode === 'map') {
+        for (const r of mbRowsFrom(t, 'map')) {
+          const v = String(r.var || '').trim();
+          if (v) tokens.push(`{{trigger.${v}}}`, `{{var.${v}}}`);
+        }
+      } else if (t.variable) {
+        tokens.push(`{{var.${String(t.variable).trim()}}}`);
+      }
+    } else if (t.type === 'modbus_error') {
+      tokens.push('{{trigger.state}}', '{{trigger.device}}', '{{trigger.slave_id}}', '{{trigger.error}}',
+                  '{{trigger.message}}', '{{trigger.exception_code}}', '{{trigger.exception_name}}',
+                  '{{trigger.operation}}', '{{trigger.function}}', '{{trigger.register}}', '{{trigger.fail_count}}');
     }
   }
   /* vapix_query actions inject event data as {{trigger.FIELD}} — resolve from catalog */
@@ -3174,47 +3497,15 @@ function actionFields(a, rowIdx) {
     </div>`;
   }
   if (type === 'modbus_write') {
-    const ctype = a.connection_type || 'tcp';
+    const rtype = a.register_type || 'holding';
+    const bits = rtype === 'coil';
+    const rows = mbRowsFrom(a, 'values');
+    const mode = a.write_mode || (rows.length ? 'block' : 'single');
+    const fn = a.function || 'auto';
+    const fnOpts = bits ? [['auto', 'Auto (FC05 / FC15)'], ['fc05', 'FC05 Write Single Coil'], ['fc15', 'FC15 Write Multiple Coils']]
+                        : [['auto', 'Auto (FC06 / FC16)'], ['fc06', 'FC06 Write Single Register'], ['fc16', 'FC16 Write Multiple Registers']];
     return `
-    <div class="form-row">
-      <div class="form-group">
-        <label>Connection Type</label>
-        <select data-k="connection_type" onchange="rerenderAction(this)">
-          <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
-          <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
-          ${ctype==='rtu'?'<option value="rtu" selected>RTU direct (advanced)</option>':''}
-        </select>
-      </div>
-      ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
-      <div class="form-group">
-        <label>Host</label>
-        <input type="text" data-k="host" value="${escHtml(a.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
-        ${ctype==='serial_gateway'?'<div class="form-hint">Use host 127.0.0.1 and port 4001. Configure RS-485 first via the Settings tab.</div>':''}
-      </div>
-      <div class="form-group">
-        <label>Port</label>
-        <input type="number" data-k="port" value="${escHtml(a.port||(ctype==='serial_gateway'?4001:502))}" min="1" max="65535">
-      </div>` : ''}
-    </div>
-    ${ctype === 'rtu' ? `
-    <div class="form-row">
-      <div class="form-group">
-        <label>Device</label>
-        <input type="text" data-k="device" value="${escHtml(a.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
-      </div>
-      <div class="form-group">
-        <label>Baud Rate</label>
-        <input type="number" data-k="baud" value="${escHtml(a.baud||9600)}" min="1200">
-      </div>
-      <div class="form-group">
-        <label>Parity</label>
-        <select data-k="parity">
-          <option value="N" ${(!a.parity||a.parity==='N')?'selected':''}>None</option>
-          <option value="E" ${a.parity==='E'?'selected':''}>Even</option>
-          <option value="O" ${a.parity==='O'?'selected':''}>Odd</option>
-        </select>
-      </div>
-    </div>` : ''}
+    ${mbConnFields(a, 'rerenderAction(this)')}
     <div class="form-row">
       <div class="form-group">
         <label>Slave ID</label>
@@ -3223,22 +3514,39 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group">
         <label>Register Type</label>
-        <select data-k="register_type">
-          <option value="holding" ${(!a.register_type||a.register_type==='holding')?'selected':''}>Holding Register</option>
-          <option value="coil"    ${a.register_type==='coil'?'selected':''}>Coil</option>
+        <select data-k="register_type" onchange="rerenderAction(this)">
+          <option value="holding" ${rtype==='holding'?'selected':''}>Holding Register</option>
+          <option value="coil"    ${rtype==='coil'?'selected':''}>Coil</option>
         </select>
       </div>
+      <div class="form-group">
+        <label>Write</label>
+        <select data-k="write_mode" onchange="rerenderAction(this)">
+          <option value="single" ${mode==='single'?'selected':''}>One value</option>
+          <option value="block"  ${mode==='block' ?'selected':''}>Several registers</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Function</label>
+        <select data-k="function">${fnOpts.map(([v, l]) => `<option value="${v}" ${(fnOpts.some(o => o[0] === fn) ? fn : 'auto')===v?'selected':''}>${l}</option>`).join('')}</select>
+        <div class="form-hint">Auto uses the single write for one ${bits ? 'coil' : 'register'}, else the multiple write.</div>
+      </div>
+    </div>
+    ${mode === 'block' ? mbTable('values', rows, bits) : `
+    <div class="form-row">
       <div class="form-group">
         <label>Register Address</label>
         <input type="number" data-k="register" value="${escHtml(a.register||0)}" min="0" max="65535">
         <div class="form-hint">0-based register address</div>
       </div>
-      <div class="form-group">
+      <div class="form-group" style="flex:2;">
         <label>Value</label>
-        <input type="number" data-k="value" value="${escHtml(a.value!==undefined?a.value:0)}">
-        <div class="form-hint">For coils: 0 = off, 1 = on. For holding registers: 16-bit unsigned integer (0-65535).</div>
+        <input type="text" data-k="value" value="${escHtml(a.value!==undefined?a.value:0)}" placeholder="${bits ? '1' : '0'}">
+        ${getTokenInsertWidget()}
+        <div class="form-hint">${bits ? 'Coil: 0/1, on/off or true/false.' : 'A number or text, or a placeholder such as <code>{{trigger.value}}</code>.'}</div>
       </div>
-    </div>`;
+    </div>
+    ${bits ? '' : mbTypeFields(a, 'data_type', 'word_order', 'rerenderAction(this)', false)}`}`;
   }
   return '';
 }
@@ -3409,6 +3717,14 @@ function normalizeTrigger(t) {
     out.counter_name = t.counter_name; out.op = t.op || 'gt'; out.value = parseFloat(t.value) || 0;
   } else if (t.type === 'rule_fired') {
     out.rule_id = t.rule_id || '';
+  } else if (t.type === 'modbus_read') {
+    normalizeModbusRead(t, out);
+  } else if (t.type === 'modbus_error') {
+    const dev = String(t.device || '').trim();
+    if (dev) out.device = dev;
+    const slave = parseInt(t.slave_id) || 0;
+    if (slave > 0) out.slave_id = slave;
+    out.fire_on = t.fire_on === 'every' ? 'every' : 'change';
   }
   /* manual trigger has no extra fields */
   return out;
@@ -3471,6 +3787,7 @@ function normalizeCondition(c) {
 }
 
 function normalizeAction(a) {
+  if (a.type === 'modbus_write') return normalizeModbusWrite(a);
   const out = { type: a.type };
   const pass = ['url','method','headers','body','username','password','operation','duration','text','channel',
                  'preset','port','state','clip_name','message','level','event_id','profile',
@@ -3709,6 +4026,8 @@ async function saveRule() {
       toast(`Trigger ${i + 1}: Please select a device event from the dropdown`, 'error');
       return;
     }
+    const mbErr = t.type === 'modbus_read' ? modbusRowError(t) : '';
+    if (mbErr) { toast(`Trigger ${i + 1} (Modbus Read): ${mbErr}`, 'error'); return; }
   }
 
   for (let i = 0; i < actionRows.length; i++) {
@@ -3730,6 +4049,7 @@ async function saveRule() {
     if (a.type === 'increment_counter' && !a.name)      { toast(`${label}: Counter name is required`, 'error'); return; }
     if (a.type === 'influxdb_write'  && !a.url)         { toast(`${label}: InfluxDB URL is required`, 'error'); return; }
     if (a.type === 'influxdb_write'  && !a.measurement) { toast(`${label}: Measurement is required`, 'error'); return; }
+    if (a.type === 'modbus_write' && modbusRowError(a)) { toast(`${label}: ${modbusRowError(a)}`, 'error'); return; }
   }
 
   const rule = {

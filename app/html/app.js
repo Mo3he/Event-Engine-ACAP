@@ -164,7 +164,7 @@ const RULE_TYPE_LABELS = {
     vapix_event: 'Device Event', schedule: 'Schedule', mqtt_message: 'MQTT',
     http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
     rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario', manual: 'Manual',
-    modbus_read: 'Modbus Read', sparkplug_command: 'Sparkplug Cmd'
+    modbus_read: 'Modbus Read', modbus_error: 'Modbus Error', sparkplug_command: 'Sparkplug Cmd'
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
