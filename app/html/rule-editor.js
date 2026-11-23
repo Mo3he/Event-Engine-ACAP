@@ -767,6 +767,8 @@ function mbTypeFields(o, typeKey, orderKey, rerender, withDecimals) {
         <select data-k="${orderKey}">${mbOrderOptions(o[orderKey])}</select>
         <div class="form-hint">Byte order of the value as the device sends it; A = most significant.</div>
       </div>
+    </div>
+    <div class="form-row">
       ${type === 'string' ? num('length', 8, '8', 'Registers') : `
       ${num('scale', '', '1', 'value = raw × scale + offset')}
       ${num('offset', '', '0', '')}
@@ -776,16 +778,17 @@ function mbTypeFields(o, typeKey, orderKey, rerender, withDecimals) {
 
 /* Editable table of map entries (modbus_read) or values (modbus_write). The
  * rows are kept as JSON in a hidden data-k input so they survive re-renders. */
+/* Column widths in px; the column without one (variable / value) takes the rest. */
 const MB_COLS = {
-  register: { label: 'Register', w: 80,  input: 'number' },
-  var:      { label: 'Variable', w: 130, input: 'text', ph: 'name' },
-  value:    { label: 'Value',    w: 140, input: 'text', ph: '0 or {{trigger.value}}' },
-  type:     { label: 'Type',     w: 90 },
+  register: { label: 'Register', w: 76,  input: 'number' },
+  var:      { label: 'Variable', input: 'text', ph: 'name' },
+  value:    { label: 'Value',    input: 'text', ph: '0 or {{…}}' },
+  type:     { label: 'Type',     w: 92 },
   order:    { label: 'Order',    w: 80 },
-  scale:    { label: 'Scale',    w: 70,  input: 'number', ph: '1' },
-  offset:   { label: 'Offset',   w: 70,  input: 'number', ph: '0' },
-  decimals: { label: 'Decimals', w: 70,  input: 'number', ph: 'auto' },
-  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8' },
+  scale:    { label: 'Scale',    w: 64,  input: 'number', ph: '1' },
+  offset:   { label: 'Offset',   w: 64,  input: 'number', ph: '0' },
+  decimals: { label: 'Decimals', w: 72,  input: 'number', ph: 'auto', title: 'Decimals (rounding)' },
+  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8', title: 'Length in registers (strings)' },
 };
 
 function mbTableCols(kind, bits) {
@@ -793,15 +796,23 @@ function mbTableCols(kind, bits) {
   return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length'];
 }
 
+/* Cells that don't apply to the row's type: length is for strings only, and
+ * scaling is for numbers only. */
+function mbCellOff(c, type) {
+  const str = (type || 'uint16') === 'string';
+  return c === 'length' ? !str : (str && (c === 'scale' || c === 'offset' || c === 'decimals'));
+}
+
 function mbTableRow(kind, r, bits) {
   const cells = mbTableCols(kind, bits).map(c => {
     const def = MB_COLS[c];
     const v = r[c] !== undefined ? r[c] : '';
+    const off = mbCellOff(c, r.type);
     let ctl;
     if (c === 'type') ctl = `<select data-mk="type" onchange="mbTableSync(this)">${mbTypeOptions(v)}</select>`;
     else if (c === 'order') ctl = `<select data-mk="order" onchange="mbTableSync(this)">${MB_ORDERS.map(([o]) => `<option ${(v||'ABCD')===o?'selected':''}>${o}</option>`).join('')}</select>`;
-    else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${escHtml(def.ph || '')}" ${def.input === 'number' ? 'step="any"' : ''}
-                 ${c === 'length' && (r.type || 'uint16') !== 'string' ? 'disabled' : ''} oninput="mbTableSync(this)">`;
+    else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}" ${def.input === 'number' ? 'step="any"' : ''}
+                 ${off ? 'disabled' : ''} oninput="mbTableSync(this)">`;
     return `<td>${ctl}</td>`;
   }).join('');
   return `<tr class="mb-row">${cells}<td><button type="button" class="tca-remove" onclick="mbTableRemove(this)" title="Remove">&times;</button></td></tr>`;
@@ -809,15 +820,17 @@ function mbTableRow(kind, r, bits) {
 
 function mbTable(kind, rows, bits) {
   const cols = mbTableCols(kind, bits);
-  const head = cols.map(c => `<th style="min-width:${MB_COLS[c].w}px;text-align:left;font-weight:500;padding:2px 4px;">${MB_COLS[c].label}</th>`).join('');
+  const colgroup = cols.map(c => MB_COLS[c].w ? `<col style="width:${MB_COLS[c].w}px">` : '<col>').join('') + '<col style="width:26px">';
+  const head = cols.map(c => `<th title="${escHtml(MB_COLS[c].title || MB_COLS[c].label)}">${MB_COLS[c].label}</th>`).join('');
   const hint = kind === 'map'
     ? `Read in one request (up to ${bits ? '2000 bits' : '125 registers'} from the lowest to the highest address). Each value is stored in its variable and is <code>{{trigger.NAME}}</code> in actions.`
     : `Adjacent registers are written in one request (${bits ? 'FC15' : 'FC16'}); a gap starts a new one. Values can use placeholders.`;
   return `
     <div class="form-group mb-wrap" data-kind="${kind}" data-bits="${bits ? 1 : 0}">
       <label>${kind === 'map' ? 'Register Map' : 'Values'}</label>
-      <div style="overflow-x:auto;">
-        <table class="mb-table" style="border-collapse:collapse;font-size:12px;">
+      <div class="mb-scroll">
+        <table class="mb-table">
+          <colgroup>${colgroup}</colgroup>
           <thead><tr>${head}<th></th></tr></thead>
           <tbody>${rows.map(r => mbTableRow(kind, r, bits)).join('')}</tbody>
         </table>
@@ -833,11 +846,12 @@ function mbTableSync(el) {
   const rows = [...wrap.querySelectorAll('tr.mb-row')].map(tr => {
     const o = {};
     tr.querySelectorAll('[data-mk]').forEach(i => { if (i.value !== '') o[i.dataset.mk] = i.value; });
-    const len = tr.querySelector('[data-mk="length"]');
-    if (len) {
-      len.disabled = (o.type || 'uint16') !== 'string';
-      if (len.disabled) delete o.length;
-    }
+    tr.querySelectorAll('input[data-mk]').forEach(i => {
+      const c = i.dataset.mk;
+      i.disabled = mbCellOff(c, o.type);
+      i.placeholder = i.disabled ? '' : (MB_COLS[c].ph || '');
+      if (i.disabled) delete o[c];
+    });
     return o;
   });
   wrap.querySelector(`[data-k="${wrap.dataset.kind}_json"]`).value = JSON.stringify(rows);
@@ -1250,9 +1264,9 @@ function conditionFields(c, rowIdx) {
           const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
           return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
         }).join('');
-        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>${loadBtn}</div>`;
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id" style="flex:1;min-width:0"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>${loadBtn}</div>`;
       } else {
-        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" style="flex:1">${loadBtn}</div>`;
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" style="flex:1;min-width:0">${loadBtn}</div>`;
       }
     } else if (aoaScenarios === null) {
       scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" placeholder="Loading…">`;
