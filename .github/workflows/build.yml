@@ -52,6 +52,17 @@ jobs:
              tools/modbus_codec_test.c app/engine/modbus_codec.c app/cJSON.c -lm
           /tmp/modbus_codec_test
 
+  gps_nmea:
+    name: GPS NMEA parser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run the tolerant NMEA parser tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iapp/engine \
+             -o /tmp/gps_nmea_test tools/gps_nmea_test.c app/engine/gps_nmea.c -lm
+          /tmp/gps_nmea_test
+
   certs:
     name: TLS profile store tests
     runs-on: ubuntu-latest
