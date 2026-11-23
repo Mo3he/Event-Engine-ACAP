@@ -244,6 +244,9 @@ header .subtitle {
 .rule-fired-time { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
 
 /* ===== Event Log ===== */
+#tab-log .container { max-width: none; }
+#tab-log .event-log-header { flex-wrap: wrap; gap: 8px; }
+#tab-rules .container, #tab-settings .container { max-width: 1100px; }
 .event-log-header {
   display: flex;
   align-items: center;
@@ -706,6 +709,8 @@ button:focus-visible, .btn:focus-visible, .tab-btn:focus-visible {
   .status-grid { grid-template-columns: repeat(2, 1fr); }
   .form-row { flex-direction: column; }
   header h1 { font-size: 14px; }
+  #tab-rules .rule-list-header { flex-wrap: wrap; gap: 8px; }
+  #tab-rules .rule-list-header > div { flex-wrap: wrap; }
 
   /* Modal full-screen on mobile */
   .modal-overlay {

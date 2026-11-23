@@ -17,7 +17,10 @@ async function loadStatus() {
 
     const dev = s.device || {};
     document.getElementById('device-card').innerHTML = `
-      <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">DEVICE</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <h3 style="font-size:13px;color:var(--text-muted);margin:0;">DEVICE</h3>
+        <button class="btn btn-ghost btn-sm" onclick="manualCheckForUpdate()">Check for Updates</button>
+      </div>
       <table style="width:100%;font-size:13px;border-collapse:collapse;">
         ${[['Model', dev.model],['Serial', dev.serial],['IP', dev.ip],
            ['Firmware', dev.firmware],['Engine', s.engine_version]].map(([k, v]) => v ? `

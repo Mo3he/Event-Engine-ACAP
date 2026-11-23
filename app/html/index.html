@@ -93,7 +93,7 @@
     <div class="container">
       <div class="event-log-header">
         <h2 style="font-size:15px;">Event Log</h2>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <select id="log-rule-filter" style="background:var(--surface);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:12px;">
             <option value="">Everything</option>
             <option value="__rules__">Rules only</option>
@@ -159,36 +159,6 @@
       <div class="status-grid" id="status-grid"></div>
       <div class="card" id="device-card" style="margin-bottom:16px;"></div>
       <div class="card" id="capabilities-card" style="margin-bottom:16px;display:none;"></div>
-
-      <div class="card" style="margin-bottom:16px;">
-        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-          Export your rules and settings before uninstalling so you can restore them after reinstalling.
-        </p>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
-          <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
-          <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
-          <button class="btn btn-ghost" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
-          <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
-          <button class="btn btn-ghost" onclick="manualCheckForUpdate()">Check for Updates</button>
-        </div>
-      </div>
-
-      <div class="card" style="margin-bottom:16px;" id="tls-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">TLS CERTIFICATES</h3>
-          <button class="btn btn-ghost btn-sm" onclick="tlsEditProfile()">+ Add profile</button>
-        </div>
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-          Certificates the camera uses when it connects to a server: the CA of a server with a private certificate,
-          and a client certificate for servers that require one (mutual TLS). Choose a profile in HTTP Request,
-          Snapshot Upload, InfluxDB Write, FTP Upload, HTTP Check, or the MQTT broker and Email settings below.
-        </p>
-        <div id="tls-list"></div>
-        <div id="tls-editor" style="display:none;"></div>
-      </div>
 
       <div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -262,7 +232,7 @@
             <div class="form-group" style="max-width:480px;">
               <label>TLS certificates <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
               <select name="tls_profile"></select>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">For a broker with its own CA or one that requires a client certificate. Add profiles under TLS Certificates above.</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">For a broker with its own CA or one that requires a client certificate. Add profiles under TLS Certificates below.</div>
             </div>
           </div>
           <div class="form-row">
@@ -387,7 +357,7 @@
             <div class="form-group" style="max-width:480px;">
               <label>TLS certificates <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
               <select id="smtp-tls-profile"></select>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">For a mail server with its own CA or one that requires a client certificate. Add profiles under TLS Certificates above.</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">For a mail server with its own CA or one that requires a client certificate. Add profiles under TLS Certificates below.</div>
             </div>
           </div>
           <div class="form-row">
@@ -434,6 +404,35 @@
             <button type="submit" class="btn btn-primary">Save Location</button>
           </div>
         </form>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;">
+        <h3 style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">BACKUP &amp; RESTORE</h3>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Export your rules and settings before uninstalling so you can restore them after reinstalling.
+        </p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-ghost" onclick="exportRules()">Export Rules</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('import-rules-file-backup').click()">Import Rules</button>
+          <input type="file" id="import-rules-file-backup" accept=".json" style="display:none;" onchange="importRules(this)">
+          <button class="btn btn-ghost" onclick="exportSettings()">Export Settings</button>
+          <button class="btn btn-ghost" onclick="document.getElementById('import-settings-file').click()">Import Settings</button>
+          <input type="file" id="import-settings-file" accept=".json" style="display:none;" onchange="importSettings(this)">
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px;" id="tls-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <h3 style="font-size:13px;color:var(--text-muted);margin:0;">TLS CERTIFICATES</h3>
+          <button class="btn btn-ghost btn-sm" onclick="tlsEditProfile()">+ Add profile</button>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+          Certificates the camera uses when it connects to a server: the CA of a server with a private certificate,
+          and a client certificate for servers that require one (mutual TLS). Choose a profile in HTTP Request,
+          Snapshot Upload, InfluxDB Write, FTP Upload, HTTP Check, or the MQTT broker and Email settings above.
+        </p>
+        <div id="tls-list"></div>
+        <div id="tls-editor" style="display:none;"></div>
       </div>
 
       <div class="card" style="margin-bottom:16px;">
