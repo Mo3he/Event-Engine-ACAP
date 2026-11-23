@@ -55,8 +55,9 @@ example an empty string or `false`).
 
 Verified on a P3288-LV (AXIS OS 12.11.77): in-place upgrade to the signed
 package with rules and settings kept, Alert Stream enable/disable with open
-streams, and partial settings updates. RS-485 behavior was tested against a
-simulated serial port, as the test camera has no RS-485 interface.
+streams, and partial settings updates. The test camera has no serial port, so
+the RS-485 switch was tested in the browser against simulated camera
+responses.
 
 ## v1.9.31 - GPS / NMEA input and triggers
 
