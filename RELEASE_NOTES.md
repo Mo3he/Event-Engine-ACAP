@@ -1,5 +1,34 @@
 # Release Notes
 
+## v1.9.31 - GPS / NMEA input and triggers
+
+Event Engine can now read NMEA 0183 GPS data and use it in rules and video
+overlays. This release adds configurable serial and network inputs, live GPS
+status, GPS triggers, and `{{gps.*}}` action variables. Rules, triggers, and
+overlays were verified on AXIS OS 12.9 and 12.11 with simulated NMEA over UDP; reception
+from a receiver connected to the serial port has not yet been verified.
+
+### Upgrading to 1.9.31
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. GPS is disabled by
+default, so existing rules behave as before until it is enabled in Settings.
+
+### New in 1.9.31
+
+- **GPS / NMEA input:** read from the camera serial port, UDP or TCP listener,
+  or a TCP client. Settings include the stale-fix timeout and serial device
+  configuration.
+- **GPS triggers:** react to fresh fixes, speed thresholds, circle/polygon
+  geofences, and fix acquisition/loss/staleness.
+- **GPS templates and status:** use coordinates, speed, heading, altitude, and
+  fix details in actions such as Overlay Text; inspect reader counters and
+  recent sentences in Settings or through the admin-only `/gps` endpoint.
+- **Live GPS overlay templates (9.1, 9.1b):** show speed and position on video
+  and clear it when the fix is lost or becomes stale.
+- **NMEA parser and simulator:** support checksummed and checksum-free standard
+  NMEA sentences, with parser and UDP reader tests.
+
 ## v1.9.30 - Modbus data types, maps, and error triggers
 
 Modbus reads and writes now support typed values, register maps, block

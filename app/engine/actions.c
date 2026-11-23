@@ -8,10 +8,12 @@
 #include <curl/curl.h>
 #include <time.h>
 #include <errno.h>
+#include <math.h>
 
 #include "actions.h"
 #include "triggers.h"
 #include "variables.h"
+#include "gps.h"
 #include "mqtt_client.h"
 #include "sparkplug.h"
 #include "event_log.h"
@@ -279,6 +281,7 @@ void Actions_Init(void) {
  *   {{trigger_json}}     all trigger data as a compact JSON object
  *   {{var.NAME}}         variable value
  *   {{counter.NAME}}     counter value
+ *   {{gps.KEY}}          latest GPS field (e.g. latitude, speed_kmh, heading)
  * Any variable may end in |N (round to N decimals) or |xml (escape & < > " ').
  *-----------------------------------------------------*/
 /* Large enough for a full-resolution snapshot in base64 plus the rest of a body */
@@ -316,6 +319,10 @@ static char* xml_escape(const char* s) {
  * offset) is not decoded as a space by form-urlencoded servers. */
 static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url_encode_values) {
     if (!tmpl) return strdup("");
+
+    gps_snapshot_t gps;
+    Gps_Get_Snapshot(&gps);
+    int gps_valid = gps.enabled && gps.fresh && gps.fix.has_fix && gps.fix.has_position;
 
     size_t out_cap = strlen(tmpl) * 2 + 256;
     char* out = malloc(out_cap);
@@ -393,6 +400,64 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
                     dyn_replacement = cJSON_PrintUnformatted(copy);
                     cJSON_Delete(copy);
                     if (dyn_replacement) replacement = dyn_replacement;
+                }
+            } else if (strncmp(key, "gps.", 4) == 0) {
+                const char* field = key + 4;
+                if (strcmp(field, "age") == 0 || strcmp(field, "age_seconds") == 0) {
+                    if (gps.age_seconds >= 0.0) {
+                        snprintf(tmp, sizeof(tmp), "%.1f", gps.age_seconds);
+                        replacement = tmp;
+                    } else replacement = "--";
+                } else if (!gps_valid) {
+                    replacement = "--";
+                } else if (strcmp(field, "lat") == 0 || strcmp(field, "latitude") == 0) {
+                    snprintf(tmp, sizeof(tmp), "%.6f", gps.fix.latitude);
+                    replacement = tmp;
+                } else if (strcmp(field, "lon") == 0 || strcmp(field, "longitude") == 0) {
+                    snprintf(tmp, sizeof(tmp), "%.6f", gps.fix.longitude);
+                    replacement = tmp;
+                } else if (strcmp(field, "speed_kmh") == 0) {
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_kmh); replacement = tmp; }
+                    else replacement = "--";
+                } else if (strcmp(field, "speed_mph") == 0) {
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_kmh / 1.609344); replacement = tmp; }
+                    else replacement = "--";
+                } else if (strcmp(field, "speed_knots") == 0) {
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_knots); replacement = tmp; }
+                    else replacement = "--";
+                } else if (strcmp(field, "speed_mps") == 0) {
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_kmh / 3.6); replacement = tmp; }
+                    else replacement = "--";
+                } else if (strcmp(field, "heading") == 0) {
+                    if (gps.fix.has_heading) { snprintf(tmp, sizeof(tmp), "%.0f", gps.fix.heading); replacement = tmp; }
+                    else replacement = "--";
+                } else if (strcmp(field, "heading_cardinal") == 0) {
+                    static const char* const cardinal[] = {
+                        "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                        "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"
+                    };
+                    replacement = gps.fix.has_heading
+                        ? cardinal[((int)floor((gps.fix.heading + 11.25) / 22.5)) % 16]
+                        : "--";
+                } else if (strcmp(field, "altitude_m") == 0) {
+                    if (gps.fix.has_altitude) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.altitude_m); replacement = tmp; }
+                    else replacement = "--";
+                } else if (strcmp(field, "satellites") == 0) {
+                    snprintf(tmp, sizeof(tmp), "%d", gps.fix.satellites);
+                    replacement = tmp;
+                } else if (strcmp(field, "fix_quality") == 0) {
+                    snprintf(tmp, sizeof(tmp), "%d", gps.fix.fix_quality);
+                    replacement = tmp;
+                } else if (strcmp(field, "fix") == 0) {
+                    replacement = gps.fix.fix_quality >= 4 ? "rtk"
+                                : gps.fix.fix_quality == 2 ? "dgps"
+                                : gps.fix.fix_quality > 0 ? "fix" : "valid";
+                } else if (strcmp(field, "utc") == 0) {
+                    replacement = gps.fix.utc;
+                } else if (strcmp(field, "date") == 0) {
+                    replacement = gps.fix.date;
+                } else if (strcmp(field, "has_fix") == 0) {
+                    replacement = "true";
                 }
             } else if (strncmp(key, "var.", 4) == 0) {
                 dyn_replacement = Variables_Get(key + 4);

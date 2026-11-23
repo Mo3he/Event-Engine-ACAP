@@ -108,7 +108,8 @@ The web UI is accessible at
 - **Event Log:** per-rule firing history with timestamps and result codes.
 - **Variables:** view and manage named variables and counters.
 - **Settings:** location (used for sunrise/sunset), SMTP configuration, MQTT
-  broker configuration, SOCKS5 proxy, device info, and backup/restore.
+  broker configuration, GPS/NMEA input, SOCKS5 proxy, device info, and
+  backup/restore.
 
 ## Triggers
 
@@ -126,6 +127,10 @@ The web UI is accessible at
 | **Modbus Read** | Poll Modbus TCP or RTU/RS-485 registers and coils on an interval. Read single values or a register map into variables; supports signed/unsigned 16/32/64-bit integers, 32/64-bit floats, strings, word order, scale and offset. Fires on a threshold edge or whenever values change |
 | **Modbus Error** | Fire when a Modbus device starts failing requests, or on every failed request, and again when it recovers. Can filter by device and slave ID; the trigger includes the error details |
 | **Sparkplug Command** | Fires when a Sparkplug B host writes a metric to this edge node via `NCMD`/`DCMD`. Optional metric-name and exact-value filters. Injects `{{trigger.metric}}` and `{{trigger.value}}`. Lets a SCADA host command the device, not just read from it |
+| **GPS Update** | Fires on each fresh NMEA GPS fix, optionally rate-limited |
+| **GPS Speed** | Fires when speed crosses a configured threshold, with optional hysteresis and unit selection |
+| **GPS Geofence** | Fires on entry to or exit from a circular or polygon geofence |
+| **GPS Fix** | Fires when a GPS fix is acquired, lost, or becomes stale |
 
 ## Conditions
 
@@ -295,6 +300,15 @@ rule editor to pick from available values.
 | `{{counter.NAME}}` | Value of a named counter |
 | `{{trigger.snapshot_base64}}` | Base64-encoded JPEG snapshot (only when **Attach snapshot** is enabled on the HTTP Request action) |
 | `{{trigger.alpv_image_base64}}` | Base64-encoded JPEG that ALPV saved for the car (only when **Attach ALPV image** is enabled on the HTTP Request action) |
+| `{{gps.latitude}}`, `{{gps.longitude}}` | Latest coordinates from a fresh GPS fix |
+| `{{gps.speed_kmh}}`, `{{gps.speed_mph}}`, `{{gps.speed_knots}}`, `{{gps.speed_mps}}` | Latest speed in the requested units |
+| `{{gps.heading}}`, `{{gps.heading_cardinal}}`, `{{gps.altitude_m}}` | Heading, compass direction, and altitude |
+| `{{gps.satellites}}`, `{{gps.fix_quality}}`, `{{gps.fix}}`, `{{gps.utc}}`, `{{gps.date}}` | Fix metadata and UTC date/time |
+| `{{gps.age}}` | Seconds since the latest valid fix (`--` if none has been received) |
+
+GPS values other than age resolve to `--` unless GPS is enabled and a fresh fix
+is available. Configure the NMEA input in **Settings → GPS**; the reader
+supports the camera serial port, UDP and TCP listeners, and a TCP client.
 
 The rule editor shows which `{{trigger.*}}` keys are available for the selected
 trigger type.

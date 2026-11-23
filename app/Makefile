@@ -13,6 +13,8 @@ OBJS1 = main.c ACAP.c cJSON.c \
         engine/alert_stream.c \
         engine/modbus_codec.c \
         engine/modbus_pool.c \
+        engine/gps_nmea.c \
+        engine/gps.c \
         engine/certs.c
 PROGS = $(PROG1)
 

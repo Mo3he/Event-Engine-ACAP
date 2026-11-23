@@ -52,6 +52,32 @@ jobs:
              tools/modbus_codec_test.c app/engine/modbus_codec.c app/cJSON.c -lm
           /tmp/modbus_codec_test
 
+  gps_nmea:
+    name: GPS NMEA parser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run the tolerant NMEA parser tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iapp/engine \
+             -o /tmp/gps_nmea_test tools/gps_nmea_test.c app/engine/gps_nmea.c -lm
+          /tmp/gps_nmea_test
+
+  gps_reader:
+    name: GPS input reader tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install GLib headers
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libglib2.0-dev
+      - name: Build and run the UDP reader integration test
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+             $(pkg-config --cflags glib-2.0) -o /tmp/gps_reader_test \
+             tools/gps_reader_test.c app/engine/gps.c app/engine/gps_nmea.c app/cJSON.c \
+             $(pkg-config --libs glib-2.0) -lpthread -lm
+          /tmp/gps_reader_test
+
   certs:
     name: TLS profile store tests
     runs-on: ubuntu-latest
@@ -83,3 +109,11 @@ jobs:
             echo "Verification of $f:"
             tar tzf "$f"
           done
+      - name: Check glibc symbol versions
+        # Newer SDK symbol versions (e.g. GLIBC_2.42 cfsetospeed) stop the app
+        # loading on older AXIS OS; 2.34 is what released builds require.
+        run: |
+          tar xzf *.eap acap_event_engine
+          max=$(readelf -W --dyn-syms acap_event_engine | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+          echo "Highest required: $max"
+          [ "$(printf '%s\nGLIBC_2.34\n' "$max" | sort -V | tail -1)" = GLIBC_2.34 ]

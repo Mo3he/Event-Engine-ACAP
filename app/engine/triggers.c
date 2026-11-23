@@ -4,6 +4,7 @@
 #include <syslog.h>
 #include <time.h>
 #include <errno.h>
+#include <math.h>
 
 #include "event_log.h"
 #include "triggers.h"
@@ -13,6 +14,7 @@
 #include "actions.h"
 #include "modbus_codec.h"
 #include "modbus_pool.h"
+#include "gps.h"
 #include "../ACAP.h"
 
 /* Simple MQTT topic filter matching (supports + and #) */
@@ -50,6 +52,10 @@ static int mqtt_topic_matches(const char* filter, const char* topic) {
 #define TRIG_MODBUS_READ       9
 #define TRIG_SPARKPLUG_COMMAND 10
 #define TRIG_MODBUS_ERROR      11
+#define TRIG_GPS_UPDATE        12
+#define TRIG_GPS_SPEED         13
+#define TRIG_GPS_GEOFENCE      14
+#define TRIG_GPS_FIX           15
 
 #define VAR_TEXT_LEN 512   /* longest variable value */
 
@@ -144,6 +150,26 @@ typedef struct {
     char   mberr_device[128];         /* substring of the device; "" = any */
     int    mberr_slave;               /* 0 = any */
     int    mberr_every;               /* 1 = every failed request, 0 = when failing starts */
+
+    /* GPS triggers */
+    int    gps_interval;
+    time_t gps_last_fire;
+    char   gps_op[8];
+    char   gps_unit[12];
+    double gps_threshold;
+    double gps_threshold2;
+    double gps_hysteresis;
+    int    gps_active;
+    double geofence_lat;
+    double geofence_lon;
+    double geofence_radius;
+    double geofence_points_lat[32];
+    double geofence_points_lon[32];
+    int    geofence_point_count;
+    int    geofence_state;            /* -1 unknown, 0 outside, 1 inside */
+    char   geofence_event[8];         /* enter, exit, both */
+    char   gps_fix_event[12];         /* acquired, lost, stale */
+    int    gps_fix_state;              /* -1 unknown, 0 no fix, 1 valid, 2 stale */
 } Subscription;
 
 static Subscription   subs[MAX_SUBS];
@@ -377,6 +403,8 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
         snprintf(s->rule_id, sizeof(s->rule_id), "%s", rule_id);
         s->trigger_index = idx;
         s->filter_value  = -1; /* not filtering by value */
+        s->geofence_state = -1;
+        s->gps_fix_state = -1;
 
         if (strcmp(type, "vapix_event") == 0 || strcmp(type, "io_input") == 0) {
             s->type = (strcmp(type, "io_input") == 0) ? TRIG_IO_INPUT : TRIG_VAPIX_EVENT;
@@ -570,6 +598,54 @@ int Triggers_Subscribe_Rule(const char* rule_id, cJSON* triggers_array) {
             s->mberr_slave = cJSON_IsNumber(slave_j) ? (int)slave_j->valuedouble : 0;
             const char* fire_on = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "fire_on"));
             s->mberr_every = fire_on && strcmp(fire_on, "every") == 0;
+
+        } else if (strcmp(type, "gps_update") == 0) {
+            s->type = TRIG_GPS_UPDATE;
+            cJSON* interval = cJSON_GetObjectItem(trig, "interval_s");
+            s->gps_interval = cJSON_IsNumber(interval) ? (int)interval->valuedouble : 1;
+            if (s->gps_interval < 1) s->gps_interval = 1;
+
+        } else if (strcmp(type, "gps_speed") == 0) {
+            s->type = TRIG_GPS_SPEED;
+            const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "op"));
+            const char* unit = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "unit"));
+            snprintf(s->gps_op, sizeof(s->gps_op), "%s", op ? op : "gt");
+            snprintf(s->gps_unit, sizeof(s->gps_unit), "%s", unit ? unit : "kmh");
+            cJSON* value = cJSON_GetObjectItem(trig, "value");
+            cJSON* value2 = cJSON_GetObjectItem(trig, "value2");
+            cJSON* hysteresis = cJSON_GetObjectItem(trig, "hysteresis");
+            s->gps_threshold = cJSON_IsNumber(value) ? value->valuedouble : 0.0;
+            s->gps_threshold2 = cJSON_IsNumber(value2) ? value2->valuedouble : 0.0;
+            s->gps_hysteresis = cJSON_IsNumber(hysteresis) ? hysteresis->valuedouble : 0.0;
+
+        } else if (strcmp(type, "gps_geofence") == 0) {
+            s->type = TRIG_GPS_GEOFENCE;
+            const char* event = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "event"));
+            snprintf(s->geofence_event, sizeof(s->geofence_event), "%s", event ? event : "enter");
+            cJSON* lat = cJSON_GetObjectItem(trig, "latitude");
+            cJSON* lon = cJSON_GetObjectItem(trig, "longitude");
+            cJSON* radius = cJSON_GetObjectItem(trig, "radius_m");
+            s->geofence_lat = cJSON_IsNumber(lat) ? lat->valuedouble : 0.0;
+            s->geofence_lon = cJSON_IsNumber(lon) ? lon->valuedouble : 0.0;
+            s->geofence_radius = cJSON_IsNumber(radius) ? radius->valuedouble : 0.0;
+            cJSON* points = cJSON_GetObjectItem(trig, "points");
+            cJSON* point;
+            cJSON_ArrayForEach(point, points) {
+                if (s->geofence_point_count >= 32 || !cJSON_IsArray(point) ||
+                    cJSON_GetArraySize(point) < 2) break;
+                cJSON* plat = cJSON_GetArrayItem(point, 0);
+                cJSON* plon = cJSON_GetArrayItem(point, 1);
+                if (!cJSON_IsNumber(plat) || !cJSON_IsNumber(plon)) continue;
+                int p = s->geofence_point_count++;
+                s->geofence_points_lat[p] = plat->valuedouble;
+                s->geofence_points_lon[p] = plon->valuedouble;
+            }
+
+        } else if (strcmp(type, "gps_fix") == 0) {
+            s->type = TRIG_GPS_FIX;
+            s->gps_fix_state = 0;
+            const char* event = cJSON_GetStringValue(cJSON_GetObjectItem(trig, "event"));
+            snprintf(s->gps_fix_event, sizeof(s->gps_fix_event), "%s", event ? event : "acquired");
 
         } else {
             LOG_WARN("unknown trigger type '%s' for rule %s", type, rule_id);
@@ -1025,8 +1101,158 @@ static void modbus_status(const mb_status_t* st) {
     }
 }
 
+static double gps_speed_value(const gps_nmea_fix_t* fix, const char* unit) {
+    if (strcmp(unit, "knots") == 0) return fix->speed_knots;
+    if (strcmp(unit, "mph") == 0) return fix->speed_kmh / 1.609344;
+    if (strcmp(unit, "mps") == 0) return fix->speed_kmh / 3.6;
+    return fix->speed_kmh;
+}
+
+static cJSON* gps_trigger_data(const gps_nmea_fix_t* fix, const char* event) {
+    cJSON* data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "type", "gps");
+    if (event) cJSON_AddStringToObject(data, "event", event);
+    cJSON_AddBoolToObject(data, "has_fix", fix->has_fix && fix->has_position);
+    cJSON_AddNumberToObject(data, "latitude", fix->latitude);
+    cJSON_AddNumberToObject(data, "longitude", fix->longitude);
+    if (fix->has_speed) {
+        cJSON_AddNumberToObject(data, "speed_knots", fix->speed_knots);
+        cJSON_AddNumberToObject(data, "speed_kmh", fix->speed_kmh);
+        cJSON_AddNumberToObject(data, "speed_mph", fix->speed_kmh / 1.609344);
+        cJSON_AddNumberToObject(data, "speed_mps", fix->speed_kmh / 3.6);
+    }
+    if (fix->has_heading) cJSON_AddNumberToObject(data, "heading", fix->heading);
+    if (fix->has_altitude) cJSON_AddNumberToObject(data, "altitude_m", fix->altitude_m);
+    cJSON_AddNumberToObject(data, "satellites", fix->satellites);
+    cJSON_AddNumberToObject(data, "fix_quality", fix->fix_quality);
+    cJSON_AddStringToObject(data, "utc", fix->utc);
+    cJSON_AddStringToObject(data, "date", fix->date);
+    return data;
+}
+
+static double gps_distance_m(double lat1, double lon1, double lat2, double lon2) {
+    const double radians = 0.017453292519943295;
+    double dlat = (lat2 - lat1) * radians;
+    double dlon = (lon2 - lon1) * radians;
+    double a = sin(dlat / 2.0) * sin(dlat / 2.0) +
+               cos(lat1 * radians) * cos(lat2 * radians) *
+               sin(dlon / 2.0) * sin(dlon / 2.0);
+    return 6371000.0 * 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+}
+
+static int gps_inside_geofence(const Subscription* s, const gps_nmea_fix_t* fix) {
+    if (s->geofence_point_count >= 3) {
+        int inside = 0;
+        for (int i = 0, j = s->geofence_point_count - 1; i < s->geofence_point_count; j = i++) {
+            double yi = s->geofence_points_lat[i], xi = s->geofence_points_lon[i];
+            double yj = s->geofence_points_lat[j], xj = s->geofence_points_lon[j];
+            int crosses = ((yi > fix->latitude) != (yj > fix->latitude)) &&
+                (fix->longitude < (xj - xi) * (fix->latitude - yi) / (yj - yi) + xi);
+            if (crosses) inside = !inside;
+        }
+        return inside;
+    }
+    return s->geofence_radius > 0.0 &&
+           gps_distance_m(s->geofence_lat, s->geofence_lon,
+                          fix->latitude, fix->longitude) <= s->geofence_radius;
+}
+
+static int gps_speed_passes(const Subscription* s, double value) {
+    const double lower = s->gps_threshold;
+    const double upper = s->gps_threshold2;
+    const double hysteresis = s->gps_hysteresis;
+    if (s->gps_active) {
+        if (strcmp(s->gps_op, "gt") == 0 || strcmp(s->gps_op, "gte") == 0)
+            return value >= lower - hysteresis;
+        if (strcmp(s->gps_op, "lt") == 0 || strcmp(s->gps_op, "lte") == 0)
+            return value <= lower + hysteresis;
+        if (strcmp(s->gps_op, "between") == 0)
+            return value >= lower - hysteresis && value <= upper + hysteresis;
+    }
+    return value_passes(value, s->gps_op, lower, upper);
+}
+
+void Triggers_On_GPS_Update(const gps_nmea_fix_t* fix) {
+    if (!fix) return;
+    time_t now = time(NULL);
+    for (int i = 0; i < sub_count; i++) {
+        Subscription* s = &subs[i];
+        if (s->type < TRIG_GPS_UPDATE || s->type > TRIG_GPS_FIX) continue;
+
+        if (s->type == TRIG_GPS_UPDATE) {
+            if (!fix->has_fix || !fix->has_position ||
+                (s->gps_last_fire && now - s->gps_last_fire < s->gps_interval))
+                continue;
+            s->gps_last_fire = now;
+            cJSON* data = gps_trigger_data(fix, "update");
+            fire_fn(s->rule_id, s->trigger_index, data);
+            cJSON_Delete(data);
+        } else if (s->type == TRIG_GPS_SPEED) {
+            if (!fix->has_fix || !fix->has_speed) {
+                s->gps_active = 0;
+                continue;
+            }
+            int active = gps_speed_passes(s, gps_speed_value(fix, s->gps_unit));
+            if (active && !s->gps_active) {
+                cJSON* data = gps_trigger_data(fix, "speed_threshold");
+                cJSON_AddStringToObject(data, "unit", s->gps_unit);
+                cJSON_AddNumberToObject(data, "value", gps_speed_value(fix, s->gps_unit));
+                fire_fn(s->rule_id, s->trigger_index, data);
+                cJSON_Delete(data);
+            }
+            s->gps_active = active;
+        } else if (s->type == TRIG_GPS_GEOFENCE) {
+            if (!fix->has_fix || !fix->has_position) {
+                s->geofence_state = -1;
+                continue;
+            }
+            int inside = gps_inside_geofence(s, fix);
+            if (s->geofence_state >= 0 && s->geofence_state != inside) {
+                const char* event = inside ? "enter" : "exit";
+                if (strcmp(s->geofence_event, "both") == 0 ||
+                    strcmp(s->geofence_event, event) == 0) {
+                    cJSON* data = gps_trigger_data(fix, event);
+                    cJSON_AddBoolToObject(data, "inside", inside);
+                    fire_fn(s->rule_id, s->trigger_index, data);
+                    cJSON_Delete(data);
+                }
+            }
+            s->geofence_state = inside;
+        } else {
+            int next = (fix->has_fix && fix->has_position) ? 1 : 0;
+            const char* event = next ? "acquired" : "lost";
+            if (s->gps_fix_state >= 0 && s->gps_fix_state != next &&
+                strcmp(s->gps_fix_event, event) == 0) {
+                cJSON* data = gps_trigger_data(fix, event);
+                fire_fn(s->rule_id, s->trigger_index, data);
+                cJSON_Delete(data);
+            }
+            s->gps_fix_state = next;
+        }
+    }
+}
+
 void Triggers_Tick(void) {
     Scheduler_Tick();
+
+    gps_snapshot_t gps;
+    Gps_Get_Snapshot(&gps);
+    if (gps.enabled && gps.fix.has_fix && gps.fix.has_position && !gps.fresh) {
+        for (int i = 0; i < sub_count; i++) {
+            Subscription* s = &subs[i];
+            if (s->type == TRIG_GPS_SPEED)
+                s->gps_active = 0;
+            else if (s->type == TRIG_GPS_GEOFENCE)
+                s->geofence_state = -1;
+            if (s->type != TRIG_GPS_FIX || strcmp(s->gps_fix_event, "stale") != 0 ||
+                s->gps_fix_state != 1)
+                continue;
+            s->gps_fix_state = 2;
+            cJSON* data = gps_trigger_data(&gps.fix, "stale");
+            fire_fn(s->rule_id, s->trigger_index, data);
+            cJSON_Delete(data);
+        }
+    }
 
     /* IO input hold-duration triggers */
     for (int i = 0; i < sub_count; i++) {
@@ -1166,6 +1392,15 @@ int Triggers_Any_Active(const char* rule_id) {
             if (s->value_op[0] && (s->value_hysteresis || s->value_since > 0)) return 1;
         } else if (s->type == TRIG_COUNTER_THRESHOLD) {
             if (s->counter_hysteresis) return 1;
+        } else if (s->type == TRIG_GPS_SPEED) {
+            if (s->gps_active) return 1;
+        } else if (s->type == TRIG_GPS_GEOFENCE) {
+            if (s->geofence_state == 1) return 1;
+        } else if (s->type == TRIG_GPS_FIX) {
+            if ((strcmp(s->gps_fix_event, "acquired") == 0 && s->gps_fix_state == 1) ||
+                (strcmp(s->gps_fix_event, "lost") == 0 && s->gps_fix_state == 0) ||
+                (strcmp(s->gps_fix_event, "stale") == 0 && s->gps_fix_state == 2))
+                return 1;
         }
         /* All other trigger types are treated as momentary here. */
     }
@@ -1215,10 +1450,16 @@ int Triggers_All_Currently_Active(const char* rule_id, int fired_trigger_index) 
             active = av && cJSON_IsTrue(av);
         } else if (s->type == TRIG_COUNTER_THRESHOLD) {
             active = Counter_Compare(s->counter_name, s->counter_op, s->counter_threshold);
+        } else if (s->type == TRIG_GPS_SPEED) {
+            active = s->gps_active;
+        } else if (s->type == TRIG_GPS_GEOFENCE) {
+            active = s->geofence_state == 1;
+        } else if (s->type == TRIG_GPS_FIX) {
+            active = (strcmp(s->gps_fix_event, "acquired") == 0 && s->gps_fix_state == 1) ||
+                     (strcmp(s->gps_fix_event, "lost") == 0 && s->gps_fix_state == 0) ||
+                     (strcmp(s->gps_fix_event, "stale") == 0 && s->gps_fix_state == 2);
         } else {
-            /* Momentary triggers (schedule, webhook, mqtt, rule_fired, manual,
-             * modbus_read, modbus_error, sparkplug_command) count only as the
-             * firing trigger. */
+            /* Momentary triggers count only as the firing trigger. */
             active = 0;
         }
 
@@ -1301,6 +1542,30 @@ cJSON* Triggers_Catalog(void) {
     cJSON_AddStringToObject(t, "type", "sparkplug_command");
     cJSON_AddStringToObject(t, "label", "Sparkplug Command");
     cJSON_AddStringToObject(t, "description", "Fires when a Sparkplug host writes a metric via NCMD/DCMD");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "gps_update");
+    cJSON_AddStringToObject(t, "label", "GPS Update");
+    cJSON_AddStringToObject(t, "description", "Fires on a valid GPS fix at the configured interval");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "gps_speed");
+    cJSON_AddStringToObject(t, "label", "GPS Speed");
+    cJSON_AddStringToObject(t, "description", "Fires when GPS speed crosses a threshold");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "gps_geofence");
+    cJSON_AddStringToObject(t, "label", "GPS Geofence");
+    cJSON_AddStringToObject(t, "description", "Fires when the GPS position enters or leaves a circle or polygon");
+    cJSON_AddItemToArray(arr, t);
+
+    t = cJSON_CreateObject();
+    cJSON_AddStringToObject(t, "type", "gps_fix");
+    cJSON_AddStringToObject(t, "label", "GPS Fix");
+    cJSON_AddStringToObject(t, "description", "Fires when a GPS fix is acquired, lost, or becomes stale");
     cJSON_AddItemToArray(arr, t);
 
     return arr;

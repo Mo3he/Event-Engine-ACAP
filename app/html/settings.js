@@ -1,5 +1,7 @@
 'use strict';
 
+let gpsPollTimer = null;
+
 async function loadStatus() {
   try {
     const s = await API.getStatus();
@@ -40,6 +42,7 @@ async function loadStatus() {
     updateStreamStatusBadge(s);
     renderDeviceCapabilities();
     checkSerialPort();
+    if (!gpsPollTimer) gpsPollTimer = setInterval(loadGpsStatus, 2000);
   } catch(e) {
     toast('Failed to load status', 'error');
   }
@@ -783,8 +786,96 @@ async function loadAllSettings() {
     loadSmtpSettings(settings);
     loadMqttSettings(settings);
     loadSparkplugSettings(settings);
+    loadGpsSettings(settings);
     loadTlsProfiles();
   } catch(e) { /* non-fatal — individual loaders will show errors as needed */ }
+}
+
+function gpsSourceVisibility() {
+  const form = document.getElementById('gps-form');
+  if (!form) return;
+  const source = form.elements.source.value;
+  const serial = source === 'serial';
+  document.getElementById('gps-serial-row').style.display = serial ? 'flex' : 'none';
+  document.getElementById('gps-network-row').style.display = serial ? 'none' : 'flex';
+  document.getElementById('gps-host-group').style.display = source === 'tcp_client' ? 'block' : 'none';
+  document.getElementById('gps-port-label').textContent =
+    source === 'tcp_client' ? 'GPS server port' : 'Listen port';
+}
+
+function loadGpsSettings(settings) {
+  const cfg = (settings && settings.gps) || {};
+  const form = document.getElementById('gps-form');
+  if (!form) return;
+  form.elements.enabled.checked = !!cfg.enabled;
+  form.elements.source.value = cfg.source || 'serial';
+  form.elements.device.value = cfg.device || 'auto';
+  form.elements.baud.value = String(cfg.baud === undefined ? 0 : cfg.baud);
+  form.elements.host.value = cfg.host || '127.0.0.1';
+  form.elements.port.value = cfg.port || 5010;
+  form.elements.stale_after_s.value = cfg.stale_after_s || 5;
+  gpsSourceVisibility();
+  loadGpsStatus();
+}
+
+async function saveGpsSettings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const cfg = {
+    enabled: form.elements.enabled.checked,
+    source: form.elements.source.value,
+    device: form.elements.device.value.trim() || 'auto',
+    baud: parseInt(form.elements.baud.value, 10) || 0,
+    host: form.elements.host.value.trim() || '127.0.0.1',
+    port: parseInt(form.elements.port.value, 10),
+    stale_after_s: parseInt(form.elements.stale_after_s.value, 10)
+  };
+  if (!cfg.port || cfg.port < 1 || cfg.port > 65535 ||
+      !cfg.stale_after_s || cfg.stale_after_s < 1 || cfg.stale_after_s > 3600) {
+    toast('Check the GPS port and stale timeout values', 'error');
+    return;
+  }
+  try {
+    await API.post('settings', { gps: cfg });
+    toast('GPS settings saved', 'success');
+    setTimeout(loadGpsStatus, 500);
+  } catch(e) {
+    toast('Failed to save GPS settings: ' + e.message, 'error');
+  }
+}
+
+async function loadGpsStatus() {
+  try {
+    const s = await API.get('gps');
+    const dot = document.getElementById('gps-dot');
+    const status = document.getElementById('gps-status-text');
+    const live = document.getElementById('gps-live-status');
+    const raw = document.getElementById('gps-raw-lines');
+    if (!dot || !status || !live || !raw) return;
+    const color = !s.enabled ? 'var(--text-dim)'
+      : (s.has_fix && s.fresh) ? 'var(--accent-success)'
+      : s.state === 'error' ? '#ef4444' : '#f59e0b';
+    dot.style.background = color;
+    status.textContent = !s.enabled ? 'Disabled' :
+      `${s.state}${s.has_fix && s.fresh ? ' · fix' : ''}`;
+    const position = s.has_fix && s.fresh
+      ? `${Number(s.latitude).toFixed(6)}, ${Number(s.longitude).toFixed(6)}`
+      : '--';
+    const speed = s.has_fix && s.fresh && Number.isFinite(Number(s.speed_kmh))
+      ? `${Number(s.speed_kmh).toFixed(1)} km/h` : '--';
+    live.innerHTML = [
+      `Position: <b>${escHtml(position)}</b>`,
+      `Speed: <b>${escHtml(speed)}</b>`,
+      `Satellites: <b>${escHtml(s.satellites)}</b>`,
+      `Bytes / lines / parsed: <b>${escHtml(s.bytes_received)} / ${escHtml(s.lines_received)} / ${escHtml(s.sentences_parsed)}</b>`,
+      `Checksum / format errors: <b>${escHtml(s.checksum_errors)} / ${escHtml(s.format_errors)}</b>`,
+      s.last_error ? `Last error: <b>${escHtml(s.last_error)}</b>` : ''
+    ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    raw.textContent = (s.raw_lines || []).join('\n');
+  } catch(e) {
+    const status = document.getElementById('gps-status-text');
+    if (status) status.textContent = 'Status unavailable';
+  }
 }
 
 /* ===== TLS profiles (certificates for HTTPS and MQTT) ===== */

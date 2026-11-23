@@ -21,6 +21,7 @@
 #include "engine/alert_stream.h"
 #include "engine/certs.h"
 #include "engine/modbus_codec.h"
+#include "engine/gps.h"
 
 #define APP_PACKAGE "acap_event_engine"
 
@@ -78,7 +79,8 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
     static const char* const trigger_types[] = {
         "vapix_event", "schedule", "mqtt_message", "http_webhook", "io_input",
         "counter_threshold", "rule_fired", "aoa_scenario", "manual", "modbus_read",
-        "modbus_error", "sparkplug_command", NULL
+        "modbus_error", "sparkplug_command", "gps_update", "gps_speed",
+        "gps_geofence", "gps_fix", NULL
     };
     static const char* const condition_types[] = {
         "time_window", "io_state", "counter", "variable_compare", "http_check",
@@ -177,6 +179,72 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
             if (ttype && strcmp(ttype, "modbus_read") == 0 && !mb_validate_read(t, mb_err, sizeof(mb_err))) {
                 snprintf(error, error_size, "trigger %d (modbus_read): %s", tidx + 1, mb_err);
                 return 0;
+            }
+            if (ttype && strcmp(ttype, "gps_speed") == 0) {
+                static const char* const ops[] = {"gt", "gte", "lt", "lte", "between", NULL};
+                static const char* const units[] = {"kmh", "mph", "knots", "mps", NULL};
+                const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(t, "op"));
+                const char* unit = cJSON_GetStringValue(cJSON_GetObjectItem(t, "unit"));
+                cJSON* value = cJSON_GetObjectItem(t, "value");
+                cJSON* value2 = cJSON_GetObjectItem(t, "value2");
+                cJSON* hyst = cJSON_GetObjectItem(t, "hysteresis");
+                if (!op || !string_in_list(op, ops) || !cJSON_IsNumber(value) ||
+                    (unit && !string_in_list(unit, units)) ||
+                    (hyst && (!cJSON_IsNumber(hyst) || hyst->valuedouble < 0)) ||
+                    (strcmp(op, "between") == 0 &&
+                     (!cJSON_IsNumber(value2) || value2->valuedouble < value->valuedouble))) {
+                    snprintf(error, error_size, "trigger %d (gps_speed) has invalid operator, unit, or thresholds", tidx + 1);
+                    return 0;
+                }
+            }
+            if (ttype && strcmp(ttype, "gps_geofence") == 0) {
+                static const char* const events[] = {"enter", "exit", "both", NULL};
+                const char* event = cJSON_GetStringValue(cJSON_GetObjectItem(t, "event"));
+                cJSON* points = cJSON_GetObjectItem(t, "points");
+                int polygon = cJSON_IsArray(points);
+                cJSON* lat = cJSON_GetObjectItem(t, "latitude");
+                cJSON* lon = cJSON_GetObjectItem(t, "longitude");
+                cJSON* radius = cJSON_GetObjectItem(t, "radius_m");
+                if ((event && !string_in_list(event, events)) ||
+                    (polygon && (cJSON_GetArraySize(points) < 3 || cJSON_GetArraySize(points) > 32)) ||
+                    (!polygon && (!cJSON_IsNumber(lat) || lat->valuedouble < -90 ||
+                                  lat->valuedouble > 90 || !cJSON_IsNumber(lon) ||
+                                  lon->valuedouble < -180 || lon->valuedouble > 180 ||
+                                  !cJSON_IsNumber(radius) || radius->valuedouble <= 0 ||
+                                  radius->valuedouble > 100000))) {
+                    snprintf(error, error_size, "trigger %d (gps_geofence) requires a valid circle or polygon", tidx + 1);
+                    return 0;
+                }
+                if (polygon) {
+                    cJSON* point;
+                    cJSON_ArrayForEach(point, points) {
+                        cJSON* plat = cJSON_GetArrayItem(point, 0);
+                        cJSON* plon = cJSON_GetArrayItem(point, 1);
+                        if (!cJSON_IsArray(point) || cJSON_GetArraySize(point) != 2 ||
+                            !cJSON_IsNumber(plat) || plat->valuedouble < -90 ||
+                            plat->valuedouble > 90 || !cJSON_IsNumber(plon) ||
+                            plon->valuedouble < -180 || plon->valuedouble > 180) {
+                            snprintf(error, error_size, "trigger %d (gps_geofence) has invalid polygon coordinates", tidx + 1);
+                            return 0;
+                        }
+                    }
+                }
+            }
+            if (ttype && strcmp(ttype, "gps_fix") == 0) {
+                static const char* const events[] = {"acquired", "lost", "stale", NULL};
+                const char* event = cJSON_GetStringValue(cJSON_GetObjectItem(t, "event"));
+                if (event && !string_in_list(event, events)) {
+                    snprintf(error, error_size, "trigger %d (gps_fix) event must be acquired, lost, or stale", tidx + 1);
+                    return 0;
+                }
+            }
+            if (ttype && strcmp(ttype, "gps_update") == 0) {
+                cJSON* interval = cJSON_GetObjectItem(t, "interval_s");
+                if (interval && (!cJSON_IsNumber(interval) || interval->valuedouble < 1 ||
+                                 interval->valuedouble > 3600)) {
+                    snprintf(error, error_size, "trigger %d (gps_update) interval_s must be 1..3600", tidx + 1);
+                    return 0;
+                }
             }
             tidx++;
         }
@@ -415,6 +483,8 @@ static void Settings_Updated(const char* service, cJSON* data) {
         apply_smtp_config(data);
     else if (strcmp(service, "sparkplug") == 0)
         apply_sparkplug_config(data);
+    else if (strcmp(service, "gps") == 0)
+        Gps_Reconfigure(data);
 }
 
 /*=====================================================
@@ -1131,6 +1201,21 @@ static void HTTP_Sparkplug(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req)
     cJSON_AddItemToObject(obj, "metrics", Sparkplug_Metrics());
     ACAP_HTTP_Respond_JSON(resp, obj);
     cJSON_Delete(obj);
+}
+
+static void HTTP_GPS(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
+    const char* method = get_method(req);
+    if (!method) {
+        ACAP_HTTP_Respond_Error(resp, 400, "Invalid Request Method");
+        return;
+    }
+    if (strcmp(method, "GET") != 0) {
+        ACAP_HTTP_Respond_Error(resp, 405, "Method not allowed");
+        return;
+    }
+    cJSON* status = Gps_Status_JSON();
+    ACAP_HTTP_Respond_JSON(resp, status);
+    cJSON_Delete(status);
 }
 
 /*=====================================================
@@ -2028,6 +2113,7 @@ int main(void) {
     load_smtp_password();
 
     RuleEngine_Init();
+    Gps_Init(cJSON_GetObjectItem(settings, "gps"), Triggers_On_GPS_Update);
 
     AlertStream_Init();
 
@@ -2057,6 +2143,7 @@ int main(void) {
     ACAP_HTTP_Node("aoa",        HTTP_AOA);
     ACAP_HTTP_Node("remote-caps", HTTP_RemoteCaps);
     ACAP_HTTP_Node("sparkplug",  HTTP_Sparkplug);
+    ACAP_HTTP_Node("gps",        HTTP_GPS);
     ACAP_HTTP_Node("certs",      HTTP_Certs);
 
     g_timeout_add_seconds(1, Engine_Tick, NULL);
@@ -2079,6 +2166,7 @@ int main(void) {
     Actions_IoFlash_Stop_All();
     Actions_Overlay_Cleanup();
     AlertStream_Cleanup();
+    Gps_Cleanup();
     RuleEngine_Cleanup();
     Sparkplug_Cleanup();
     MQTT_Cleanup();
