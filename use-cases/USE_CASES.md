@@ -945,7 +945,7 @@ match a list entry that differs by a character.
 
 Display the receiver's current position and speed on the camera's video, and
 remove the overlay if fresh GPS data stops arriving. Requires an NMEA 0183 GPS
-receiver and GPS input configured under **Settings → GPS**. Physical receiver
+receiver and GPS input configured under **Settings → GPS / NMEA Input**. Physical receiver
 compatibility and reception should be verified on the target installation.
 
 ### 9.1 Live GPS Position and Speed Overlay

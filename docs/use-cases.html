@@ -338,6 +338,9 @@
     <a href="#uc8-4" class="sub">8.4 Block List → Milestone</a>
     <a href="#uc8-5" class="sub">8.5 Block List Alert on Video</a>
 
+    <a href="#uc9">9 — GPS / NMEA</a>
+    <a href="#uc9-1" class="sub">9.1 Live GPS Overlay</a>
+
     <div class="sidebar-group">Reference</div>
     <a href="#summary">Template Summary</a>
     <a href="#customisation">Customisation Guide</a>
@@ -1383,6 +1386,36 @@
       </div>
     </div>
 
+    <!-- ═══════════════════════ UC 9 ═══════════════════════ -->
+    <div class="section-header" id="uc9">
+      <h2>9 — GPS / NMEA</h2>
+      <p>Event Engine reads NMEA 0183 data from a GPS receiver on the camera's serial port, or over UDP or TCP, and makes the position available to rules as <span class="var">{{gps.*}}</span> variables and GPS triggers. Requires 1.9.31 or later and GPS enabled under <strong>Settings → GPS / NMEA Input</strong>.</p>
+    </div>
+
+    <div class="uc-card" id="uc9-1">
+      <h3>9.1 Live GPS Position and Speed Overlay</h3>
+      <p class="scenario">A camera on a vehicle or a moving asset should show where it is and how fast it is moving on the live video and in recordings. The overlay should disappear when the GPS data stops being valid, rather than showing an old position.</p>
+      <div class="tags">
+        <span class="tag trigger">gps_update (1 s)</span>
+        <span class="tag trigger">gps_fix (lost / stale)</span>
+        <span class="tag action">overlay_text</span>
+        <span class="tag feature">named overlay</span>
+        <span class="tag feature">{{gps.*}}</span>
+      </div>
+      <ol class="how-list">
+        <li data-step="1"><strong>9.1:</strong> a <strong>GPS Update</strong> trigger fires at most once per second on a fresh fix and refreshes the <strong>Overlay Text</strong> named <code>gps_live_position</code> with <span class="var">{{gps.speed_kmh}}</span>, <span class="var">{{gps.latitude}}</span>, <span class="var">{{gps.longitude}}</span> and <span class="var">{{gps.heading_cardinal}}</span></li>
+        <li data-step="2"><strong>9.1b:</strong> two <strong>GPS Fix</strong> triggers (Lost, Stale) clear the same overlay when the receiver reports no fix or no valid update arrives within the stale timeout</li>
+        <li data-step="3">Coordinates show 6 decimals and speed 1; append <code>|N</code> to a variable to change the precision</li>
+      </ol>
+      <div class="setup-box">
+        <strong>Setup:</strong> Requires 1.9.31 or later. Under <strong>Settings → GPS / NMEA Input</strong> choose the source (for the serial port, device <code>auto</code> and the receiver's baud rate, often 4800 or 9600), save, and check that the status shows parsed sentences and a fix. Do not share the serial port with Modbus RTU or another application. Import and enable both templates; keep the overlay name and channel the same in both if you change them.
+      </div>
+      <div class="dl-row">
+        <button class="dl-btn" onclick="downloadTemplate('9.1-gps-live-video-overlay')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 9.1 — Show Overlay</button>
+        <button class="dl-btn" onclick="downloadTemplate('9.1b-gps-live-video-overlay-clear')"><svg viewBox="0 0 16 16"><path d="M8 12l-4-4h2.5V2h3v6H12L8 12zm-6 2h12v1.5H2V14z"/></svg> 9.1b — Clear Overlay</button>
+      </div>
+    </div>
+
     <!-- ═══════════════════════ SUMMARY ═══════════════════════ -->
     <div class="section-header" id="summary">
       <h2>Template Summary</h2>
@@ -1454,6 +1487,8 @@
         <tr><td>8.4</td><td>alpv-blocklist-to-milestone-alarm</td><td>ALPV</td><td>Block-list plate → Milestone Analytics Event (plate, country, vehicle, snapshots)</td></tr>
         <tr><td>8.5a</td><td>alpv-blocklist-alert-show</td><td>ALPV</td><td>Block-list plate → full-screen alert image + plate text on the video (this or another camera)</td></tr>
         <tr><td>8.5b</td><td>alpv-blocklist-alert-clear</td><td>ALPV</td><td>That vehicle lost → clear the alert</td></tr>
+        <tr><td>9.1</td><td>gps-live-video-overlay</td><td>GPS</td><td>Fresh GPS fix → overlay with position, speed and heading</td></tr>
+        <tr><td>9.1b</td><td>gps-live-video-overlay-clear</td><td>GPS</td><td>GPS fix lost or stale → clear the overlay</td></tr>
       </tbody>
     </table>
 
