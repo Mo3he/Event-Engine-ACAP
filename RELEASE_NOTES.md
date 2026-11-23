@@ -2,22 +2,61 @@
 
 ## v1.10.0 - Settings redesign and feature controls
 
-The Settings page has been reorganized into collapsible sections with concise
-status summaries. Hiding a section does not disable its feature. MQTT,
-Sparkplug B, GPS, Alert Stream, and RS-485 now have separate enable switches;
-turning a feature off keeps its configuration. Backup and Restore controls are
-in the Device section, and the rule editor uses a centered dialog that keeps
-scrolling within the dialog. Turning an existing RS-485 gateway off and back on
-leaves its serial port mode and line settings unchanged.
-
-Alert Stream can now be disabled from Settings. Disabling it closes existing
-streams and rejects new connections. The setting defaults to enabled, including
-on installations whose saved settings do not yet contain the new flag.
+A refreshed web UI and a reorganized Settings page. The interface has a
+cleaner, centered layout that sits more naturally next to the camera's own
+pages, and each optional feature can now be switched on and off directly
+from its section in Settings. Alert Stream can be disabled for the first time.
 
 ### Upgrading to 1.10.0
 
-In-place upgrades keep existing rules and settings. Existing Alert Stream
-configurations remain enabled unless explicitly turned off after upgrading.
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept, and every feature
+stays in the state it was in before the upgrade. Alert Stream stays enabled
+unless you turn it off; this also applies when restoring an older settings
+backup.
+
+### New in 1.10.0
+
+- **Refreshed interface:** centered page layout, clearer primary buttons,
+  green on/off switches, and rounded rule chips with conditions marked in
+  orange. The rule editor opens as a centered dialog whose contents scroll
+  without moving the page behind it.
+- **Feature switches in Settings:** MQTT, Sparkplug B, GPS, Alert Stream and
+  RS-485 each have an enable switch in their section header. Turning a feature
+  off keeps its configuration, so turning it back on restores the same setup.
+  If MQTT or Sparkplug B has not been configured yet, the switch stays off and
+  the section opens to show what is missing.
+- **Collapsible sections:** collapsing a section only hides it; it does not
+  turn the feature off. Email, Location, TLS profiles and Proxy show a short
+  summary when collapsed, such as the mail server, coordinates or number of
+  profiles.
+- **Backup & Restore in the Device section:** rule and settings export/import
+  now sit next to *Check for Updates*.
+- **Alert Stream on/off:** when disabled, open streams are closed and new
+  connections get HTTP 503. `GET /engine` reports `stream_enabled`, and the
+  setting is `engine.alert_stream_enabled` (default `true`).
+- **RS-485:** 4800 baud can be selected.
+
+### Fixes in 1.10.0
+
+- **Re-enabling an existing RS-485 gateway keeps its serial settings.**
+  Turning it off and on only toggles the TCP listener; baud rate, parity, data
+  bits, stop bits and port mode are left unchanged.
+- **Importing settings refreshes every section** instead of only MQTT.
+
+### API change: partial settings updates
+
+`POST /settings` now merges the fields of a nested object such as `mqtt` or
+`engine` into the saved settings, as the API documentation already described.
+Previously the whole object was replaced, so a client sending only
+`{"engine": {"latitude": 59.3}}` silently dropped every other `engine` field.
+Fields you leave out are now kept; to clear a value, send it explicitly (for
+example an empty string or `false`).
+
+Verified on a P3288-LV (AXIS OS 12.11.77): in-place upgrade to the signed
+package with rules and settings kept, Alert Stream enable/disable with open
+streams, and partial settings updates. RS-485 behavior was tested against a
+simulated serial port, as the test camera has no RS-485 interface.
 
 ## v1.9.31 - GPS / NMEA input and triggers
 
