@@ -1,6 +1,6 @@
 {
-  "name": "GPS - Clear Live Overlay When Fix Is Stale",
-  "description": "Clear the named overlay from 9.1 when fresh GPS data stops arriving. Use the same target device and channel as the display rule if changed.",
+  "name": "GPS - Clear Live Overlay When Fix Is Lost or Stale",
+  "description": "Clear the named overlay from 9.1 when the receiver reports no fix or fresh GPS data stops arriving. Use the same target device and channel as the display rule if changed.",
   "enabled": true,
   "trigger_logic": "OR",
   "trigger_window": 0,
@@ -9,6 +9,10 @@
   "max_executions": 0,
   "max_exec_period": "",
   "triggers": [
+    {
+      "type": "gps_fix",
+      "event": "lost"
+    },
     {
       "type": "gps_fix",
       "event": "stale"

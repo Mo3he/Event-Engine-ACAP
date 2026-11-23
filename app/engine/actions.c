@@ -411,25 +411,25 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
                 } else if (!gps_valid) {
                     replacement = "--";
                 } else if (strcmp(field, "lat") == 0 || strcmp(field, "latitude") == 0) {
-                    snprintf(tmp, sizeof(tmp), "%.8f", gps.fix.latitude);
+                    snprintf(tmp, sizeof(tmp), "%.6f", gps.fix.latitude);
                     replacement = tmp;
                 } else if (strcmp(field, "lon") == 0 || strcmp(field, "longitude") == 0) {
-                    snprintf(tmp, sizeof(tmp), "%.8f", gps.fix.longitude);
+                    snprintf(tmp, sizeof(tmp), "%.6f", gps.fix.longitude);
                     replacement = tmp;
                 } else if (strcmp(field, "speed_kmh") == 0) {
-                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.4f", gps.fix.speed_kmh); replacement = tmp; }
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_kmh); replacement = tmp; }
                     else replacement = "--";
                 } else if (strcmp(field, "speed_mph") == 0) {
-                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.4f", gps.fix.speed_kmh / 1.609344); replacement = tmp; }
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_kmh / 1.609344); replacement = tmp; }
                     else replacement = "--";
                 } else if (strcmp(field, "speed_knots") == 0) {
-                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.4f", gps.fix.speed_knots); replacement = tmp; }
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_knots); replacement = tmp; }
                     else replacement = "--";
                 } else if (strcmp(field, "speed_mps") == 0) {
-                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.4f", gps.fix.speed_kmh / 3.6); replacement = tmp; }
+                    if (gps.fix.has_speed) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.speed_kmh / 3.6); replacement = tmp; }
                     else replacement = "--";
                 } else if (strcmp(field, "heading") == 0) {
-                    if (gps.fix.has_heading) { snprintf(tmp, sizeof(tmp), "%.4f", gps.fix.heading); replacement = tmp; }
+                    if (gps.fix.has_heading) { snprintf(tmp, sizeof(tmp), "%.0f", gps.fix.heading); replacement = tmp; }
                     else replacement = "--";
                 } else if (strcmp(field, "heading_cardinal") == 0) {
                     static const char* const cardinal[] = {
@@ -440,7 +440,7 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
                         ? cardinal[((int)floor((gps.fix.heading + 11.25) / 22.5)) % 16]
                         : "--";
                 } else if (strcmp(field, "altitude_m") == 0) {
-                    if (gps.fix.has_altitude) { snprintf(tmp, sizeof(tmp), "%.4f", gps.fix.altitude_m); replacement = tmp; }
+                    if (gps.fix.has_altitude) { snprintf(tmp, sizeof(tmp), "%.1f", gps.fix.altitude_m); replacement = tmp; }
                     else replacement = "--";
                 } else if (strcmp(field, "satellites") == 0) {
                     snprintf(tmp, sizeof(tmp), "%d", gps.fix.satellites);

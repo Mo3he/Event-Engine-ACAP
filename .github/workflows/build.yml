@@ -109,3 +109,11 @@ jobs:
             echo "Verification of $f:"
             tar tzf "$f"
           done
+      - name: Check glibc symbol versions
+        # Newer SDK symbol versions (e.g. GLIBC_2.42 cfsetospeed) stop the app
+        # loading on older AXIS OS; 2.34 is what released builds require.
+        run: |
+          tar xzf *.eap acap_event_engine
+          max=$(readelf -W --dyn-syms acap_event_engine | grep -o 'GLIBC_2\.[0-9]*' | sort -uV | tail -1)
+          echo "Highest required: $max"
+          [ "$(printf '%s\nGLIBC_2.34\n' "$max" | sort -V | tail -1)" = GLIBC_2.34 ]

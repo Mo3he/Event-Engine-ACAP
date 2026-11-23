@@ -518,7 +518,7 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 8.5a | `8.5a-alpv-blocklist-alert-show.json` | ALPV | Block-list plate → full-screen alert image + plate text on the video (this or another camera) |
 | 8.5b | `8.5b-alpv-blocklist-alert-clear.json` | ALPV | That vehicle lost → clear the alert |
 | 9.1 | `9.1-gps-live-video-overlay.json` | GPS | Fresh NMEA fix → update video overlay with position, speed, and heading |
-| 9.1b | `9.1b-gps-live-video-overlay-clear.json` | GPS | GPS fix stale → clear the live overlay |
+| 9.1b | `9.1b-gps-live-video-overlay-clear.json` | GPS | GPS fix lost or stale → clear the live overlay |
 
 ---
 
@@ -951,16 +951,17 @@ compatibility and reception should be verified on the target installation.
 ### 9.1 Live GPS Position and Speed Overlay
 
 **Scenario:** Show the latest GPS position, speed, and heading on the live video
-stream. The overlay refreshes on fresh GPS fixes and clears when the fix becomes
-stale.
+stream. The overlay refreshes on fresh GPS fixes and clears when the fix is lost
+or becomes stale.
 
 **How it works:**
 
 - **9.1 (show):** a **GPS Update** trigger runs once per second at most and
   refreshes a named **Overlay Text** with `{{gps.speed_kmh}}`,
   `{{gps.latitude}}`, `{{gps.longitude}}`, and `{{gps.heading_cardinal}}`.
-- **9.1b (clear):** a **GPS Fix** trigger clears that same named overlay when
-  no valid update arrives within the configured stale timeout.
+- **9.1b (clear):** two **GPS Fix** triggers (Lost, Stale) clear that same
+  named overlay when the receiver reports no fix or no valid update arrives
+  within the configured stale timeout.
 - GPS input supports the camera serial port, UDP and TCP listeners, and a TCP
   client. Do not configure GPS and Modbus to share the same physical serial
   port.

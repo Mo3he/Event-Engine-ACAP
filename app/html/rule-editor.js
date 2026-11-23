@@ -1083,8 +1083,8 @@ async function gpsUseCurrentPosition(rowIdx) {
     }
     const row = document.getElementById(`trow-${rowIdx}`);
     if (!row) return;
-    row.querySelector('[data-k="latitude"]').value = gps.latitude;
-    row.querySelector('[data-k="longitude"]').value = gps.longitude;
+    row.querySelector('[data-k="latitude"]').value = gps.latitude.toFixed(6);
+    row.querySelector('[data-k="longitude"]').value = gps.longitude.toFixed(6);
     collectTriggerRow(rowIdx);
     toast('Geofence center set to current GPS position', 'success');
   } catch(e) {
@@ -1855,6 +1855,9 @@ function toggleTokenPicker(btn) {
                                  ...(hasSnapshot ? ['{{trigger.snapshot_base64}}'] : []),
                                  ...(hasAlpvImage ? ['{{trigger.alpv_image_base64}}'] : [])] },
   ];
+  groups.push({ label: 'GPS', tokens: ['{{gps.speed_kmh}}', '{{gps.latitude}}', '{{gps.longitude}}',
+                                      '{{gps.heading_cardinal}}', '{{gps.heading}}', '{{gps.altitude_m}}',
+                                      '{{gps.satellites}}', '{{gps.fix}}', '{{gps.utc}}', '{{gps.age}}'] });
   if (triggerTokens.length)
     groups.push({ label: 'Trigger', tokens: triggerTokens });
   if (knownVarNames.length)

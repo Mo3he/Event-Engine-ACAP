@@ -610,7 +610,7 @@ Content-Type: application/json
         <tr><th>Trigger</th><th>Behavior</th></tr>
         <tr><td><strong>GPS Update</strong></td><td>Fires on a valid fix, at most once per configured interval.</td></tr>
         <tr><td><strong>GPS Speed</strong></td><td>Fires when speed enters the selected threshold. Supports above, below, and between comparisons, units (km/h, mph, knots, m/s), and optional hysteresis.</td></tr>
-        <tr><td><strong>GPS Geofence</strong></td><td>Fires when position enters, exits, or does either for a circle or polygon. Circle coordinates are decimal degrees; polygon points are latitude/longitude pairs.</td></tr>
+        <tr><td><strong>GPS Geofence</strong></td><td>Fires when position enters, exits, or does either for a circle or polygon. Circle coordinates are decimal degrees; polygon points are latitude/longitude pairs. Only boundary crossings fire: the first valid fix (at startup or after the fix is lost) sets the baseline.</td></tr>
         <tr><td><strong>GPS Fix</strong></td><td>Fires when a fix is acquired, lost, or becomes stale.</td></tr>
       </table>
       <p>Use GPS template values in actions to place location, speed, or heading directly in an <strong>Overlay Text</strong> action. For example: <code>Speed {{gps.speed_kmh}} km/h - {{gps.latitude}}, {{gps.longitude}}</code>. Values other than age show <code>--</code> when GPS is disabled or no fresh fix is available. The admin-only <code>GET /local/acap_event_engine/gps</code> endpoint reports reader status, counters, fix freshness, and recent raw sentences.</p>
@@ -1183,9 +1183,9 @@ Content-Type: application/json
       <p>These values can be used in any action when GPS is enabled and a fresh fix is available. Values other than age resolve to <code>--</code> if the fix is unavailable or stale.</p>
       <table>
         <tr><th>Variable</th><th>Value</th></tr>
-        <tr><td><span class="var">{{gps.latitude}}</span>, <span class="var">{{gps.longitude}}</span></td><td>Coordinates in decimal degrees (aliases: <code>gps.lat</code> and <code>gps.lon</code>)</td></tr>
-        <tr><td><span class="var">{{gps.speed_kmh}}</span>, <span class="var">{{gps.speed_mph}}</span>, <span class="var">{{gps.speed_knots}}</span>, <span class="var">{{gps.speed_mps}}</span></td><td>Speed in km/h, mph, knots, or m/s</td></tr>
-        <tr><td><span class="var">{{gps.heading}}</span>, <span class="var">{{gps.heading_cardinal}}</span></td><td>Heading in degrees and compass direction</td></tr>
+        <tr><td><span class="var">{{gps.latitude}}</span>, <span class="var">{{gps.longitude}}</span></td><td>Coordinates in decimal degrees with 6 decimals (aliases: <code>gps.lat</code> and <code>gps.lon</code>)</td></tr>
+        <tr><td><span class="var">{{gps.speed_kmh}}</span>, <span class="var">{{gps.speed_mph}}</span>, <span class="var">{{gps.speed_knots}}</span>, <span class="var">{{gps.speed_mps}}</span></td><td>Speed in km/h, mph, knots, or m/s with 1 decimal; append <code>|0</code> for whole numbers</td></tr>
+        <tr><td><span class="var">{{gps.heading}}</span>, <span class="var">{{gps.heading_cardinal}}</span></td><td>Heading in whole degrees and compass direction</td></tr>
         <tr><td><span class="var">{{gps.altitude_m}}</span></td><td>Altitude in metres</td></tr>
         <tr><td><span class="var">{{gps.satellites}}</span>, <span class="var">{{gps.fix_quality}}</span>, <span class="var">{{gps.fix}}</span></td><td>Satellite count, NMEA fix quality, and fix label</td></tr>
         <tr><td><span class="var">{{gps.utc}}</span>, <span class="var">{{gps.date}}</span></td><td>UTC time and date from the NMEA sentence</td></tr>

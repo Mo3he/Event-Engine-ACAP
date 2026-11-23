@@ -1,6 +1,6 @@
 {
   "name": "GPS - Live Position and Speed Overlay",
-  "description": "Refresh a named video overlay from each fresh NMEA GPS fix. Pair with 9.1b to clear it when GPS data becomes stale. Requires GPS input enabled in Settings.",
+  "description": "Refresh a named video overlay from each fresh NMEA GPS fix. Pair with 9.1b to clear it when the fix is lost or GPS data becomes stale. Requires GPS input enabled in Settings.",
   "enabled": true,
   "trigger_logic": "OR",
   "trigger_window": 0,

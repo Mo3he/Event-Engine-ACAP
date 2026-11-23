@@ -17,6 +17,16 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Pin pre-2.42 cfset*speed symbol versions so the app loads on older AXIS OS
+ * (same as modbus_pool.c). */
+#if defined(__aarch64__)
+__asm__(".symver cfsetispeed,cfsetispeed@GLIBC_2.17");
+__asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.17");
+#elif defined(__arm__)
+__asm__(".symver cfsetispeed,cfsetispeed@GLIBC_2.4");
+__asm__(".symver cfsetospeed,cfsetospeed@GLIBC_2.4");
+#endif
+
 #include <glib.h>
 
 #define GPS_LOG(fmt, ...) syslog(LOG_INFO, "gps: " fmt, ##__VA_ARGS__)
