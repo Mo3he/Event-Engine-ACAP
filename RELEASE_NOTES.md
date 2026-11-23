@@ -1,8 +1,17 @@
 # Release Notes
 
-## Unreleased
+## v1.9.30 - Modbus data types, maps, and error triggers
 
-### New in the next release
+Modbus reads and writes now support typed values, register maps, block
+operations, and error/recovery triggers. This release also fixes Modbus rule
+editing and write validation.
+
+### Upgrading to 1.9.30
+
+The signed packages install as an in-place upgrade. Existing rules, settings
+and variables are kept.
+
+### New in 1.9.30
 
 - **Modbus typed reads and writes:** read single values or register maps using
   signed/unsigned integers, floats, strings, byte/word order, scaling and
@@ -11,11 +20,16 @@
 - **Modbus Error trigger:** fire when a device starts failing requests and
   when it recovers, or on every failed request.
 
-### Fixes in the next release
+### Fixes in 1.9.30
 
 - **Modbus settings are preserved when editing a rule.** The rule editor was
   dropping Modbus-specific fields when saving. The editor also now fits dense
   trigger, condition and action forms without horizontal overflow.
+- **Modbus action tests validate writes before encoding them.** Oversized
+  strings and incompatible functions are rejected safely; invalid values and
+  writes that cannot be queued report an action error instead of success.
+- **Existing Modbus write rules keep working.** A `uint16` write still accepts
+  -32768 to -1 and writes it as two's complement, as 1.9.29 did.
 
 ## v1.9.29 - ALPV block list alert template
 

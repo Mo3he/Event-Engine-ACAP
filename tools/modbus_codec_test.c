@@ -90,6 +90,10 @@ static void test_round_trip(void) {
     CHECK(mb_encode_number(-40000, MB_T_INT16, MB_O_ABCD, regs) == -1, "int16 -40000 out of range");
     CHECK(mb_encode_number(NAN, MB_T_FLOAT32, MB_O_ABCD, regs) == -1, "NaN rejected");
     CHECK(mb_encode_number(1e39, MB_T_FLOAT32, MB_O_ABCD, regs) == -1, "float32 overflow");
+    mb_field_t u16 = { .nregs = 1, .type = MB_T_UINT16, .scale = 1 };
+    CHECK(mb_encode_field(-5, &u16, regs) == 0 && regs[0] == 0xFFFB, "uint16 write -5 as 0xFFFB");
+    CHECK(mb_encode_field(-0.5, &u16, regs) == 0 && regs[0] == 0, "uint16 write -0.5 as legacy truncation");
+    CHECK(mb_encode_field(-32768.9, &u16, regs) == 0 && regs[0] == 0x8000, "uint16 write negative fraction at signed boundary");
 }
 
 static void test_strings(void) {
@@ -169,6 +173,10 @@ static void test_validation(void) {
 
     valid(mb_validate_write, "{\"register\":10,\"value\":1}", NULL);
     valid(mb_validate_write, "{\"register\":10,\"value\":70000}", "out of range");
+    valid(mb_validate_write, "{\"register\":10,\"value\":-5}", NULL);
+    valid(mb_validate_write, "{\"register\":10,\"value\":-0.5}", NULL);
+    valid(mb_validate_write, "{\"register\":10,\"value\":-32768.9}", NULL);
+    valid(mb_validate_write, "{\"register\":10,\"value\":-40000}", "out of range");
     valid(mb_validate_write, "{\"register\":10,\"value\":\"{{var.sp}}\"}", NULL);
     valid(mb_validate_write, "{\"register\":10,\"value\":\"abc\"}", "not a number");
     valid(mb_validate_write, "{\"register\":10,\"value\":700,\"scale\":0.1}", NULL);
@@ -186,6 +194,8 @@ static void test_validation(void) {
     valid(mb_validate_write,
           "{\"values\":[{\"register\":0,\"type\":\"string\",\"length\":120,\"value\":\"\"},"
           "{\"register\":120,\"type\":\"uint64\",\"value\":1}]}", "at most 123");
+    valid(mb_validate_write, "{\"data_type\":\"string\",\"length\":125,\"value\":\"\"}", "at most 123");
+    valid(mb_validate_write, "{\"values\":[{\"register\":0,\"type\":\"string\",\"length\":125,\"value\":\"\"}]}", "at most 123");
     valid(mb_validate_write, "{\"register_type\":\"coil\",\"values\":[{\"register\":0,\"value\":1},{\"register\":1,\"value\":0}]}", NULL);
 }
 

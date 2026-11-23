@@ -1979,7 +1979,7 @@ For multiple values, use `values` instead of `register` and `value`. Each entry 
 | `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for multi-register values |
 | `scale` | number | `1` | Input value is converted to raw form using `(value - offset) / scale` |
 | `offset` | number | `0` | Numeric value offset |
-| `length` | integer (1–125) | `8` | String length in registers |
-| `value` | number \| string | — | Value to write; supports templates. Coils accept `0`, `1`, `true`, `false`, `on`, or `off` |
+| `length` | integer (1–123) | `8` | String length in registers |
+| `value` | number \| string | — | Value to write; supports templates. A `uint16` also accepts -32768 to -1, written as two's complement. Coils accept `0`, `1`, `true`, `false`, `on`, or `off` |
 | `values` | array | — | Block entries with `register`, `value`, and optional `type`, `order`, `scale`, `offset`, and `length`. Overlapping entries are rejected; gaps create separate requests. Maximum per request: 123 registers or 1968 coils |
 | `function` | `"auto"` \| `"fc05"` \| `"fc15"` \| `"fc06"` \| `"fc16"` | `"auto"` | Force a compatible single/multiple-coil or register write function |

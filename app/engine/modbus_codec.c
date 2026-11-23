@@ -174,6 +174,13 @@ double mb_unscale(double value, double scale, double offset) {
     return (value - offset) / (scale != 0 ? scale : 1);
 }
 
+int mb_encode_field(double v, const mb_field_t* f, uint16_t* regs) {
+    double raw = mb_unscale(v, f->scale, f->offset);
+    if (f->type == MB_T_UINT16 && raw < 0)
+        return mb_encode_number(trunc(raw), MB_T_INT16, f->order, regs);
+    return mb_encode_number(raw, f->type, f->order, regs);
+}
+
 const char* mb_exception_name(int code) {
     switch (code) {
         case 0x01: return "Illegal Function";
@@ -406,7 +413,7 @@ static int check_literal(cJSON* v, const mb_field_t* f, int bits, char* err, siz
         return 0;
     }
     uint16_t regs[4];
-    if (mb_encode_number(mb_unscale(d, f->scale, f->offset), f->type, f->order, regs) != 0) {
+    if (mb_encode_field(d, f, regs) != 0) {
         snprintf(err, err_size, "value %g is out of range for %s", d, mb_type_name(f->type));
         return -1;
     }

@@ -4658,7 +4658,7 @@ static int mb_encode_value(cJSON* v, const mb_field_t* f, int bits, cJSON* trigg
     } else if (mb_parse_number(text, &d) != 0) {
         snprintf(err, err_size, "'%.40s' is not a number", text);
         rc = -1;
-    } else if (mb_encode_number(mb_unscale(d, f->scale, f->offset), f->type, f->order, regs) != 0) {
+    } else if (mb_encode_field(d, f, regs) != 0) {
         snprintf(err, err_size, "%.40s is out of range for %s", text, mb_type_name(f->type));
         rc = -1;
     }
@@ -4682,6 +4682,11 @@ static int mb_write_value_cmp(const void* a, const void* b) {
  * of adjacent registers is one request (FC16/FC15), or FC06/FC05 for a single
  * register or coil unless the function says otherwise. */
 static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
+    char err[160], ferr[160];
+    if (!mb_validate_write(cfg, err, sizeof(err))) {
+        LOG_ACTION_ERR("modbus_write: %s", err);
+        return;
+    }
     const char* rtype = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "register_type"));
     int bits = rtype && strcmp(rtype, "coil") == 0;
     cJSON* slave_j = cJSON_GetObjectItem(cfg, "slave_id");
@@ -4694,8 +4699,7 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
     int block = cJSON_IsArray(values) && cJSON_GetArraySize(values) > 0;
     int n = block ? cJSON_GetArraySize(values) : 1;
     MbWriteValue* wv = calloc((size_t)n, sizeof(*wv));
-    if (!wv) return;
-    char err[160], ferr[160];
+    if (!wv) { LOG_ACTION_ERR("modbus_write: out of memory"); return; }
     int ok = 1;
     if (block) {
         int i = 0;
@@ -4704,7 +4708,7 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
             if (mb_field_parse(e, "type", "order", bits, &wv[i].f, ferr, sizeof(ferr)) != 0 ||
                 mb_encode_value(cJSON_GetObjectItem(e, "value"), &wv[i].f, bits, trigger_data,
                                 wv[i].regs, ferr, sizeof(ferr)) != 0) {
-                snprintf(err, sizeof(err), "values entry %d: %s", i + 1, ferr);
+                snprintf(err, sizeof(err), "values entry %d: %.120s", i + 1, ferr);
                 ok = 0;
                 break;
             }
@@ -4718,7 +4722,7 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
         ok = 0;
     }
     if (!ok) {
-        LOG_WARN("modbus_write: register %d not written: %s", wv[0].f.reg, err);
+        LOG_ACTION_ERR("modbus_write: register %d not written: %s", wv[0].f.reg, err);
         free(wv);
         return;
     }
@@ -4726,7 +4730,7 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
     /* Join adjacent values into runs, one request each. */
     int max = bits ? MB_MAX_WRITE_BITS : MB_MAX_WRITE_REGS;
     uint16_t* run = malloc((size_t)max * sizeof(uint16_t));
-    if (!run) { free(wv); return; }
+    if (!run) { LOG_ACTION_ERR("modbus_write: out of memory"); free(wv); return; }
     int run_start = 0, run_len = 0;
     for (int i = 0; i <= n; i++) {
         int flush = i == n || (run_len > 0 && (wv[i].f.reg != run_start + run_len ||
@@ -4734,7 +4738,10 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
         if (flush && run_len > 0) {
             int fc = bits ? (run_len == 1 && !force_multi ? 0x05 : 0x0F)
                           : (run_len == 1 && !force_multi ? 0x06 : 0x10);
-            modbus_submit_write(cfg, slave_id, fc, run_start, run_len, run);
+            if (modbus_submit_write(cfg, slave_id, fc, run_start, run_len, run) != 0) {
+                LOG_ACTION_ERR("modbus_write: could not queue write to register %d", run_start);
+                break;
+            }
             run_len = 0;
         }
         if (i == n) break;

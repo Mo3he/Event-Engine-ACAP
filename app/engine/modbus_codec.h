@@ -98,6 +98,11 @@ typedef struct {
 int mb_field_parse(cJSON* obj, const char* type_key, const char* order_key,
                    int bits, mb_field_t* f, char* err, size_t err_size);
 
+/* A number written to a numeric field: unscaled, then encoded. A uint16 also
+ * takes -32768..-1 as two's complement, as 1.9.29 wrote them. Returns -1 if
+ * it is out of range. */
+int mb_encode_field(double v, const mb_field_t* f, uint16_t* regs);
+
 /* Check a modbus_read trigger / modbus_write action as the API receives it.
  * Returns 1 if valid, else 0 with err set. */
 int mb_validate_read(cJSON* trig, char* err, size_t err_size);
