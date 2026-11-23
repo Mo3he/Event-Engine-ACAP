@@ -1,6 +1,6 @@
 # Release Notes
 
-## v1.10.0 - GPS / NMEA input and triggers
+## v1.9.31 - GPS / NMEA input and triggers
 
 Event Engine can now read NMEA 0183 GPS data and use it in rules and video
 overlays. This release adds configurable serial and network inputs, live GPS
@@ -8,7 +8,13 @@ status, GPS triggers, and `{{gps.*}}` action variables. Rules, triggers, and
 overlays were verified on AXIS OS 12.9 with simulated NMEA over UDP; reception
 from a receiver connected to the serial port has not yet been verified.
 
-### New in 1.10.0
+### Upgrading to 1.9.31
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. GPS is disabled by
+default, so existing rules behave as before until it is enabled in Settings.
+
+### New in 1.9.31
 
 - **GPS / NMEA input:** read from the camera serial port, UDP or TCP listener,
   or a TCP client. Settings include the stale-fix timeout and serial device
