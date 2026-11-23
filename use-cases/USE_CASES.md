@@ -517,6 +517,8 @@ Event Engine can check conditions on — and act on — **remote Axis devices** 
 | 8.4 | `8.4-alpv-blocklist-to-milestone-alarm.json` | ALPV | Block-list plate → Milestone XProtect Analytics Event (plate, country, vehicle, snapshots) |
 | 8.5a | `8.5a-alpv-blocklist-alert-show.json` | ALPV | Block-list plate → full-screen alert image + plate text on the video (this or another camera) |
 | 8.5b | `8.5b-alpv-blocklist-alert-clear.json` | ALPV | That vehicle lost → clear the alert |
+| 9.1 | `9.1-gps-live-video-overlay.json` | GPS | Fresh NMEA fix → update video overlay with position, speed, and heading |
+| 9.1b | `9.1b-gps-live-video-overlay-clear.json` | GPS | GPS fix stale → clear the live overlay |
 
 ---
 
@@ -936,6 +938,38 @@ The plate shown is the one ALPV read. Depending on its list settings, ALPV can
 match a list entry that differs by a character.
 
 **Templates:** [`templates/8.5a-alpv-blocklist-alert-show.json`](templates/8.5a-alpv-blocklist-alert-show.json) and [`templates/8.5b-alpv-blocklist-alert-clear.json`](templates/8.5b-alpv-blocklist-alert-clear.json)
+
+---
+
+## Use Case 9: GPS / NMEA
+
+Display the receiver's current position and speed on the camera's video, and
+remove the overlay if fresh GPS data stops arriving. Requires an NMEA 0183 GPS
+receiver and GPS input configured under **Settings → GPS**. Physical receiver
+compatibility and reception should be verified on the target installation.
+
+### 9.1 Live GPS Position and Speed Overlay
+
+**Scenario:** Show the latest GPS position, speed, and heading on the live video
+stream. The overlay refreshes on fresh GPS fixes and clears when the fix becomes
+stale.
+
+**How it works:**
+
+- **9.1 (show):** a **GPS Update** trigger runs once per second at most and
+  refreshes a named **Overlay Text** with `{{gps.speed_kmh}}`,
+  `{{gps.latitude}}`, `{{gps.longitude}}`, and `{{gps.heading_cardinal}}`.
+- **9.1b (clear):** a **GPS Fix** trigger clears that same named overlay when
+  no valid update arrives within the configured stale timeout.
+- GPS input supports the camera serial port, UDP and TCP listeners, and a TCP
+  client. Do not configure GPS and Modbus to share the same physical serial
+  port.
+
+**Setup:** Configure the GPS source and stale timeout in Settings, confirm the
+live status card receives valid fixes, then import and enable both rules. Keep
+the overlay name and channel consistent if you customize the templates.
+
+**Templates:** [`templates/9.1-gps-live-video-overlay.json`](templates/9.1-gps-live-video-overlay.json) and [`templates/9.1b-gps-live-video-overlay-clear.json`](templates/9.1b-gps-live-video-overlay-clear.json)
 
 ---
 

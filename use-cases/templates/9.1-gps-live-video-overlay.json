@@ -1,0 +1,28 @@
+{
+  "name": "GPS - Live Position and Speed Overlay",
+  "description": "Refresh a named video overlay from each fresh NMEA GPS fix. Pair with 9.1b to clear it when GPS data becomes stale. Requires GPS input enabled in Settings.",
+  "enabled": true,
+  "trigger_logic": "OR",
+  "trigger_window": 0,
+  "condition_logic": "AND",
+  "cooldown": 0,
+  "max_executions": 0,
+  "max_exec_period": "",
+  "triggers": [
+    {
+      "type": "gps_update",
+      "interval_s": 1
+    }
+  ],
+  "conditions": [],
+  "actions": [
+    {
+      "type": "overlay_text",
+      "overlay": "gps_live_position",
+      "text": "Speed {{gps.speed_kmh}} km/h - {{gps.latitude}}, {{gps.longitude}} ({{gps.heading_cardinal}})",
+      "channel": 1,
+      "position": "topLeft",
+      "duration": 0
+    }
+  ]
+}
