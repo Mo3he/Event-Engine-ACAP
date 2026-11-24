@@ -731,11 +731,11 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Threshold</label>
-        <input type="number" data-k="threshold" value="${escHtml(t.threshold!==undefined?t.threshold:'')}" placeholder="0" step="any">
+        <input type="text" inputmode="decimal" data-k="threshold" value="${escHtml(t.threshold!==undefined?t.threshold:'')}" placeholder="0">
       </div>
       <div class="form-group">
         <label>Threshold 2 <span style="font-weight:normal;opacity:.7">(between only)</span></label>
-        <input type="number" data-k="threshold2" value="${escHtml(t.threshold2!==undefined?t.threshold2:'')}" placeholder="100" step="any">
+        <input type="text" inputmode="decimal" data-k="threshold2" value="${escHtml(t.threshold2!==undefined?t.threshold2:'')}" placeholder="100">
       </div>
     </div>`;
   }
@@ -771,7 +771,23 @@ const MB_ORDERS = [
   ['ABCD', 'ABCD (big-endian)'], ['CDAB', 'CDAB (word swap)'],
   ['BADC', 'BADC (byte swap)'], ['DCBA', 'DCBA (little-endian)'],
 ];
+/* 16-bit values and text have no words to swap, only the two bytes of each register. */
+const MB_BYTE_ORDERS = [['ABCD', 'AB (normal)'], ['BADC', 'BA (byte swap)']];
+const MB_ENCODINGS = [
+  ['utf-8', 'UTF-8'], ['ascii', 'ASCII'],
+  ['iso-8859-1', 'ISO-8859-1 (Latin-1)'], ['iso-8859-2', 'ISO-8859-2 (Latin-2)'],
+  ['windows-1250', 'Windows-1250 (Central European)'], ['windows-1252', 'Windows-1252 (Western)'],
+];
+const MB_MAX_STRING_REGS = 125;
 const MB_TYPE_REGS = { uint16: 1, int16: 1, uint32: 2, int32: 2, float32: 2, uint64: 4, int64: 4, float64: 4 };
+
+function mbHasWords(type) { return (MB_TYPE_REGS[type] || 0) > 1; }
+/* The order a 16-bit value or text actually uses: only the byte swap counts. */
+function mbOrderFor(type, order) {
+  const o = order || 'ABCD';
+  if (mbHasWords(type || 'uint16')) return o;
+  return o === 'BADC' || o === 'DCBA' ? 'BADC' : 'ABCD';
+}
 
 function mbIsBits(rtype) { return rtype === 'coil' || rtype === 'discrete'; }
 
@@ -836,37 +852,57 @@ function mbConnFields(o, rerender) {
 function mbTypeOptions(sel) {
   return MB_TYPES.map(v => `<option value="${v}" ${(sel||'uint16')===v?'selected':''}>${v}</option>`).join('');
 }
-function mbOrderOptions(sel) {
-  return MB_ORDERS.map(([v, l]) => `<option value="${v}" ${(sel||'ABCD')===v?'selected':''}>${l}</option>`).join('');
+function mbOrderOptions(sel, type, short) {
+  const list = mbHasWords(type || 'uint16') ? MB_ORDERS : MB_BYTE_ORDERS;
+  const cur = mbOrderFor(type, sel);
+  return list.map(([v, l]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? l.split(' ')[0] : l}</option>`).join('');
+}
+function mbEncodingOptions(sel, short) {
+  const cur = (sel || 'utf-8').toLowerCase();
+  return MB_ENCODINGS.map(([v, l]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? l.split(' ')[0] : l}</option>`).join('');
 }
 
-/* Data type, word order, scaling and string length of a single value. */
+/* Data type, word/byte order, scaling, string length and encoding of a
+ * single value. withDecimals: a read (scaling applies forwards). */
 function mbTypeFields(o, typeKey, orderKey, rerender, withDecimals) {
   const type = o[typeKey] || 'uint16';
-  const num = (k, def, ph, hint) => `
+  const num = (k, label, def, ph, hint) => `
       <div class="form-group">
-        <label>${k[0].toUpperCase() + k.slice(1)}</label>
-        <input type="number" data-k="${k}" value="${escHtml(o[k]!==undefined?o[k]:def)}" placeholder="${ph}" step="any">
+        <label>${label}</label>
+        <input type="text" inputmode="decimal" data-k="${k}" value="${escHtml(o[k]!==undefined?o[k]:def)}" placeholder="${ph}">
         ${hint ? `<div class="form-hint">${hint}</div>` : ''}
       </div>`;
+  const words = mbHasWords(type);
+  const regs = mbRegs(type, o.length);
   return `
     <div class="form-row">
       <div class="form-group">
         <label>Data Type</label>
         <select data-k="${typeKey}" onchange="${rerender}">${mbTypeOptions(type)}</select>
-        <div class="form-hint">${type === 'string' ? 'ASCII text, 2 characters per register' : `${mbRegs(type)} register${mbRegs(type) > 1 ? 's' : ''}`}</div>
+        <div class="form-hint">${type === 'string' ? 'Text, 2 bytes per register' : `${regs} register${regs > 1 ? 's' : ''}`}</div>
       </div>
       <div class="form-group">
-        <label>Word Order</label>
-        <select data-k="${orderKey}">${mbOrderOptions(o[orderKey])}</select>
-        <div class="form-hint">Byte order of the value as the device sends it; A = most significant.</div>
+        <label>${words ? 'Word Order' : 'Byte Order'}</label>
+        <select data-k="${orderKey}">${mbOrderOptions(o[orderKey], type)}</select>
+        <div class="form-hint">${words ? 'Order of the bytes as the device sends them; A = most significant.'
+                                       : `Order of the two bytes in each register${type === 'string' ? ' (BA: the 2nd character first)' : ''}.`}</div>
       </div>
     </div>
     <div class="form-row">
-      ${type === 'string' ? num('length', 8, '8', 'Registers') : `
-      ${num('scale', '', '1', 'value = raw × scale + offset')}
-      ${num('offset', '', '0', '')}
-      ${withDecimals ? num('decimals', '', 'auto', 'Rounding') : ''}`}
+      ${type === 'string' ? `
+      <div class="form-group">
+        <label>Length (registers)</label>
+        <input type="number" data-k="length" value="${escHtml(o.length!==undefined?o.length:8)}" min="1" max="${MB_MAX_STRING_REGS}" step="1">
+        <div class="form-hint">1-${MB_MAX_STRING_REGS}. ${withDecimals ? 'Text stops at the first NUL.' : 'Shorter text is padded with NUL (0x00).'}</div>
+      </div>
+      <div class="form-group">
+        <label>Encoding</label>
+        <select data-k="encoding">${mbEncodingOptions(o.encoding)}</select>
+        <div class="form-hint">Character set of the device. In UTF-8, letters such as ą or ż take 2 bytes.</div>
+      </div>` : `
+      ${num('scale', 'Scale (multiplier)', '', '1', withDecimals ? 'value = raw × scale + offset' : 'raw = (value − offset) ÷ scale')}
+      ${num('offset', 'Offset', '', '0', 'e.g. -0.5')}
+      ${withDecimals ? num('decimals', 'Decimals', '', 'auto', 'Rounding') : ''}`}
     </div>`;
 }
 
@@ -879,22 +915,23 @@ const MB_COLS = {
   value:    { label: 'Value',    input: 'text', ph: '0 or {{…}}' },
   type:     { label: 'Type',     w: 92 },
   order:    { label: 'Order',    w: 80 },
-  scale:    { label: 'Scale',    w: 64,  input: 'number', ph: '1' },
-  offset:   { label: 'Offset',   w: 64,  input: 'number', ph: '0' },
-  decimals: { label: 'Decimals', w: 72,  input: 'number', ph: 'auto', title: 'Decimals (rounding)' },
-  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8', title: 'Length in registers (strings)' },
+  scale:    { label: 'Scale',    w: 64,  input: 'decimal', ph: '1', title: 'Scale (multiplier)' },
+  offset:   { label: 'Offset',   w: 64,  input: 'decimal', ph: '0' },
+  decimals: { label: 'Decimals', w: 72,  input: 'decimal', ph: 'auto', title: 'Decimals (rounding)' },
+  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8', title: 'Length in registers (text, 1-125)' },
+  encoding: { label: 'Encoding', w: 104, title: 'Character encoding (text)' },
 };
 
 function mbTableCols(kind, bits) {
-  if (kind === 'map') return bits ? ['register', 'var'] : ['register', 'var', 'type', 'order', 'scale', 'offset', 'decimals', 'length'];
-  return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length'];
+  if (kind === 'map') return bits ? ['register', 'var'] : ['register', 'var', 'type', 'order', 'scale', 'offset', 'decimals', 'length', 'encoding'];
+  return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length', 'encoding'];
 }
 
-/* Cells that don't apply to the row's type: length is for strings only, and
- * scaling is for numbers only. */
+/* Cells that don't apply to the row's type: length and encoding are for
+ * strings only, and scaling is for numbers only. */
 function mbCellOff(c, type) {
   const str = (type || 'uint16') === 'string';
-  return c === 'length' ? !str : (str && (c === 'scale' || c === 'offset' || c === 'decimals'));
+  return c === 'length' || c === 'encoding' ? !str : (str && (c === 'scale' || c === 'offset' || c === 'decimals'));
 }
 
 function mbTableRow(kind, r, bits) {
@@ -904,9 +941,12 @@ function mbTableRow(kind, r, bits) {
     const off = mbCellOff(c, r.type);
     let ctl;
     if (c === 'type') ctl = `<select data-mk="type" onchange="mbTableSync(this)">${mbTypeOptions(v)}</select>`;
-    else if (c === 'order') ctl = `<select data-mk="order" onchange="mbTableSync(this)">${MB_ORDERS.map(([o]) => `<option ${(v||'ABCD')===o?'selected':''}>${o}</option>`).join('')}</select>`;
-    else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}" ${def.input === 'number' ? 'step="any"' : ''}
+    else if (c === 'order') ctl = `<select data-mk="order" onchange="mbTableSync(this)" title="${mbHasWords(r.type || 'uint16') ? 'Word order' : 'Byte order'}">${mbOrderOptions(v, r.type, true)}</select>`;
+    else if (c === 'encoding') ctl = `<select data-mk="encoding" onchange="mbTableSync(this)" ${off ? 'disabled' : ''}>${mbEncodingOptions(v, true)}</select>`;
+    else if (def.input === 'decimal') ctl = `<input type="text" inputmode="decimal" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}"
                  ${off ? 'disabled' : ''} oninput="mbTableSync(this)">`;
+    else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}"
+                 ${c === 'length' ? `min="1" max="${MB_MAX_STRING_REGS}" step="1"` : ''} ${off ? 'disabled' : ''} oninput="mbTableSync(this)">`;
     return `<td>${ctl}</td>`;
   }).join('');
   return `<tr class="mb-row">${cells}<td><button type="button" class="tca-remove" onclick="mbTableRemove(this)" title="Remove">&times;</button></td></tr>`;
@@ -917,8 +957,8 @@ function mbTable(kind, rows, bits) {
   const colgroup = cols.map(c => MB_COLS[c].w ? `<col style="width:${MB_COLS[c].w}px">` : '<col>').join('') + '<col style="width:26px">';
   const head = cols.map(c => `<th title="${escHtml(MB_COLS[c].title || MB_COLS[c].label)}">${MB_COLS[c].label}</th>`).join('');
   const hint = kind === 'map'
-    ? `Read in one request (up to ${bits ? '2000 bits' : '125 registers'} from the lowest to the highest address). Each value is stored in its variable and is <code>{{trigger.NAME}}</code> in actions.`
-    : `Adjacent registers are written in one request (${bits ? 'FC15' : 'FC16'}); a gap starts a new one. Values can use placeholders.`;
+    ? `Read from the lowest to the highest address, ${bits ? 'up to 2000 bits in one request' : 'up to 125 registers per request; larger maps are read in several requests (at most 2000 registers)'}. Each value is stored in its variable and is <code>{{trigger.NAME}}</code> in actions.`
+    : `Adjacent ${bits ? 'coils are written in one request (FC15, up to 1968)' : 'registers are written in one request (FC16, up to 123 registers); longer runs are split'}, and a gap starts a new request. Values can use placeholders.`;
   return `
     <div class="form-group mb-wrap" data-kind="${kind}" data-bits="${bits ? 1 : 0}">
       <label>${kind === 'map' ? 'Register Map' : 'Values'}</label>
@@ -940,10 +980,20 @@ function mbTableSync(el) {
   const rows = [...wrap.querySelectorAll('tr.mb-row')].map(tr => {
     const o = {};
     tr.querySelectorAll('[data-mk]').forEach(i => { if (i.value !== '') o[i.dataset.mk] = i.value; });
-    tr.querySelectorAll('input[data-mk]').forEach(i => {
+    /* The order choices depend on the type: words for 32/64-bit, bytes otherwise */
+    const ord = tr.querySelector('select[data-mk="order"]');
+    if (ord) {
+      const words = mbHasWords(o.type || 'uint16');
+      if (words !== (ord.options.length === MB_ORDERS.length)) {
+        ord.innerHTML = mbOrderOptions(o.order, o.type, true);
+        ord.title = words ? 'Word order' : 'Byte order';
+      }
+      o.order = ord.value;
+    }
+    tr.querySelectorAll('input[data-mk], select[data-mk="encoding"]').forEach(i => {
       const c = i.dataset.mk;
       i.disabled = mbCellOff(c, o.type);
-      i.placeholder = i.disabled ? '' : (MB_COLS[c].ph || '');
+      if (i.tagName === 'INPUT') i.placeholder = i.disabled ? '' : (MB_COLS[c].ph || '');
       if (i.disabled) delete o[c];
     });
     return o;
@@ -970,25 +1020,38 @@ function mbTableRemove(btn) {
   mbTableSync(wrap);
 }
 
+/* A number typed with a decimal point or comma ("-0,5"); undefined if empty
+ * or not a number. */
 function mbNum(v) {
   if (typeof v === 'number') return v;
-  const s = String(v === undefined || v === null ? '' : v).trim();
+  const s = String(v === undefined || v === null ? '' : v).trim().replace(/^([+-]?\d*),(\d+)$/, '$1.$2');
   return s !== '' && !isNaN(Number(s)) ? Number(s) : undefined;
+}
+function mbBlank(v) { return v === undefined || v === null || String(v).trim() === ''; }
+/* A number field: the number, nothing if empty, or the text as typed so the
+ * editor (and the engine) can report it. */
+function mbNumOrText(v) {
+  if (mbBlank(v)) return undefined;
+  const n = mbNum(v);
+  return n !== undefined ? n : String(v).trim();
 }
 
 /* Copies the typed-value fields that differ from the defaults. */
 function mbNormField(src, out, typeKey, orderKey, withDecimals) {
   const type = src[typeKey] || 'uint16';
   if (type !== 'uint16') out[typeKey] = type;
-  if (src[orderKey] && src[orderKey] !== 'ABCD') out[orderKey] = src[orderKey];
+  const order = mbOrderFor(type, src[orderKey]);
+  if (order !== 'ABCD') out[orderKey] = order;
   if (type === 'string') {
     out.length = parseInt(src.length) || 8;
+    const enc = (src.encoding || 'utf-8').toLowerCase();
+    if (enc !== 'utf-8') out.encoding = enc;
     return;
   }
-  const scale = mbNum(src.scale), offset = mbNum(src.offset), decimals = mbNum(src.decimals);
+  const scale = mbNumOrText(src.scale), offset = mbNumOrText(src.offset), decimals = mbNumOrText(src.decimals);
   if (scale !== undefined && scale !== 1) out.scale = scale;
   if (offset !== undefined && offset !== 0) out.offset = offset;
-  if (withDecimals && decimals !== undefined) out.decimals = Math.round(decimals);
+  if (withDecimals && decimals !== undefined) out.decimals = typeof decimals === 'number' ? Math.round(decimals) : decimals;
 }
 
 function mbNormConn(src, out) {
@@ -1007,8 +1070,9 @@ function mbNormConn(src, out) {
 /* A value to write: a number when it is one, else text (a string or a template). */
 function mbWriteValue(v, type) {
   if (type === 'string') return v === undefined || v === null ? '' : String(v);
-  const n = mbNum(v);
-  return n !== undefined ? n : String(v === undefined || v === null ? '' : v).trim();
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  const n = s.includes('{{') ? undefined : mbNum(s);
+  return n !== undefined ? n : s;
 }
 
 function normalizeModbusRead(t, out) {
@@ -1034,8 +1098,8 @@ function normalizeModbusRead(t, out) {
   }
   if (t.op) {
     out.op = t.op;
-    out.threshold = parseFloat(t.threshold) || 0;
-    if (t.op === 'between') out.threshold2 = parseFloat(t.threshold2) || 0;
+    out.threshold = mbNumOrText(t.threshold) ?? 0;
+    if (t.op === 'between') out.threshold2 = mbNumOrText(t.threshold2) ?? 0;
   }
 }
 
@@ -1062,14 +1126,34 @@ function normalizeModbusWrite(a) {
   return out;
 }
 
-/* Problems the editor can spot before saving (the engine checks the rest). */
+/* Problems the editor can spot before saving or testing a normalized
+ * modbus_read / modbus_write (the engine checks the rest). */
 function modbusRowError(o) {
+  const numErr = (f, where) => {
+    for (const [k, label] of [['scale', 'Scale'], ['offset', 'Offset'], ['decimals', 'Decimals'], ['threshold', 'Threshold'], ['threshold2', 'Threshold 2']]) {
+      if (typeof f[k] === 'string') return `${where}${label} "${f[k]}" is not a number`;
+    }
+    if (f.scale === 0) return `${where}Scale can't be 0`;
+    if ((f.type || f.data_type) === 'string' && (f.length < 1 || f.length > MB_MAX_STRING_REGS))
+      return `${where}Length must be 1-${MB_MAX_STRING_REGS} registers`;
+    return '';
+  };
+  const bits = o.register_type === 'coil' || o.register_type === 'discrete';
+  const valueErr = (f, type, where) => {
+    if (o.type !== 'modbus_write' || type === 'string') return '';
+    if (mbBlank(f.value)) return `${where}enter a value to write`;
+    return '';
+  };
+  const top = numErr(o, '');
+  if (top) return top;
   const rows = o.type === 'modbus_read' ? o.map : o.values;
-  if (!rows) return '';
+  if (!rows) return valueErr(o, bits ? 'bool' : (o.data_type || 'uint16'), '');
   if (!rows.length) return o.type === 'modbus_read' ? 'add at least one value to the register map' : 'add at least one register to write';
-  if (o.type === 'modbus_read') {
-    const missing = rows.findIndex(r => !r.var);
-    if (missing >= 0) return `map row ${missing + 1} needs a variable name`;
+  for (let i = 0; i < rows.length; i++) {
+    const where = `${o.type === 'modbus_read' ? 'map' : 'values'} row ${i + 1}: `;
+    if (o.type === 'modbus_read' && !rows[i].var) return `${where}enter a variable name`;
+    const e = numErr(rows[i], where) || valueErr(rows[i], bits ? 'bool' : (rows[i].type || 'uint16'), where);
+    if (e) return e;
   }
   return '';
 }
@@ -3754,6 +3838,10 @@ async function testActionRow(i) {
     data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
   });
   const normalized = normalizeAction(data);
+  if (normalized.type === 'modbus_write') {
+    const err = modbusRowError(normalized);
+    if (err) { toast(`Action ${i + 1} test: ${err}`, 'error'); return; }
+  }
   const btn = document.getElementById('atest-' + i);
   const origText = btn ? btn.textContent : '';
   if (btn) { btn.textContent = '…'; btn.disabled = true; }

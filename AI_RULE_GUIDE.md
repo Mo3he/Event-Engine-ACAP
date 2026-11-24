@@ -1838,7 +1838,7 @@ Set `while_active: true` on recording, overlay, I/O output, siren, or speaker_di
 
 ## Trigger: `modbus_read`
 
-Polls Modbus registers or bits at a configurable interval. Read one value or a `map` of values into variables in a single request. Numeric values support signed/unsigned 16/32/64-bit integers, 32/64-bit floats, word order, scale, offset and decimal rounding; strings use two ASCII characters per register. A threshold uses edge-triggered hysteresis — it fires once when the condition becomes true and does not re-fire until it clears. Without `op`, it fires on the first successful read and whenever any read value changes.
+Polls Modbus registers or bits at a configurable interval. Read one value or a `map` of values into variables. Numeric values support signed/unsigned 16/32/64-bit integers, 32/64-bit floats, word order, scale, offset and decimal rounding; strings use two bytes per register in a selectable `encoding`. A threshold uses edge-triggered hysteresis — it fires once when the condition becomes true and does not re-fire until it clears. Without `op`, it fires on the first successful read and whenever any read value changes.
 
 ```json
 {
@@ -1873,7 +1873,7 @@ For a map, put `register`, `var`, `type`, `order`, and optional scaling fields i
   "poll_interval": 10,
   "map": [
     { "register": 0, "var": "temperature", "type": "float32", "order": "CDAB", "scale": 0.1 },
-    { "register": 2, "var": "status_text", "type": "string", "length": 8 }
+    { "register": 2, "var": "status_text", "type": "string", "length": 8, "encoding": "windows-1250" }
   ],
   "compare": "temperature",
   "op": "gte",
@@ -1893,13 +1893,14 @@ For a map, put `register`, `var`, `type`, `order`, and optional scaling fields i
 | `register_type` | `"holding"` \| `"input"` \| `"coil"` \| `"discrete"` | `"holding"` | Register type (FC03/FC04/FC01/FC02) |
 | `register` | integer | `0` | Single-value register address (0-based); use `map` instead for multiple values |
 | `data_type` | string | `"uint16"` | Single value: `uint16`, `int16`, `uint32`, `int32`, `float32`, `uint64`, `int64`, `float64`, or `string`. Bit reads use 0/1 |
-| `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for multi-register values |
+| `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for 32/64-bit values. For 16-bit values and strings only `"ABCD"` (normal) and `"BADC"` (bytes swapped in each register) differ |
 | `scale` | number | `1` | Numeric values are reported as `raw × scale + offset`; must not be zero |
 | `offset` | number | `0` | Numeric value offset |
 | `decimals` | integer (0–10) | automatic | Optional rounding after scaling |
-| `length` | integer (1–125) | `8` | String length in registers (single value or map entry) |
+| `length` | integer (1–125) | `8` | String length in registers (single value or map entry); the text ends at the first NUL |
+| `encoding` | `"utf-8"` \| `"ascii"` \| `"iso-8859-1"` \| `"iso-8859-2"` \| `"windows-1250"` \| `"windows-1252"` | `"utf-8"` | String encoding (single value or map entry). Text is stored in variables as UTF-8; invalid bytes read as `?` |
 | `variable` | string | — | Optional variable updated by a single-value read |
-| `map` | array | — | Register-map entries; each requires `register` and a unique `var`, and may include `type`, `order`, `scale`, `offset`, `decimals`, or `length`. One read may span at most 125 registers or 2000 bits |
+| `map` | array | — | Register-map entries; each requires `register` and a unique `var`, and may include `type`, `order`, `scale`, `offset`, `decimals`, `length`, or `encoding`. One request reads up to 125 registers or 2000 bits; a larger map is read in several requests, spanning at most 2000 registers |
 | `compare` | string | first map variable | Map variable used by `op` and `threshold`; must name an entry in `map` |
 | `poll_interval` | integer | `30` | Seconds between polls (minimum 1) |
 | `op` | `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` \| `"eq"` \| `"between"` | — | Threshold comparison operator. Omit to fire on every change of value |
@@ -1927,7 +1928,7 @@ The trigger data includes `state` (`"failing"` or `"recovered"`), `device`, `sla
 
 ## Action: `modbus_write`
 
-Writes one typed value or a block of values to Modbus. Automatic function selection uses FC06/FC05 for one register/coil and FC16/FC15 for multiple contiguous values. In block mode, adjacent values are batched into one request; gaps start a new request.
+Writes one typed value or a block of values to Modbus. Automatic function selection uses FC06/FC05 for one register/coil and FC16/FC15 for multiple contiguous values. In block mode, adjacent values are batched into one request of up to 123 registers or 1968 coils; longer runs and strings longer than 123 registers are split, and gaps start a new request. Strings are padded with NUL to `length`. When tested from the editor (`POST /actions`), the write waits for the device and returns its error, if any.
 
 ```json
 {
@@ -1959,7 +1960,7 @@ For multiple values, use `values` instead of `register` and `value`. Each entry 
   "function": "fc16",
   "values": [
     { "register": 10, "type": "uint32", "value": "{{trigger.count}}" },
-    { "register": 12, "type": "string", "length": 8, "value": "Running" }
+    { "register": 12, "type": "string", "length": 8, "encoding": "ascii", "value": "Running" }
   ]
 }
 ```
@@ -1976,10 +1977,11 @@ For multiple values, use `values` instead of `register` and `value`. Each entry 
 | `register_type` | `"holding"` \| `"coil"` | `"holding"` | Register type |
 | `register` | integer | `0` | Single-value register address (0-based); use `values` instead for several values |
 | `data_type` | string | `"uint16"` | Single-value type: `uint16`, `int16`, `uint32`, `int32`, `float32`, `uint64`, `int64`, `float64`, or `string` |
-| `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for multi-register values |
+| `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for 32/64-bit values. For 16-bit values and strings only `"ABCD"` and `"BADC"` (bytes swapped) differ |
 | `scale` | number | `1` | Input value is converted to raw form using `(value - offset) / scale` |
 | `offset` | number | `0` | Numeric value offset |
-| `length` | integer (1–123) | `8` | String length in registers |
-| `value` | number \| string | — | Value to write; supports templates. A `uint16` also accepts -32768 to -1, written as two's complement. Coils accept `0`, `1`, `true`, `false`, `on`, or `off` |
-| `values` | array | — | Block entries with `register`, `value`, and optional `type`, `order`, `scale`, `offset`, and `length`. Overlapping entries are rejected; gaps create separate requests. Maximum per request: 123 registers or 1968 coils |
+| `length` | integer (1–125) | `8` | String length in registers; shorter text is padded with NUL (0x00) |
+| `encoding` | `"utf-8"` \| `"ascii"` \| `"iso-8859-1"` \| `"iso-8859-2"` \| `"windows-1250"` \| `"windows-1252"` | `"utf-8"` | String encoding. Literal text with characters the encoding lacks is rejected; template text gets `?` instead. The length check counts encoded bytes (in UTF-8, `ż` is 2 bytes) |
+| `value` | number \| string | — | Value to write; supports templates. Required for numbers and coils; an empty string clears a text register. A `uint16` also accepts -32768 to -1, written as two's complement. Coils accept `0`, `1`, `true`, `false`, `on`, or `off` |
+| `values` | array | — | Block entries with `register`, `value`, and optional `type`, `order`, `scale`, `offset`, `length`, and `encoding`. Overlapping entries are rejected; gaps create separate requests. A request carries at most 123 registers or 1968 coils; longer runs are split, up to 32 requests per action |
 | `function` | `"auto"` \| `"fc05"` \| `"fc15"` \| `"fc06"` \| `"fc16"` | `"auto"` | Force a compatible single/multiple-coil or register write function |

@@ -21,6 +21,7 @@
 #include <time.h>
 #include <syslog.h>
 #include <pthread.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -345,28 +346,67 @@ static int sgw_request(struct mb_ctx* c, int slave_id,
     return rtu_finish(slave_id, rbuf, got, resp_pdu, resp_pdu_len, err);
 }
 
+/* A pooled TCP connection the device has closed, e.g. after being idle.
+ * Bytes waiting on an open connection are late answers to earlier requests
+ * and are dropped. */
+static int peer_closed(int fd) {
+    for (;;) {
+        struct pollfd p = { .fd = fd, .events = POLLIN };
+        if (poll(&p, 1, 0) <= 0) return 0;
+        if (p.revents & (POLLERR | POLLHUP | POLLNVAL)) return 1;
+        uint8_t buf[256];
+        ssize_t n = recv(fd, buf, sizeof(buf), MSG_DONTWAIT);
+        if (n == 0) return 1;
+        if (n < 0) return errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR;
+    }
+}
+
+static void disconnect(struct mb_ctx* c) {
+    if (c->fd >= 0) close(c->fd);
+    c->fd = -1;
+    c->connected = 0;
+}
+
+static int send_request(struct mb_ctx* c, int slave_id, const uint8_t* pdu, int pdu_len,
+                        uint8_t* resp, int* rlen, mb_err_t* err) {
+    memset(err, 0, sizeof(*err));
+    if (c->transport == MB_TCP)       return tcp_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+    if (c->transport == MB_SERIAL_GW) return sgw_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+    return rtu_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+}
+
 /* Connect if needed, send the request and check the response is for this
  * function: an exception gives MB_ERR_EXCEPTION. On a transport error the
- * connection is closed so the next request starts clean. */
+ * connection is closed so the next request starts clean. A request on a
+ * reused TCP connection that turns out to be closed is sent once more on a
+ * new connection. */
 static int transact(struct mb_ctx* c, int slave_id, const uint8_t* pdu, int pdu_len,
                     uint8_t* resp, int* rlen, mb_err_t* err) {
     memset(err, 0, sizeof(*err));
     pthread_mutex_lock(&pool_mutex);
+    int tcp = c->transport != MB_RTU;
+    int reused = c->connected && c->fd >= 0;
+    if (reused && tcp && peer_closed(c->fd)) {
+        LOG("%s: connection closed by the device, reconnecting", c->key);
+        disconnect(c);
+        reused = 0;
+    }
     if (ensure_connected(c) != 0) {
         int e = errno;
         pthread_mutex_unlock(&pool_mutex);
         return fail(err, MB_ERR_CONNECTION, e ? e : EIO);
     }
-    int rc;
-    if (c->transport == MB_TCP)            rc = tcp_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
-    else if (c->transport == MB_SERIAL_GW) rc = sgw_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
-    else                                   rc = rtu_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
-    if (rc != 0 && (c->transport != MB_RTU || err->kind == MB_ERR_CONNECTION)) {
-        /* A late answer would be read as the response to the next request */
-        if (c->fd >= 0) close(c->fd);
-        c->fd = -1;
-        c->connected = 0;
+    int rc = send_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+    if (rc != 0 && reused && tcp && err->kind == MB_ERR_CONNECTION) {
+        LOG("%s: connection lost, sending again on a new connection", c->key);
+        disconnect(c);
+        if (ensure_connected(c) == 0)
+            rc = send_request(c, slave_id, pdu, pdu_len, resp, rlen, err);
+        else
+            fail(err, MB_ERR_CONNECTION, errno ? errno : EIO);
     }
+    if (rc != 0 && (tcp || err->kind == MB_ERR_CONNECTION))
+        disconnect(c);   /* a late answer would be read as the response to the next request */
     pthread_mutex_unlock(&pool_mutex);
     if (rc != 0) return -1;
     if (*rlen < 1) return fail(err, MB_ERR_INVALID, EBADMSG);
@@ -570,6 +610,16 @@ void modbus_pool_release_all(void) {
 
 typedef enum { JOB_READ, JOB_WRITE, JOB_STOP } mb_job_kind_t;
 
+/* Someone waiting for a write's result (modbus_write_wait). Freed by
+ * whichever of the waiter and the worker lets go last. */
+typedef struct {
+    GMutex      lock;
+    GCond       cond;
+    int         refs;
+    int         done;      /* 1 = status set, -1 = dropped */
+    mb_status_t status;
+} mb_waiter_t;
+
 typedef struct {
     mb_job_kind_t    kind;
     cJSON*           cfg;
@@ -577,6 +627,9 @@ typedef struct {
     int              function;
     int              address;
     int              count;
+    mb_span_t        spans[MB_MAX_REQUESTS];   /* reads: the requests */
+    int              nspans;
+    mb_waiter_t*     waiter;    /* writes only, may be NULL */
     mb_read_done_fn  done;      /* reads only */
     mb_read_result_t res;       /* status for both; data = values to write */
 } mb_job_t;
@@ -591,7 +644,26 @@ void modbus_set_status_callback(mb_status_fn fn) {
     status_fn = fn;
 }
 
+/* Hand the result to the waiter (status NULL: the job was dropped) and let
+ * go of it. */
+static void waiter_finish(mb_waiter_t* w, const mb_status_t* status) {
+    g_mutex_lock(&w->lock);
+    if (!w->done) {
+        if (status) w->status = *status;
+        w->done = status ? 1 : -1;
+        g_cond_signal(&w->cond);
+    }
+    int last = --w->refs == 0;
+    g_mutex_unlock(&w->lock);
+    if (last) {
+        g_mutex_clear(&w->lock);
+        g_cond_clear(&w->cond);
+        free(w);
+    }
+}
+
 static void job_free(mb_job_t* j) {
+    if (j->waiter) waiter_finish(j->waiter, NULL);
     if (j->cfg) cJSON_Delete(j->cfg);
     free(j);
 }
@@ -635,10 +707,17 @@ static void run_job(mb_job_t* j) {
     if (!ctx) {
         st->err.kind = MB_ERR_CONFIG;
         rc = -1;
-    } else if (j->function == 0x03 || j->function == 0x04) {
-        rc = mb_read_registers(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
-    } else if (j->function == 0x01 || j->function == 0x02) {
-        rc = mb_read_bits(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
+    } else if (j->function >= 0x01 && j->function <= 0x04) {
+        /* One request per span; a failure reports that span */
+        rc = 0;
+        for (int i = 0; i < j->nspans && rc == 0; i++) {
+            const mb_span_t* sp = &j->spans[i];
+            uint16_t* out = j->res.data + (sp->address - j->address);
+            rc = j->function >= 0x03
+                ? mb_read_registers(ctx, j->slave_id, j->function, sp->address, sp->count, out, &st->err)
+                : mb_read_bits(ctx, j->slave_id, j->function, sp->address, sp->count, out, &st->err);
+            if (rc != 0) { st->address = sp->address; st->count = sp->count; }
+        }
     } else if (j->function == 0x06 || j->function == 0x10) {
         rc = mb_write_registers(ctx, j->slave_id, j->function, j->address, j->count, j->res.data, &st->err);
     } else {
@@ -656,6 +735,10 @@ static gpointer worker_main(gpointer unused) {
         run_job(j);
         cJSON_Delete(j->cfg);
         j->cfg = NULL;
+        if (j->waiter) {
+            waiter_finish(j->waiter, &j->res.status);
+            j->waiter = NULL;
+        }
         if (j->kind == JOB_WRITE) {
             pthread_mutex_lock(&worker_lock);
             pending_writes--;
@@ -687,9 +770,19 @@ static int submit(mb_job_t* j) {
 }
 
 void modbus_submit_read(cJSON* conn, int slave_id, const char* reg_type,
-                        int address, int count, unsigned tag, mb_read_done_fn done) {
+                        int address, int count, const mb_span_t* spans, int nspans,
+                        unsigned tag, mb_read_done_fn done) {
+    if (count < 1 || count > MB_READ_MAX || nspans > MB_MAX_REQUESTS) { cJSON_Delete(conn); return; }
     mb_job_t* j = calloc(1, sizeof(*j));
     if (!j) { cJSON_Delete(conn); return; }
+    if (spans && nspans > 0) {
+        memcpy(j->spans, spans, (size_t)nspans * sizeof(*spans));
+        j->nspans = nspans;
+    } else {
+        j->spans[0].address = address;
+        j->spans[0].count = count;
+        j->nspans = 1;
+    }
     if (!reg_type) reg_type = "holding";
     j->kind     = JOB_READ;
     j->cfg      = conn;
@@ -704,11 +797,15 @@ void modbus_submit_read(cJSON* conn, int slave_id, const char* reg_type,
     submit(j);
 }
 
-int modbus_submit_write(cJSON* conn, int slave_id, int function, int address,
-                        int count, const uint16_t* values) {
-    if (count < 1 || count > MB_READ_MAX) return -1;
-    mb_job_t* j = calloc(1, sizeof(*j));
-    if (!j) return -1;
+/* On failure the job's reference to waiter is released too. */
+static int submit_write(cJSON* conn, int slave_id, int function, int address,
+                        int count, const uint16_t* values, mb_waiter_t* waiter) {
+    mb_job_t* j = count >= 1 && count <= MB_READ_MAX ? calloc(1, sizeof(*j)) : NULL;
+    if (!j) {
+        if (waiter) waiter_finish(waiter, NULL);
+        return -1;
+    }
+    j->waiter   = waiter;
     j->kind     = JOB_WRITE;
     j->cfg      = cJSON_Duplicate(conn, 1);
     j->slave_id = slave_id;
@@ -716,12 +813,38 @@ int modbus_submit_write(cJSON* conn, int slave_id, int function, int address,
     j->address  = address;
     j->count    = count;
     memcpy(j->res.data, values, (size_t)count * sizeof(uint16_t));
-    if (!j->cfg) { free(j); return -1; }
+    if (!j->cfg) { job_free(j); return -1; }
     if (submit(j) != 0) {
         LOG_WARN("modbus_write: queue full (%d writes waiting), write dropped", MB_QUEUE_MAX);
         return -1;
     }
     return 0;
+}
+
+int modbus_submit_write(cJSON* conn, int slave_id, int function, int address,
+                        int count, const uint16_t* values) {
+    return submit_write(conn, slave_id, function, address, count, values, NULL);
+}
+
+int modbus_write_wait(cJSON* conn, int slave_id, int function, int address, int count,
+                      const uint16_t* values, int timeout_ms, mb_status_t* status) {
+    mb_waiter_t* w = calloc(1, sizeof(*w));
+    if (!w) return -1;
+    g_mutex_init(&w->lock);
+    g_cond_init(&w->cond);
+    w->refs = 2;
+    if (submit_write(conn, slave_id, function, address, count, values, w) != 0) {
+        waiter_finish(w, NULL);
+        return -1;
+    }
+    gint64 deadline = g_get_monotonic_time() + (gint64)timeout_ms * 1000;
+    g_mutex_lock(&w->lock);
+    while (!w->done && g_cond_wait_until(&w->cond, &w->lock, deadline)) {}
+    int done = w->done;
+    if (done == 1 && status) *status = w->status;
+    g_mutex_unlock(&w->lock);
+    waiter_finish(w, NULL);
+    return done == 1 ? 0 : done == 0 ? -2 : -1;
 }
 
 void modbus_worker_stop(void) {

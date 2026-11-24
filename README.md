@@ -124,7 +124,7 @@ The web UI is accessible at
 | **Rule Chain** | Fires when another named rule executes |
 | **AOA Scenario** | Fires when an Axis Object Analytics scenario generates an event. Optional object-class filter (human, car, truck, bus, bike, other vehicle, or any). Injects `{{trigger.scenario_id}}`, `{{trigger.active}}`, and `{{trigger.reason}}` |
 | **Manual** | Fired via the **Fire Now** button in the UI or `POST /fire` with a rule ID. Useful for testing and one-shot actions |
-| **Modbus Read** | Poll Modbus TCP or RTU/RS-485 registers and coils on an interval. Read single values or a register map into variables; supports signed/unsigned 16/32/64-bit integers, 32/64-bit floats, strings, word order, scale and offset. Fires on a threshold edge or whenever values change |
+| **Modbus Read** | Poll Modbus TCP or RTU/RS-485 registers and coils on an interval. Read single values or a register map into variables; supports signed/unsigned 16/32/64-bit integers, 32/64-bit floats, strings in UTF-8, ASCII, ISO-8859-1/2 or Windows-1250/1252, word order, scale and offset. Large maps are read in several requests. Fires on a threshold edge or whenever values change |
 | **Modbus Error** | Fire when a Modbus device starts failing requests, or on every failed request, and again when it recovers. Can filter by device and slave ID; the trigger includes the error details |
 | **Sparkplug Command** | Fires when a Sparkplug B host writes a metric to this edge node via `NCMD`/`DCMD`. Optional metric-name and exact-value filters. Injects `{{trigger.metric}}` and `{{trigger.value}}`. Lets a SCADA host command the device, not just read from it |
 | **GPS Update** | Fires on each fresh NMEA GPS fix, optionally rate-limited |
@@ -227,7 +227,7 @@ stop a siren when motion ends).
 
 | Type | Description |
 |------|-------------|
-| **Modbus Write** | Write typed values or blocks over Modbus TCP or RTU/RS-485. Supports FC05/FC15 coil writes and FC06/FC16 register writes, including adjacent-register batching, data types, word order, scaling and strings |
+| **Modbus Write** | Write typed values or blocks over Modbus TCP or RTU/RS-485. Supports FC05/FC15 coil writes and FC06/FC16 register writes, including adjacent-register batching (split at the 123-register limit), data types, word order, scaling and strings in several encodings |
 
 ### Industrial
 

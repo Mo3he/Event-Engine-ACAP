@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "../cJSON.h"
+#include "modbus_codec.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -103,17 +104,27 @@ typedef struct {
 
 typedef void (*mb_read_done_fn)(const mb_read_result_t* result);
 
-/* Queue a read of count registers or bits. conn is the connection cfg (see
- * above) and is taken over by the worker. reg_type: "holding", "input",
- * "coil" or "discrete". done() is called on the GLib main loop, after the
- * status callback. */
+/* Queue a read of count registers or bits from address. spans are the
+ * requests (from mb_plan_reads, within address..address+count-1); the
+ * registers between them are left 0. NULL reads everything in one request.
+ * conn is the connection cfg (see above) and is taken over by the worker.
+ * reg_type: "holding", "input", "coil" or "discrete". done() is called on the
+ * GLib main loop, after the status callback. */
 void modbus_submit_read(cJSON* conn, int slave_id, const char* reg_type,
-                        int address, int count, unsigned tag, mb_read_done_fn done);
+                        int address, int count, const mb_span_t* spans, int nspans,
+                        unsigned tag, mb_read_done_fn done);
 
 /* Queue a write (function 5, 6, 15 or 16) of count values starting at
  * address. conn is copied. Returns 0 if queued, -1 if the queue is full. */
 int modbus_submit_write(cJSON* conn, int slave_id, int function, int address,
                         int count, const uint16_t* values);
+
+/* Queue a write like modbus_submit_write and wait up to timeout_ms for the
+ * device's answer, for testing an action. Not for the GLib main loop thread
+ * if it can wait long. The status callback still runs. Returns 0 with
+ * *status set, -1 if the write was not queued or was dropped, -2 on timeout. */
+int modbus_write_wait(cJSON* conn, int slave_id, int function, int address, int count,
+                      const uint16_t* values, int timeout_ms, mb_status_t* status);
 
 /* Stop the worker (pending jobs are dropped) and close all connections. */
 void modbus_worker_stop(void);
