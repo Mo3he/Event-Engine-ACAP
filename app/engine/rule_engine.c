@@ -272,7 +272,7 @@ static void on_trigger_fired(const char* rule_id, int trigger_index, cJSON* trig
     r->last_fired = time(NULL);
     r->execution_count++;
     if (r->max_exec_period[0]) r->period_exec_count++;
-    char rid_copy[37]; snprintf(rid_copy, sizeof(rid_copy), "%s", r->id);
+    char rid_copy[37]; snprintf(rid_copy, sizeof(rid_copy), "%.36s", r->id);
     char rname_copy[128]; snprintf(rname_copy, sizeof(rname_copy), "%s", r->name);
     cJSON* actions_dup = cJSON_Duplicate(r->actions_json, 1);
     cJSON* trigger_dup = trigger_data ? cJSON_Duplicate(trigger_data, 1) : cJSON_CreateObject();
@@ -507,11 +507,11 @@ int RuleEngine_Add(cJSON* rule_json, char* id_out_37) {
     Rule* r = &rules[rule_count];
     rule_from_json(r, rule_json);
     if (!given_id || strlen(given_id) < 8) gen_uuid(r->id);
-    if (id_out_37) snprintf(id_out_37, 37, "%s", r->id);
+    if (id_out_37) snprintf(id_out_37, 37, "%.36s", r->id);
     rule_count++;
     rules_save_locked();
     cJSON* triggers_dup = cJSON_Duplicate(r->triggers_json, 1);
-    char rid[37]; snprintf(rid, sizeof(rid), "%s", r->id);
+    char rid[37]; snprintf(rid, sizeof(rid), "%.36s", r->id);
     int enabled = r->enabled;
     pthread_mutex_unlock(&store_lock);
 
@@ -676,7 +676,7 @@ void RuleEngine_Tick(void) {
 
         if (refire_ids && prev == 0 && now_open == 1 && r->trigger_pending &&
             has_active)
-            snprintf(refire_ids[refire_count++], 37, "%s", r->id);
+            snprintf(refire_ids[refire_count++], 37, "%.36s", r->id);
     }
     pthread_mutex_unlock(&store_lock);
 
@@ -698,7 +698,7 @@ int RuleEngine_Fire(const char* id, cJSON* trigger_data) {
     if (!r) { pthread_mutex_unlock(&store_lock); return 0; }
 
     cJSON* actions_dup = cJSON_Duplicate(r->actions_json, 1);
-    char rid[37]; snprintf(rid, sizeof(rid), "%s", r->id);
+    char rid[37]; snprintf(rid, sizeof(rid), "%.36s", r->id);
     char rname[128]; snprintf(rname, sizeof(rname), "%s", r->name);
     pthread_mutex_unlock(&store_lock);
 
