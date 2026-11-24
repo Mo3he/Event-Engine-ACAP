@@ -1,5 +1,58 @@
 # Release Notes
 
+## v1.10.1 - Modbus fixes: Test button, encodings, long requests
+
+Follow-up to the Modbus feedback in #20. The Test button now reports what the
+device actually did, strings can use other character encodings, and reads and
+writes larger than one Modbus request are split automatically.
+
+### Upgrading to 1.10.1
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept.
+
+### New in 1.10.1
+
+- **String encodings:** Modbus strings can be UTF-8 (the default), ASCII,
+  ISO-8859-1, ISO-8859-2, Windows-1250 or Windows-1252, set per value and per
+  map or block entry. Text such as `Zażółć gęślą jaźń` is converted to the
+  selected encoding when written and back to UTF-8 when read. Typed-in text
+  with characters the encoding lacks is rejected when the rule is saved; text
+  from a template gets `?` instead. The length check counts encoded bytes.
+- **Long reads and writes are split:** one request still carries at most
+  125 registers on a read and 123 on a write (the Modbus frame limits). A
+  register map can now span up to 2000 registers and is read in several
+  requests, and a block write or a string of up to 125 registers is written in
+  several FC16 requests. Values are only split when one is longer than a
+  request.
+- **Byte order for 16-bit values and strings:** these types have no words to
+  swap, so the editor offers *AB (normal)* and *BA (byte swap)* instead of the
+  four word orders, which are kept for 32- and 64-bit values.
+
+### Fixes in 1.10.1
+
+- **Test works on the first click.** A Modbus device that closes idle TCP
+  connections made the next write fail while Test still reported OK, so only
+  the second click reached the device. Event Engine now notices a closed
+  connection before sending, and sends a request once more on a new
+  connection if it was lost in transit. This applies to every Modbus read and
+  write, not only to Test.
+- **Test reports the device's answer.** Test waits for the write to finish
+  and shows timeouts, refused connections and Modbus exceptions.
+- **Empty values are rejected.** A Modbus Write with no value for a number or
+  coil is now an error when saving and testing; it was written as 0 for
+  coils. An empty string still clears a text register.
+- **Scale and offset accept decimals with a comma.** The fields were number
+  inputs, which some browsers left empty when given `0,1` or `-0,5`, so the
+  value was silently ignored. They now accept a point or a comma, and text
+  that isn't a number is reported instead of dropped.
+
+Verified on a P3288-LV (AXIS OS 12.11.77) with a Modbus TCP test server that
+closes idle connections: Test before and after an idle disconnect, an
+unreachable device, empty values, NUL padding, 125-register string writes
+split into 123 + 2 registers, Windows-1250 writes and reads, register maps
+read in several requests, and scaling with a negative fractional offset.
+
 ## v1.10.0 - Settings redesign and feature controls
 
 A refreshed web UI and a reorganized Settings page. The interface has a

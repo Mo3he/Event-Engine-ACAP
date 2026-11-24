@@ -4715,9 +4715,10 @@ static int mb_encode_value(cJSON* v, const mb_field_t* f, int bits, cJSON* trigg
         else if (mb_parse_number(text, &d) == 0) regs[0] = d != 0;
         else { snprintf(err, err_size, "'%.40s' is not on/off or a number", text); rc = -1; }
     } else if (f->type == MB_T_STRING) {
-        if (mb_encode_string(text, f->nregs, f->order, regs) != 0) {
-            snprintf(err, err_size, "text is %d characters; %d registers hold %d",
-                     (int)strlen(text), f->nregs, f->nregs * 2);
+        if (mb_encode_string(text, f->nregs, f->order, f->charset, regs, NULL) != 0) {
+            snprintf(err, err_size, "text is %d bytes in %s; %d registers hold %d",
+                     (int)mb_text_encode(text, f->charset, NULL, 0, NULL, NULL),
+                     mb_charset_name(f->charset), f->nregs, f->nregs * 2);
             rc = -1;
         }
     } else if (mb_parse_number(text, &d) != 0) {
@@ -4740,12 +4741,18 @@ static int mb_write_value_cmp(const void* a, const void* b) {
     return ((const MbWriteValue*)a)->f.reg - ((const MbWriteValue*)b)->f.reg;
 }
 
+/* Set while Actions_Test runs on this thread: Modbus writes then wait for
+ * the device's answer so the test reports it. */
+static __thread int g_action_testing = 0;
+#define MB_TEST_TIMEOUT_MS 10000
+
 /* modbus_write — write one typed value, or a block of "values", to Modbus
  * holding registers or coils (TCP or RTU/RS-485). Values are encoded here on
  * the main loop; the requests run on the Modbus worker thread so a device that
- * doesn't answer can't stall the main loop. Writes keep their order. Each run
- * of adjacent registers is one request (FC16/FC15), or FC06/FC05 for a single
- * register or coil unless the function says otherwise. */
+ * doesn't answer can't stall the main loop. Writes keep their order. Adjacent
+ * registers share a request (FC16/FC15) up to the Modbus limit, and a value
+ * longer than that (a long string) is split; a single register or coil uses
+ * FC06/FC05 unless the function says otherwise. */
 static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
     char err[160], ferr[160];
     if (!mb_validate_write(cfg, err, sizeof(err))) {
@@ -4764,7 +4771,8 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
     int block = cJSON_IsArray(values) && cJSON_GetArraySize(values) > 0;
     int n = block ? cJSON_GetArraySize(values) : 1;
     MbWriteValue* wv = calloc((size_t)n, sizeof(*wv));
-    if (!wv) { LOG_ACTION_ERR("modbus_write: out of memory"); return; }
+    mb_field_t* fs = calloc((size_t)n, sizeof(*fs));
+    if (!wv || !fs) { LOG_ACTION_ERR("modbus_write: out of memory"); free(wv); free(fs); return; }
     int ok = 1;
     if (block) {
         int i = 0;
@@ -4789,32 +4797,53 @@ static void action_modbus_write(cJSON* cfg, cJSON* trigger_data) {
     if (!ok) {
         LOG_ACTION_ERR("modbus_write: register %d not written: %s", wv[0].f.reg, err);
         free(wv);
+        free(fs);
         return;
     }
 
-    /* Join adjacent values into runs, one request each. */
-    int max = bits ? MB_MAX_WRITE_BITS : MB_MAX_WRITE_REGS;
-    uint16_t* run = malloc((size_t)max * sizeof(uint16_t));
-    if (!run) { LOG_ACTION_ERR("modbus_write: out of memory"); free(wv); return; }
-    int run_start = 0, run_len = 0;
-    for (int i = 0; i <= n; i++) {
-        int flush = i == n || (run_len > 0 && (wv[i].f.reg != run_start + run_len ||
-                                               run_len + wv[i].f.nregs > max));
-        if (flush && run_len > 0) {
-            int fc = bits ? (run_len == 1 && !force_multi ? 0x05 : 0x0F)
-                          : (run_len == 1 && !force_multi ? 0x06 : 0x10);
-            if (modbus_submit_write(cfg, slave_id, fc, run_start, run_len, run) != 0) {
-                LOG_ACTION_ERR("modbus_write: could not queue write to register %d", run_start);
+    for (int i = 0; i < n; i++) fs[i] = wv[i].f;
+    mb_span_t spans[MB_MAX_REQUESTS];
+    int nspans = mb_plan_writes(fs, n, bits ? MB_MAX_WRITE_BITS : MB_MAX_WRITE_REGS, spans, MB_MAX_REQUESTS);
+    free(fs);
+    uint16_t run[MB_MAX_WRITE_BITS];
+    for (int si = 0; si < nspans; si++) {
+        const mb_span_t* sp = &spans[si];
+        /* The registers of this request, from the values that overlap it */
+        for (int i = 0; i < n; i++) {
+            int lo = wv[i].f.reg > sp->address ? wv[i].f.reg : sp->address;
+            int hi = wv[i].f.reg + wv[i].f.nregs < sp->address + sp->count
+                   ? wv[i].f.reg + wv[i].f.nregs : sp->address + sp->count;
+            if (lo < hi)
+                memcpy(run + (lo - sp->address), wv[i].regs + (lo - wv[i].f.reg),
+                       (size_t)(hi - lo) * sizeof(uint16_t));
+        }
+        int fc = bits ? (sp->count == 1 && !force_multi ? 0x05 : 0x0F)
+                      : (sp->count == 1 && !force_multi ? 0x06 : 0x10);
+        if (!g_action_testing) {
+            if (modbus_submit_write(cfg, slave_id, fc, sp->address, sp->count, run) != 0) {
+                LOG_ACTION_ERR("modbus_write: could not queue write to register %d", sp->address);
                 break;
             }
-            run_len = 0;
+            continue;
         }
-        if (i == n) break;
-        if (run_len == 0) run_start = wv[i].f.reg;
-        memcpy(run + run_len, wv[i].regs, (size_t)wv[i].f.nregs * sizeof(uint16_t));
-        run_len += wv[i].f.nregs;
+        mb_status_t st;
+        int rc = modbus_write_wait(cfg, slave_id, fc, sp->address, sp->count, run, MB_TEST_TIMEOUT_MS, &st);
+        if (rc == -2) {
+            LOG_ACTION_ERR("modbus_write: no answer within %d s (register %d)", MB_TEST_TIMEOUT_MS / 1000, sp->address);
+            break;
+        }
+        if (rc != 0) {
+            LOG_ACTION_ERR("modbus_write: could not queue write to register %d", sp->address);
+            break;
+        }
+        if (!st.ok) {
+            char desc[128];
+            mb_err_describe(&st.err, desc, sizeof(desc));
+            LOG_ACTION_ERR("modbus_write: %s, slave %d, FC%02d register %d: %s",
+                           st.device, slave_id, fc, sp->address, desc);
+            break;
+        }
     }
-    free(run);
     free(wv);
 }
 
@@ -4944,7 +4973,9 @@ int Actions_Test(const char* type, cJSON* config) {
     g_action_error[0] = '\0';
     cJSON* td = cJSON_CreateObject();
     cJSON_AddStringToObject(td, "type", "test");
+    g_action_testing = 1;
     execute_from(NULL, arr, 0, td);
+    g_action_testing = 0;
 
     int failed = g_action_error[0] ? 1 : 0;
     char rname[128];

@@ -135,6 +135,8 @@ typedef struct {
     char   modbus_reg_type[16];       /* "holding", "input", "coil", "discrete" */
     int    modbus_register;           /* first register of the read (0-65535) */
     int    modbus_count;              /* registers (or bits) in the read */
+    mb_span_t* modbus_spans;          /* heap: the requests of one poll */
+    int    modbus_nspans;
     int    modbus_poll_interval;      /* seconds between polls */
     time_t modbus_last_poll;          /* timestamp of last poll */
     MbEntry* modbus_map;              /* heap: values decoded from the read */
@@ -275,10 +277,12 @@ static void free_sub(Subscription* s) {
     if (s->topic_filter) cJSON_Delete(s->topic_filter);
     if (s->cached_data)  cJSON_Delete(s->cached_data);
     free(s->modbus_map);
+    free(s->modbus_spans);
     free(s->modbus_last_sig);
     s->topic_filter = NULL;
     s->cached_data = NULL;
     s->modbus_map = NULL;
+    s->modbus_spans = NULL;
     s->modbus_last_sig = NULL;
 }
 
@@ -378,10 +382,26 @@ static int modbus_parse_values(Subscription* s, cJSON* trig) {
     }
     s->modbus_register = lo;
     s->modbus_count = hi - lo + 1;
-    if (s->modbus_count > (s->modbus_bits ? MB_MAX_READ_BITS : MB_MAX_READ_REGS)) {
-        LOG_WARN("modbus_read: rule %s: the map spans %d registers, more than one read", s->rule_id, s->modbus_count);
+    if (s->modbus_count > MB_MAX_SPAN) {
+        LOG_WARN("modbus_read: rule %s: the map spans %d registers, more than %d", s->rule_id,
+                 s->modbus_count, MB_MAX_SPAN);
         return -1;
     }
+    mb_field_t* fs = malloc((size_t)s->modbus_map_count * sizeof(*fs));
+    if (!fs) return -1;
+    for (int i = 0; i < s->modbus_map_count; i++) fs[i] = s->modbus_map[i].f;
+    mb_span_t spans[MB_MAX_REQUESTS];
+    int n_spans = mb_plan_reads(fs, s->modbus_map_count, s->modbus_bits ? MB_MAX_READ_BITS : MB_MAX_READ_REGS,
+                                spans, MB_MAX_REQUESTS);
+    free(fs);
+    if (n_spans < 1) {
+        LOG_WARN("modbus_read: rule %s: the map needs more than %d read requests", s->rule_id, MB_MAX_REQUESTS);
+        return -1;
+    }
+    s->modbus_spans = malloc((size_t)n_spans * sizeof(*spans));
+    if (!s->modbus_spans) return -1;
+    memcpy(s->modbus_spans, spans, (size_t)n_spans * sizeof(*spans));
+    s->modbus_nspans = n_spans;
     return 0;
 }
 
@@ -950,7 +970,7 @@ static void modbus_read_done(const mb_read_result_t* r) {
         const uint16_t* regs = r->data + (f->reg - s->modbus_register);
         cJSON* item;
         if (!s->modbus_bits && f->type == MB_T_STRING) {
-            mb_decode_string(regs, f->nregs, f->order, text, sizeof(text));
+            mb_decode_string(regs, f->nregs, f->order, f->charset, text, sizeof(text));
             item = cJSON_CreateString(text);
         } else {
             double v = s->modbus_bits ? (double)(regs[0] ? 1 : 0)
@@ -1311,7 +1331,8 @@ void Triggers_Tick(void) {
         cJSON_AddStringToObject(cfg, "parity",          s->modbus_parity);
         s->modbus_busy = 1;
         modbus_submit_read(cfg, s->modbus_slave_id, s->modbus_reg_type, s->modbus_register,
-                           s->modbus_count, s->modbus_serial, modbus_read_done);
+                           s->modbus_count, s->modbus_spans, s->modbus_nspans,
+                           s->modbus_serial, modbus_read_done);
     }
 }
 
