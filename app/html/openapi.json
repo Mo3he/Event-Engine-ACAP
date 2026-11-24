@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{gps.latitude}}`, `{{gps.longitude}}` | Latest coordinates from a fresh GPS fix |\n| `{{gps.speed_kmh}}`, `{{gps.speed_mph}}`, `{{gps.speed_knots}}`, `{{gps.speed_mps}}` | Latest speed in the named units |\n| `{{gps.heading}}`, `{{gps.heading_cardinal}}`, `{{gps.altitude_m}}` | Heading, compass direction, and altitude |\n| `{{gps.age}}` | Seconds since the latest valid fix |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`. GPS values other than age resolve to `--` unless GPS is enabled and a fresh fix is available.\n",
-    "version": "1.10.1",
+    "version": "1.10.2",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -1536,7 +1536,7 @@
         "summary": "List all rules, fetch one by ID, or export all rules",
         "operationId": "listRules",
         "tags": ["Rules"],
-        "description": "Without query parameters: returns all rules.\n\nWith `?id=UUID`: returns a single rule.\n\nWith `?action=export`: exports all rules as a JSON file download.\n\nWith `?id=UUID&action=export`: exports a single rule as JSON file.",
+        "description": "Without query parameters: returns all rules.\n\nWith `?id=UUID`: returns a single rule.\n\nWith `?action=export`: exports all rules as a JSON file download.\n\nWith `?id=UUID&action=export`: exports a single rule as JSON file.\n\nExports replace passwords, tokens, webhook URLs and credential header values with `__REDACTED__` unless `include_secrets=1` is given. `?id=UUID` without `action` returns the rule unchanged.",
         "parameters": [
           {
             "name": "id",
@@ -1549,6 +1549,12 @@
             "in": "query",
             "schema": { "type": "string", "enum": ["export"] },
             "description": "If 'export', return rules as downloadable JSON file instead of response body"
+          },
+          {
+            "name": "include_secrets",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["1", "true"] },
+            "description": "With action=export: include passwords and tokens instead of __REDACTED__"
           }
         ],
         "responses": {
@@ -1573,7 +1579,7 @@
         "summary": "Create/update a rule, bulk export, or bulk import rules",
         "operationId": "createOrUpdateRule",
         "tags": ["Rules"],
-        "description": "Multiple modes:\n\n**Create** (no parameters): POST a single rule object to create a new rule.\n\n**Update** (`?id=UUID`): POST a single rule object to update existing rule with that ID.\n\n**Export all** (`?action=export`): POST with optional empty body to export all rules as JSON array.\n\n**Import** (`?action=import`): POST a **JSON array** of rule objects to bulk import them. Cannot import a single rule object — use the Create endpoint instead.",
+        "description": "Multiple modes:\n\n**Create** (no parameters): POST a single rule object to create a new rule.\n\n**Update** (`?id=UUID`): POST a single rule object to update existing rule with that ID.\n\n**Export all** (`?action=export`): POST with optional empty body to export all rules as JSON array.\n\n**Import** (`?action=import`): POST a **JSON array** of rule objects to bulk import them. Cannot import a single rule object — use the Create endpoint instead.\n\nOn create, update and import, a `__REDACTED__` value takes the stored value of the same rule (same `id`, same step type at the same position). Otherwise the field is removed and its path is listed in `missing_secrets`; a webhook trigger token is replaced with a new random token listed in `regenerated_tokens`. The create and import responses include these lists when they are not empty.",
         "parameters": [
           {
             "name": "id",
@@ -1586,6 +1592,12 @@
             "in": "query",
             "schema": { "type": "string", "enum": ["export", "import"] },
             "description": "Operation: 'export' to get all rules as JSON array, 'import' to bulk import rules from a JSON array"
+          },
+          {
+            "name": "include_secrets",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["1", "true"] },
+            "description": "With action=export: include passwords and tokens instead of __REDACTED__"
           }
         ],
         "requestBody": {
@@ -2205,7 +2217,15 @@
         "summary": "Get application settings",
         "operationId": "getSettings",
         "tags": ["Settings"],
-        "description": "Password field is never returned — it is write-only.",
+        "description": "The MQTT and SMTP passwords are returned empty; posting an empty password keeps the stored one. With `?include_secrets=1` (settings backup) the stored passwords are included.",
+        "parameters": [
+          {
+            "name": "include_secrets",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["1", "true"] },
+            "description": "Include the stored MQTT and SMTP passwords"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Current settings",

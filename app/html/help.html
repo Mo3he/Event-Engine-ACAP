@@ -1419,13 +1419,23 @@ spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
         <div>Export your rules and settings before <strong>uninstalling</strong>. A full uninstall clears all stored data. In-place updates (reinstall over existing) preserve data.</div>
       </div>
       <p>Rules can also be exported individually using <strong>Export</strong> from the rule card's action menu, producing a portable single-rule JSON file that can be shared and imported on any camera.</p>
+      <h3>Passwords and tokens in exports</h3>
+      <p>Every export asks whether to include secrets. <strong>Export without secrets</strong> is the default and is the right choice for files you share or store outside the camera.</p>
+      <ul>
+        <li><strong>Rules:</strong> passwords, API and bot tokens, webhook trigger tokens, Slack and Teams webhook URLs, and the values of credential headers such as <code>Authorization</code> or <code>X-API-Key</code> are replaced with <code>__REDACTED__</code>. Importing such a file leaves those fields empty, and the import message lists the rules that need them entered again. A webhook trigger gets a new random token, so update the systems that call it.</li>
+        <li><strong>Settings:</strong> the MQTT and SMTP passwords are left empty. Importing the file keeps the passwords already saved on the camera.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Choose <strong>Include secrets</strong> only for a full backup you can restore without retyping credentials. Anyone with that file can use those accounts and devices, so store it like a password.</div>
+      </div>
 
       <!-- ═══════════════════════════════════════════ API -->
       <h2 id="api">REST API</h2>
       <p>All endpoints are under <code>/local/acap_event_engine/</code> and require HTTP Basic Auth with admin credentials.</p>
       <table>
         <tr><th>Method</th><th>Path</th><th>Description</th></tr>
-        <tr><td>GET / POST / DELETE</td><td><code>/rules</code></td><td>Rule CRUD. POST without <code>id</code> creates; POST with <code>?id=</code> updates. GET with <code>?id=&lt;id&gt;&amp;action=export</code> downloads a rule as JSON.</td></tr>
+        <tr><td>GET / POST / DELETE</td><td><code>/rules</code></td><td>Rule CRUD. POST without <code>id</code> creates; POST with <code>?id=</code> updates. GET with <code>?id=&lt;id&gt;&amp;action=export</code> downloads a rule as JSON. Exports replace secrets with <code>__REDACTED__</code> unless <code>&amp;include_secrets=1</code> is added; saving a rule with <code>__REDACTED__</code> keeps the stored value.</td></tr>
         <tr><td>POST</td><td><code>/fire</code></td><td>Fire a rule manually or via webhook token.</td></tr>
         <tr><td>GET</td><td><code>/triggers</code></td><td>Available trigger types and their schemas.</td></tr>
         <tr><td>GET</td><td><code>/actions</code></td><td>Available action types and their schemas.</td></tr>

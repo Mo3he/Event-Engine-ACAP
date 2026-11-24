@@ -77,6 +77,7 @@ static void ACAP_ENDPOINT_settings(const ACAP_HTTP_Response response, const ACAP
 static void ACAP_ENDPOINT_app(const ACAP_HTTP_Response response, const ACAP_HTTP_Request request);
 static char ACAP_package_name[ACAP_MAX_PACKAGE_NAME];
 static ACAP_Config_Update ACAP_UpdateCallback = NULL;
+static void (*ACAP_SettingsSecretsHook)(cJSON* settings_copy) = NULL;
 cJSON* SplitString(const char* input, const char* delimiter);
 
 /*=====================================================
@@ -199,7 +200,18 @@ ACAP_ENDPOINT_settings(const ACAP_HTTP_Response response, const ACAP_HTTP_Reques
     }
 
     if (strcmp(method, "GET") == 0) {
-        ACAP_HTTP_Respond_JSON(response, cJSON_GetObjectItem(app, "settings"));
+        cJSON* settings = cJSON_GetObjectItem(app, "settings");
+        char* include = ACAP_HTTP_Request_Param(request, "include_secrets");
+        int with_secrets = include && (strcmp(include, "1") == 0 || strcmp(include, "true") == 0);
+        free(include);
+        if (with_secrets && ACAP_SettingsSecretsHook) {
+            cJSON* copy = cJSON_Duplicate(settings, 1);
+            ACAP_SettingsSecretsHook(copy);
+            ACAP_HTTP_Respond_JSON(response, copy);
+            cJSON_Delete(copy);
+            return;
+        }
+        ACAP_HTTP_Respond_JSON(response, settings);
         return;
     }
 
@@ -1561,6 +1573,10 @@ int ACAP_FILE_Exists(const char* filepath) {
  *=====================================================*/
 
 static void (*ACAP_WARNING_HOOK)(const char* message) = NULL;
+
+void ACAP_Set_Settings_Secrets_Hook(void (*hook)(cJSON* settings_copy)) {
+    ACAP_SettingsSecretsHook = hook;
+}
 
 void ACAP_Set_Warning_Hook(void (*hook)(const char* message)) {
     ACAP_WARNING_HOOK = hook;

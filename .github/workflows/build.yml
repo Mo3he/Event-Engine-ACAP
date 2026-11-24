@@ -90,6 +90,17 @@ jobs:
              -o /tmp/certs_test tools/certs_test.c app/engine/certs.c app/cJSON.c -lssl -lcrypto -lpthread
           /tmp/certs_test
 
+  rule_secrets:
+    name: Rule secret masking tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run the export masking and import restore tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iapp/engine \
+             -o /tmp/rule_secrets_test tools/rule_secrets_test.c app/engine/rule_secrets.c app/cJSON.c -lm
+          /tmp/rule_secrets_test
+
   build_acap:
     name: Build ACAP (${{ matrix.arch }})
     runs-on: ubuntu-latest
