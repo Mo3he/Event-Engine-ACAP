@@ -101,15 +101,6 @@ static void active_recording_store(const char* host, const char* diskid, const c
     }
 }
 
-static const char* active_recording_lookup(const char* host, const char* diskid) {
-    const char* h = host ? host : "";
-    for (int i = 0; i < active_recording_count; i++)
-        if (strcmp(active_recordings[i].host, h) == 0 &&
-            strcmp(active_recordings[i].diskid, diskid) == 0)
-            return active_recordings[i].recording_id;
-    return NULL;
-}
-
 static void active_recording_remove(const char* host, const char* diskid) {
     const char* h = host ? host : "";
     for (int i = 0; i < active_recording_count; i++) {
@@ -2232,7 +2223,7 @@ static void action_overlay(const char* rule_id, cJSON* cfg, cJSON* trigger_data,
         cJSON* e = resp_j ? cJSON_GetObjectItem(resp_j, "error") : NULL;
         if (!resp_j || e) {
             const char* m = e ? cJSON_GetStringValue(cJSON_GetObjectItem(e, "message")) : NULL;
-            char why[160];
+            char why[CURL_ERROR_SIZE];
             if (!m) m = s->host[0] ? remote_failure_text(why, sizeof(why)) : "no response from the device";
             err = strdup(m);
             cJSON_Delete(resp_j);
