@@ -1,5 +1,54 @@
 # Release Notes
 
+## v1.10.2 - Secrets left out of exports by default
+
+Rule exports and backups used to contain every password and token in plain
+text, and the SMTP password could be read back from the settings. Exports now
+leave secrets out unless you choose to include them.
+
+### Upgrading to 1.10.2
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. On first start,
+Event Engine removes a saved SMTP password from `settings.json`; the password
+itself is kept and email keeps working.
+
+### New in 1.10.2
+
+- **Exports ask about secrets:** Export (all rules or one rule) and Export
+  Settings ask whether to include passwords and tokens, with a warning that
+  such a file gives access to those accounts. *Export without secrets* is the
+  default.
+- **Masked rule exports:** without secrets, passwords, API and bot tokens,
+  webhook trigger tokens, Slack and Teams webhook URLs and the values of
+  credential headers (`Authorization`, `Cookie`, `X-API-Key` and similar)
+  are replaced with `__REDACTED__`. Other headers stay readable.
+- **Imports handle masked files:** a `__REDACTED__` value keeps the stored
+  secret when the rule already exists on the camera. Otherwise the field is
+  left empty, the import message names the rules that need their secrets
+  entered again, and the Event Log lists each field. A webhook trigger gets a
+  new random token instead of an empty one, because an empty token would
+  accept every webhook call.
+- **API:** add `include_secrets=1` to `GET /rules?action=export`,
+  `GET /rules?id=…&action=export`, `POST /rules?action=export` and
+  `GET /settings` to include secrets. The create and import responses list
+  `missing_secrets` and `regenerated_tokens` when there are any.
+  `GET /rules?id=…`, used by the rule editor, is unchanged.
+
+### Fixes in 1.10.2
+
+- **SMTP password no longer returned:** after the SMTP settings were saved,
+  the password was put back into the settings, so `GET /settings`,
+  `GET /app` and settings exports returned it and it was written to
+  `settings.json`. It is now only stored in its own file, as the MQTT
+  password already was.
+
+Verified on a P3288-LV (AXIS OS 12.11.77): every export path with and without
+`include_secrets`, saving a masked rule over the stored one, imports with and
+without a matching rule, webhook token regeneration, the Event Log warnings,
+the SMTP password removal on upgrade from 1.10.1, and the export dialog for
+rules, a single rule and settings.
+
 ## v1.10.1 - Modbus fixes: Test button, encodings, long requests
 
 Follow-up to the Modbus feedback in #20. The Test button now reports what the

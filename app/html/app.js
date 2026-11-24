@@ -85,7 +85,7 @@ if (typeof API === 'undefined') {
 
     getRules:      ()      => API.get('rules'),
     getRule:       id      => API.get(`rules?id=${encodeURIComponent(id)}`),
-    exportRules:   ()      => API.get('rules?action=export'),
+    exportRules:   secrets => API.get('rules?action=export' + (secrets ? '&include_secrets=1' : '')),
     importRules:   rules   => API.post('rules?action=import', rules).then(r => r.json()),
     addRule:       rule    => API.post('rules', rule),
     updateRule:    (id, r) => API.post(`rules?id=${encodeURIComponent(id)}`, r),
@@ -1255,11 +1255,80 @@ async function deleteRule(id) {
   }
 }
 
+/* Ask whether an export should include passwords and tokens. Resolves to
+ * true (include), false (leave out) or null (cancelled). */
+const EXPORT_SECRETS_TEXT = {
+  rules: {
+    contents: 'Rules can contain passwords, API tokens, webhook URLs and authorization headers.',
+    without: 'Without secrets, each value is replaced with <code>__REDACTED__</code> and has to be entered again after importing the file.',
+  },
+  settings: {
+    contents: 'Settings can contain the MQTT and SMTP passwords.',
+    without: 'Without secrets, the passwords are left empty. Importing the file keeps the passwords already saved on the camera.',
+  },
+};
+
+function askIncludeSecrets(what) {
+  const text = EXPORT_SECRETS_TEXT[what === 'settings' ? 'settings' : 'rules'];
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="_secrets_title"
+           style="height:auto;max-width:480px;">
+        <div class="modal-header">
+          <span class="modal-title" id="_secrets_title">Export ${escHtml(what)}</span>
+          <button class="modal-close" data-choice="cancel" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="margin:0 0 10px;">${text.contents} Include them in the file?</p>
+          <div class="form-warning">A file with secrets gives anyone who has it access to those
+            devices and services. Store it like a password and don't share it.</div>
+          <div class="form-hint" style="margin-top:10px;">${text.without}</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" data-choice="cancel">Cancel</button>
+          <button class="btn btn-danger" data-choice="include">Include secrets</button>
+          <button class="btn btn-primary" data-choice="exclude">Export without secrets</button>
+        </div>
+      </div>`;
+    const close = choice => {
+      document.removeEventListener('keydown', onEscape);
+      overlay.remove();
+      resolve(choice === 'include' ? true : choice === 'exclude' ? false : null);
+    };
+    const onEscape = ev => { if (ev.code === 'Escape') close('cancel'); };
+    overlay.addEventListener('click', ev => {
+      if (ev.target === overlay) return close('cancel');
+      const btn = ev.target.closest('[data-choice]');
+      if (btn) close(btn.dataset.choice);
+    });
+    document.addEventListener('keydown', onEscape);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-choice="exclude"]').focus();
+  });
+}
+
+/* Warn after an import when masked secrets could not be restored. */
+function reportMissingSecrets(result) {
+  const imported = (result && result.imported) || [];
+  const missing = imported.filter(i => i.missing_secrets && i.missing_secrets.length).map(i => i.rule_name);
+  const newTokens = imported.filter(i => i.regenerated_tokens && i.regenerated_tokens.length).map(i => i.rule_name);
+  if (missing.length) {
+    toast(`Enter passwords and tokens again in: ${missing.join(', ')} (they were left out of the export)`, 'warning');
+  }
+  if (newTokens.length) {
+    toast(`New webhook tokens were generated for: ${newTokens.join(', ')}. Update the webhook callers.`, 'warning');
+  }
+}
+
 async function exportRule(id) {
   try {
     const r = allRules.find(r => r.id === id);
     const ruleName = r ? r.name : id;
-    const response = await fetch(`/local/acap_event_engine/rules?id=${encodeURIComponent(id)}&action=export`);
+    const secrets = await askIncludeSecrets('rule');
+    if (secrets === null) return;
+    const response = await fetch(`/local/acap_event_engine/rules?id=${encodeURIComponent(id)}&action=export${secrets ? '&include_secrets=1' : ''}`);
     if (!response.ok) {
       toast('Failed to export rule', 'error');
       return;
@@ -1531,7 +1600,9 @@ function downloadJSON(filename, data) {
 
 async function exportRules() {
   try {
-    const full = await API.exportRules();
+    const secrets = await askIncludeSecrets('rules');
+    if (secrets === null) return;
+    const full = await API.exportRules(secrets);
     const rules = Array.isArray(full) ? full : [full];
     for (const r of rules) {
       const tag = getRuleTag(r.id);
@@ -1579,6 +1650,7 @@ async function importRules(input) {
       }
     }
     toast(`Imported ${result.success} rule(s)${result.failed ? ', ' + result.failed + ' failed' : ''}`);
+    reportMissingSecrets(result);
     loadRules();
   } catch(e) {
     toast('Import failed: ' + e.message, 'error');
@@ -1587,7 +1659,9 @@ async function importRules(input) {
 
 async function exportSettings() {
   try {
-    const settings = await API.get('settings');
+    const secrets = await askIncludeSecrets('settings');
+    if (secrets === null) return;
+    const settings = await API.get(secrets ? 'settings?include_secrets=1' : 'settings');
     downloadJSON('event_engine_settings.json', settings);
   } catch(e) {
     toast('Export failed: ' + e.message, 'error');

@@ -164,6 +164,14 @@ int ACAP_Set_Config(const char* service, cJSON* serviceSettings);
 cJSON* ACAP_Get_Config(const char* service);
 
 /**
+ * @brief Add secrets that are stored outside the settings to an export.
+ *
+ * GET /settings never returns stored passwords. With ?include_secrets=1 it
+ * responds with a copy of the settings passed through this hook first.
+ */
+void ACAP_Set_Settings_Secrets_Hook(void (*hook)(cJSON* settings_copy));
+
+/**
  * @brief Clean up all ACAP resources and stop background threads.
  *
  * Call this before application exit to properly release resources:

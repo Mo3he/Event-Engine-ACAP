@@ -54,7 +54,7 @@ HTTP Digest Auth (admin credentials). With curl, use `-u root:pass --anyauth`.
 | `POST` | `/rules?id=UUID` | Update an existing rule |
 | `DELETE` | `/rules?id=UUID` | Delete a rule |
 | `POST` | `/rules?action=import` | Bulk import rules (body = JSON array of rules) |
-| `GET` | `/rules?action=export` | Export all rules as JSON |
+| `GET` | `/rules?action=export` | Export all rules as JSON; secrets are `__REDACTED__` unless `&include_secrets=1` |
 | `POST` | `/fire` | Fire a rule: `{"id":"UUID"}` or webhook: `{"token":"...", "payload":{...}}` |
 | `GET` | `/engine` | Get engine status (uptime, rule counts, MQTT status, device info) |
 | `GET` | `/events` | Get event log (optional `?limit=N&rule=UUID`; `&system=1` adds system messages, `&system=only` returns only them). Timestamps are epoch seconds with milliseconds |

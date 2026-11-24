@@ -22,6 +22,7 @@
 #include "engine/certs.h"
 #include "engine/modbus_codec.h"
 #include "engine/gps.h"
+#include "engine/rule_secrets.h"
 
 #define APP_PACKAGE "acap_event_engine"
 
@@ -446,24 +447,9 @@ static void apply_engine_config(cJSON* engine_cfg) {
     AlertStream_Set_Enabled(setting_enabled(engine_cfg, "alert_stream_enabled"));
 }
 
+/* Password is stored separately; action_email() reads it from this file, so
+ * it never needs to be in the settings that GET /settings returns. */
 #define SMTP_PASS_FILE "localdata/smtp_password.txt"
-
-static void load_smtp_password(void) {
-    cJSON* obj = ACAP_FILE_Read(SMTP_PASS_FILE);
-    if (!obj) return;
-    const char* pw = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "pw"));
-    if (pw && pw[0]) {
-        /* Inject into in-memory smtp config so actions.c can read it */
-        cJSON* _sett    = ACAP_Get_Config("settings");
-        cJSON* smtp_cfg = _sett ? cJSON_GetObjectItem(_sett, "smtp") : NULL;
-        if (smtp_cfg) {
-            cJSON* pw_item = cJSON_GetObjectItem(smtp_cfg, "password");
-            if (pw_item) cJSON_SetValuestring(pw_item, pw);
-            else         cJSON_AddStringToObject(smtp_cfg, "password", pw);
-        }
-    }
-    cJSON_Delete(obj);
-}
 
 static void apply_smtp_config(cJSON* smtp_json) {
     if (!smtp_json) return;
@@ -473,12 +459,47 @@ static void apply_smtp_config(cJSON* smtp_json) {
         cJSON_AddStringToObject(obj, "pw", pass);
         ACAP_FILE_Write(SMTP_PASS_FILE, obj);
         cJSON_Delete(obj);
-        /* Strip from in-memory settings so GET never returns it */
         cJSON* pw_item = cJSON_GetObjectItem(smtp_json, "password");
         if (pw_item) cJSON_SetValuestring(pw_item, "");
     }
-    /* Reload so in-memory config has the password for action_email() */
-    load_smtp_password();
+}
+
+static void add_stored_password(cJSON* settings, const char* service, const char* file) {
+    cJSON* cfg = cJSON_GetObjectItem(settings, service);
+    cJSON* obj = ACAP_FILE_Read(file);
+    const char* pw = obj ? cJSON_GetStringValue(cJSON_GetObjectItem(obj, "pw")) : NULL;
+    if (cJSON_IsObject(cfg) && pw && pw[0]) {
+        if (cJSON_GetObjectItem(cfg, "password"))
+            cJSON_ReplaceItemInObject(cfg, "password", cJSON_CreateString(pw));
+        else
+            cJSON_AddStringToObject(cfg, "password", pw);
+    }
+    if (obj) cJSON_Delete(obj);
+}
+
+/* GET /settings?include_secrets=1 (settings backup with secrets) */
+static void settings_secrets_hook(cJSON* settings_copy) {
+    add_stored_password(settings_copy, "mqtt", MQTT_PASS_FILE);
+    add_stored_password(settings_copy, "smtp", SMTP_PASS_FILE);
+}
+
+/* Versions before 1.10.2 put the SMTP password back into the settings after
+ * saving it, so localdata/settings.json may still hold it. The settings were
+ * already stripped in memory during ACAP_Init(); write them back. */
+static void scrub_saved_settings(cJSON* settings) {
+    cJSON* saved = ACAP_FILE_Read("localdata/settings.json");
+    if (!saved) return;
+    int dirty = 0;
+    const char* services[] = { "smtp", "mqtt" };
+    for (size_t i = 0; i < sizeof(services) / sizeof(services[0]); i++) {
+        const char* pw = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(saved, services[i]), "password"));
+        if (pw && pw[0]) dirty = 1;
+    }
+    cJSON_Delete(saved);
+    if (dirty) {
+        ACAP_FILE_Write("localdata/settings.json", settings);
+        LOG("Removed stored passwords from settings.json");
+    }
 }
 
 static void acap_warning_to_log(const char* message) {
@@ -511,6 +532,59 @@ static cJSON* get_body_json(const ACAP_HTTP_Request req) {
     return cJSON_Parse(body);
 }
 
+/* Exports leave out passwords and tokens unless ?include_secrets=1. */
+static int want_secrets(const ACAP_HTTP_Request req) {
+    char* v = ACAP_HTTP_Request_Param(req, "include_secrets");
+    int yes = v && (strcmp(v, "1") == 0 || strcmp(v, "true") == 0);
+    free(v);
+    return yes;
+}
+
+static cJSON* export_all_rules(int include_secrets) {
+    cJSON* summaries = RuleEngine_List();
+    cJSON* full_arr = cJSON_CreateArray();
+    cJSON* item;
+    cJSON_ArrayForEach(item, summaries) {
+        const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
+        if (!rid) continue;
+        cJSON* full_rule = RuleEngine_Get(rid);
+        if (!full_rule) continue;
+        if (!include_secrets) RuleSecrets_Mask(full_rule);
+        cJSON_AddItemToArray(full_arr, full_rule);
+    }
+    cJSON_Delete(summaries);
+    return full_arr;
+}
+
+/* Replace RULE_SECRET_MASK placeholders in an incoming rule with the saved
+ * values of the rule with id (may be NULL). Fields that can't be restored
+ * are removed and logged; their paths are added to report when given. */
+static void restore_rule_secrets(cJSON* rule, const char* id, cJSON* report) {
+    cJSON* stored = (id && *id) ? RuleEngine_Get(id) : NULL;
+    cJSON* missing = cJSON_CreateArray();
+    cJSON* regenerated = cJSON_CreateArray();
+    RuleSecrets_Restore(rule, stored, missing, regenerated);
+    if (stored) cJSON_Delete(stored);
+
+    const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(rule, "name"));
+    cJSON* p;
+    cJSON_ArrayForEach(p, missing)
+        EventLog_System("rules", "warning", "Rule '%s': %s was redacted and has no saved value, enter it again",
+                        name ? name : "", p->valuestring);
+    cJSON_ArrayForEach(p, regenerated)
+        EventLog_System("rules", "warning", "Rule '%s': %s was redacted, a new webhook token was generated",
+                        name ? name : "", p->valuestring);
+
+    if (report && cJSON_GetArraySize(missing) > 0)
+        cJSON_AddItemToObject(report, "missing_secrets", missing);
+    else
+        cJSON_Delete(missing);
+    if (report && cJSON_GetArraySize(regenerated) > 0)
+        cJSON_AddItemToObject(report, "regenerated_tokens", regenerated);
+    else
+        cJSON_Delete(regenerated);
+}
+
 /*=====================================================
  * GET/POST/DELETE /local/acap_event_engine/rules
  *
@@ -518,6 +592,9 @@ static cJSON* get_body_json(const ACAP_HTTP_Request req) {
  * GET /rules?id=UUID                  - Get a single rule
  * GET /rules?id=UUID&action=export    - Export one rule as JSON download
  * GET /rules?action=export            - Export all rules as JSON download
+ *   Exports replace passwords, tokens, webhook URLs and credential headers
+ *   with RULE_SECRET_MASK unless &include_secrets=1 is given. Saving or
+ *   importing a rule with the placeholder keeps the stored value.
  *
  * POST /rules                         - Create a new rule
  * POST /rules?id=UUID                 - Update existing rule
@@ -535,16 +612,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         
         /* GET ?action=export → bulk export all rules (full details) as file download */
         if (!id && action && *action && strcmp(action, "export") == 0) {
-            cJSON* summaries = RuleEngine_List();
-            cJSON* full_arr = cJSON_CreateArray();
-            cJSON* item;
-            cJSON_ArrayForEach(item, summaries) {
-                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
-                if (!rid) continue;
-                cJSON* full_rule = RuleEngine_Get(rid);
-                if (full_rule) cJSON_AddItemToArray(full_arr, full_rule);
-            }
-            cJSON_Delete(summaries);
+            cJSON* full_arr = export_all_rules(want_secrets(req));
             char* json_str = cJSON_Print(full_arr);
             unsigned json_size = json_str ? strlen(json_str) : 0;
             
@@ -588,6 +656,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     snprintf(filename + fi, sizeof(filename) - fi, ".json");
                 }
 
+                if (!want_secrets(req)) RuleSecrets_Mask(rule);
                 char* json_str = cJSON_Print(rule);
                 unsigned json_size = json_str ? strlen(json_str) : 0;
                 
@@ -618,16 +687,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
         
         /* POST ?action=export → bulk export all rules (JSON response body, full details) */
         if (action && *action && strcmp(action, "export") == 0) {
-            cJSON* summaries = RuleEngine_List();
-            cJSON* full_arr = cJSON_CreateArray();
-            cJSON* item;
-            cJSON_ArrayForEach(item, summaries) {
-                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(item, "id"));
-                if (!rid) continue;
-                cJSON* full_rule = RuleEngine_Get(rid);
-                if (full_rule) cJSON_AddItemToArray(full_arr, full_rule);
-            }
-            cJSON_Delete(summaries);
+            cJSON* full_arr = export_all_rules(want_secrets(req));
             ACAP_HTTP_Respond_JSON(resp, full_arr);
             cJSON_Delete(full_arr);
             if (action) free(action);
@@ -661,8 +721,12 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 char error[256] = "";
                 
                 const char* rname = cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "name"));
+                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "id"));
+                cJSON* secrets_report = cJSON_CreateObject();
+                restore_rule_secrets(rule_item, (rid && RuleEngine_Exists(rid)) ? rid : NULL, secrets_report);
 
                 if (!validate_rule_json(rule_item, error, sizeof(error))) {
+                    cJSON_Delete(secrets_report);
                     cJSON* err_obj = cJSON_CreateObject();
                     cJSON_AddNumberToObject(err_obj, "index", total - 1);
                     cJSON_AddStringToObject(err_obj, "rule_name", rname ? rname : "unknown");
@@ -673,7 +737,6 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
 
                 /* Restoring a backup over the rules it came from should update
                  * them, not clone every id. */
-                const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(rule_item, "id"));
                 char new_id[37] = "";
                 int added;
                 if (rid && RuleEngine_Exists(rid)) {
@@ -687,6 +750,11 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     cJSON_AddNumberToObject(imported_obj, "index", total - 1);
                     cJSON_AddStringToObject(imported_obj, "id", new_id);
                     cJSON_AddStringToObject(imported_obj, "rule_name", rname ? rname : "");
+                    cJSON* sr;
+                    while ((sr = secrets_report->child)) {
+                        cJSON_DetachItemViaPointer(secrets_report, sr);
+                        cJSON_AddItemToObject(imported_obj, sr->string, sr);
+                    }
                     cJSON_AddItemToArray(imported_array, imported_obj);
                     success++;
                 } else {
@@ -696,6 +764,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                     cJSON_AddStringToObject(err_obj, "error", "Failed to import rule");
                     cJSON_AddItemToArray(errors_array, err_obj);
                 }
+                cJSON_Delete(secrets_report);
             }
 
             cJSON_Delete(body);
@@ -726,6 +795,7 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
                 ACAP_HTTP_Respond_Text(resp, "OK");
                 return;
             }
+            restore_rule_secrets(body, RuleEngine_Exists(id) ? id : NULL, NULL);
             char error[256] = "";
             if (!validate_rule_json(body, error, sizeof(error))) {
                 free(id); cJSON_Delete(body);
@@ -740,14 +810,19 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
             /* POST (no id) → create new rule, unless the body names one that
              * already exists, in which case this is an update. */
             if (id) free(id);
+            const char* body_id = cJSON_GetStringValue(cJSON_GetObjectItem(body, "id"));
+            int exists = body_id && RuleEngine_Exists(body_id);
+            cJSON* secrets_report = cJSON_CreateObject();
+            restore_rule_secrets(body, exists ? body_id : NULL, secrets_report);
             char error[256] = "";
             if (!validate_rule_json(body, error, sizeof(error))) {
+                cJSON_Delete(secrets_report);
                 cJSON_Delete(body);
                 ACAP_HTTP_Respond_Error(resp, 400, error);
                 return;
             }
-            const char* body_id = cJSON_GetStringValue(cJSON_GetObjectItem(body, "id"));
-            if (body_id && RuleEngine_Exists(body_id)) {
+            if (exists) {
+                cJSON_Delete(secrets_report);
                 int updated = RuleEngine_Update(body_id, body);
                 cJSON_Delete(body);
                 if (!updated) { ACAP_HTTP_Respond_Error(resp, 500, "Failed to update rule"); return; }
@@ -756,12 +831,13 @@ static void HTTP_Rules(ACAP_HTTP_Response resp, const ACAP_HTTP_Request req) {
             }
             char new_id[37] = "";
             if (!RuleEngine_Add(body, new_id)) {
+                cJSON_Delete(secrets_report);
                 cJSON_Delete(body);
                 ACAP_HTTP_Respond_Error(resp, 500, "Failed to add rule");
                 return;
             }
             cJSON_Delete(body);
-            cJSON* result = cJSON_CreateObject();
+            cJSON* result = secrets_report;
             cJSON_AddStringToObject(result, "id", new_id);
             cJSON_AddStringToObject(result, "status", "created");
             ACAP_HTTP_Respond_JSON(resp, result);
@@ -2122,7 +2198,8 @@ int main(void) {
 
     Sparkplug_Configure(cJSON_GetObjectItem(settings, "sparkplug"));
 
-    load_smtp_password();
+    ACAP_Set_Settings_Secrets_Hook(settings_secrets_hook);
+    scrub_saved_settings(settings);
 
     RuleEngine_Init();
     Gps_Init(cJSON_GetObjectItem(settings, "gps"), Triggers_On_GPS_Update);

@@ -494,7 +494,7 @@ All endpoints are under `/local/acap_event_engine/` and require Digest Auth
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET / POST / DELETE | `/rules` | Rule CRUD: POST without `id` creates, POST with `?id=` updates, `?action=export` exports all, `?action=import` bulk imports |
+| GET / POST / DELETE | `/rules` | Rule CRUD: POST without `id` creates, POST with `?id=` updates, `?action=export` exports all, `?action=import` bulk imports. Exports replace secrets with `__REDACTED__` unless `&include_secrets=1` is given |
 | POST | `/fire` | Fire a rule manually (`{"id":"UUID"}`) or via webhook token (`{"token":"...", "payload":{...}}`) |
 | GET | `/triggers` | Available trigger types and their schemas |
 | GET / POST | `/actions` | Available action types (GET) or test a single action (POST) |
@@ -564,7 +564,8 @@ admin-level camera credentials.
 Rules and settings are stored in `localdata/` on the camera and survive in-place
 application updates. To preserve data across a full uninstall/reinstall, use the
 **Export** buttons in the Settings tab to download your rules and settings as JSON
-files before uninstalling.
+files before uninstalling. Each export asks whether to include passwords and
+tokens; without them, they have to be entered again after importing.
 
 ## Project structure
 
