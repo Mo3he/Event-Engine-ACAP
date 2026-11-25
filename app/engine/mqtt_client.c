@@ -780,6 +780,12 @@ static void* worker_fn(void* arg) {
         struct timeval tv_zero = {0, 0};
         if (select(shutdown_pipe[0] + 1, &check, NULL, NULL, &tv_zero) > 0) break;
 
+        /* This attempt uses the current settings, so earlier reconnect
+         * requests are satisfied. Drain before copying them: a request made
+         * after the copy must still wake the next wait, or a corrected
+         * password would sit behind the backoff. */
+        drain_pipe(wake_pipe[0]);
+
         /* Take a private copy so a concurrent MQTT_Reconfigure cannot swap the
          * host out from under us mid-handshake. */
         MQTT_Config active;
@@ -834,7 +840,6 @@ static void* worker_fn(void* arg) {
                 tls_note, idx + 1, count);
         else
             LOG("connecting to %s:%d%s", cur_host, cur_port, tls_note);
-        drain_pipe(wake_pipe[0]);   /* ignore reconnect requests made while offline */
         int fd = tcp_connect(cur_host, cur_port);
         if (fd < 0) {
             int wrapped = next_server(count);
@@ -864,7 +869,8 @@ static void* worker_fn(void* arg) {
             tls_close(&ssl);
             close(fd); fd = -1;
             server_index = (server_index + 1) % count;
-            sleep(reconnect_delay);
+            /* Woken by MQTT_Reconfigure, so corrected credentials apply at once. */
+            wait_before_retry(reconnect_delay);
             reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
             continue;
         }
@@ -1003,7 +1009,7 @@ static void* worker_fn(void* arg) {
             continue;
         }
 
-        sleep(reconnect_delay);
+        wait_before_retry(reconnect_delay);
         reconnect_delay = reconnect_delay < RECONNECT_DELAY_MAX ? reconnect_delay * 2 : RECONNECT_DELAY_MAX;
         continue;
 
