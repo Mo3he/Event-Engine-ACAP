@@ -1745,9 +1745,25 @@ cJSON* ACAP_EVENTS_Parse(AXEvent* axEvent) {
     return object;
 }
 
+/* Subscriptions being removed. Unsubscribing completes asynchronously, so an
+ * event can still arrive after ACAP_EVENTS_Unsubscribe() returned; it is
+ * dropped. (Not a check against the active list: a stateful event's current
+ * state arrives inside ax_event_handler_subscribe(), before the id is known.) */
+static GHashTable* retired_subscriptions = NULL;
+
+static int subscription_retired(guint subscription) {
+    return retired_subscriptions &&
+           g_hash_table_contains(retired_subscriptions, GUINT_TO_POINTER(subscription));
+}
+
 static void
 ACAP_EVENTS_Main_Callback(guint subscription, AXEvent* axEvent, gpointer user_data) {
     LOG_TRACE("%s:\n", __func__);
+
+    if (subscription_retired(subscription)) {
+        ax_event_free(axEvent);
+        return;
+    }
 
     cJSON* eventData = ACAP_EVENTS_Parse(axEvent);
     if (!eventData) {
@@ -1838,6 +1854,30 @@ int ACAP_EVENTS_Subscribe(cJSON* event, void* user_data) {
     return declarationID;
 }
 
+static void unsubscribe_done(guint subscription, gpointer user_data, GError* error) {
+    (void)user_data;
+    if (retired_subscriptions)
+        g_hash_table_remove(retired_subscriptions, GUINT_TO_POINTER(subscription));
+    if (error) {
+        LOG_WARN("%s: subscription %u: %s\n", __func__, subscription, error->message);
+        g_error_free(error);
+    }
+}
+
+/* Not ax_event_handler_unsubscribe(): it blocks on the default main context,
+ * which is where this runs, and stalled about 2 s per subscription (every
+ * rule or Sparkplug save, and shutdown). */
+static void unsubscribe_async(guint subscription) {
+    GError* error = NULL;
+    if (!retired_subscriptions)
+        retired_subscriptions = g_hash_table_new(g_direct_hash, g_direct_equal);
+    g_hash_table_add(retired_subscriptions, GUINT_TO_POINTER(subscription));
+    if (!ax_event_handler_unsubscribe_and_notify(ACAP_EVENTS_HANDLER, subscription, unsubscribe_done, NULL, &error)) {
+        LOG_WARN("%s: subscription %u: %s\n", __func__, subscription, error ? error->message : "failed");
+        g_clear_error(&error);
+    }
+}
+
 int ACAP_EVENTS_Unsubscribe(int id) {
     LOG_TRACE("%s: Unsubscribing id=%d\n", __func__, id);
 
@@ -1847,7 +1887,7 @@ int ACAP_EVENTS_Unsubscribe(int id) {
     if (id == 0) {
         cJSON* event = ACAP_EVENTS_SUBSCRIPTIONS->child;
         while (event) {
-            ax_event_handler_unsubscribe(ACAP_EVENTS_HANDLER, (guint)event->valueint, 0);
+            unsubscribe_async((guint)event->valueint);
             event = event->next;
         }
         cJSON_Delete(ACAP_EVENTS_SUBSCRIPTIONS);
@@ -1857,8 +1897,8 @@ int ACAP_EVENTS_Unsubscribe(int id) {
         for (int i = 0; i < arraySize; i++) {
             cJSON* item = cJSON_GetArrayItem(ACAP_EVENTS_SUBSCRIPTIONS, i);
             if (item && item->valueint == id) {
-                ax_event_handler_unsubscribe(ACAP_EVENTS_HANDLER, (guint)id, 0);
                 cJSON_DeleteItemFromArray(ACAP_EVENTS_SUBSCRIPTIONS, i);
+                unsubscribe_async((guint)id);
                 break;
             }
         }

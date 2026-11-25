@@ -1,5 +1,16 @@
 # Release Notes
 
+## Unreleased
+
+### Fixed
+
+- **Event handling stalled after saving rules or settings:** removing an event
+  subscription blocked Event Engine for about 2 seconds per subscription, so
+  events and actions waited after every rule save (2.5 s instead of 0.6 s on a
+  P3288-LV) and after a Sparkplug B settings save (14 s with 7 event-bound
+  metrics). Subscriptions are now removed in the background, and the app also
+  restarts faster (9 s instead of 14 s).
+
 ## v1.10.2 - Secrets left out of exports by default
 
 Rule exports and backups used to contain every password and token in plain
