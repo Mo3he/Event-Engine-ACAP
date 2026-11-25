@@ -10,6 +10,21 @@
   P3288-LV) and after a Sparkplug B settings save (14 s with 7 event-bound
   metrics). Subscriptions are now removed in the background, and the app also
   restarts faster (9 s instead of 14 s).
+- **MQTT:** after the broker refused a login, or after a lost connection, the
+  client waited out its backoff (up to 60 seconds) with a plain sleep, so a
+  corrected password or broker address was not used until then, and stopping
+  the app could take as long. It now wakes as soon as the settings change. A
+  settings change made while a connection attempt was starting could also be
+  dropped; it now triggers the next attempt.
+- **Sparkplug B:** `bdSeq` kept counting past 255. Sparkplug 3.0 requires 0 to
+  255, wrapping to 0; a stored larger value is reduced on start.
+- **Sparkplug B:** changing the group, edge node or device ID while connected
+  could publish data under the new ID before its birth certificate, and a
+  change made while connecting left the broker holding a death certificate for
+  the old ID. Data now waits for the new birth, and a change during the
+  handshake reconnects so the will matches.
+- **Sparkplug B:** turning Sparkplug B off while MQTT stayed on sent no death
+  certificate, so hosts kept showing the node online. It now sends NDEATH.
 
 ## v1.10.2 - Secrets left out of exports by default
 
