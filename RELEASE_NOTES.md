@@ -12,6 +12,11 @@
   dropped; it now triggers the next attempt.
 - **Sparkplug B:** `bdSeq` kept counting past 255. Sparkplug 3.0 requires 0 to
   255, wrapping to 0; a stored larger value is reduced on start.
+- **Sparkplug B:** changing the group, edge node or device ID while connected
+  could publish data under the new ID before its birth certificate, and a
+  change made while connecting left the broker holding a death certificate for
+  the old ID. Data now waits for the new birth, and a change during the
+  handshake reconnects so the will matches.
 
 ## v1.10.2 - Secrets left out of exports by default
 

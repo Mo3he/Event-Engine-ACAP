@@ -72,6 +72,10 @@ static int    hist_count = 0;
 static uint64_t bdseq      = 0;
 static uint8_t  seq        = 0;
 static int      birth_sent = 0;
+/* Identity the current session's will was registered for (at PRECONNECT). */
+static char session_group[128] = "";
+static char session_node[128]  = "";
+static char session_dev[128]   = "";
 static int      initialized = 0;
 static uint64_t last_birth_ms = 0;
 static uint64_t data_published = 0;
@@ -464,6 +468,9 @@ static void mqtt_state_cb(int state, void* user_data) {
             bdseq = (bdseq + 1) & 0xFF;
             save_bdseq();
             birth_sent = 0;
+            snprintf(session_group, sizeof(session_group), "%s", group_id);
+            snprintf(session_node,  sizeof(session_node),  "%s", edge_node_id);
+            snprintf(session_dev,   sizeof(session_dev),   "%s", device_id);
             register_will();
         } else {
             MQTT_Set_Will(NULL, NULL, 0, 0, 0);
@@ -474,6 +481,16 @@ static void mqtt_state_cb(int state, void* user_data) {
 
     if (state == MQTT_STATE_CONNECTED) {
         pthread_mutex_lock(&spb_lock);
+        /* The identity changed during the handshake: the broker holds a will
+         * for the old one, so start a session that matches instead. */
+        if (enabled && valid_id(group_id) && valid_id(edge_node_id) &&
+            (strcmp(session_group, group_id) != 0 || strcmp(session_node, edge_node_id) != 0 ||
+             strcmp(session_dev, device_id) != 0)) {
+            pthread_mutex_unlock(&spb_lock);
+            LOG("identity changed while connecting, reconnecting");
+            MQTT_Force_Reconnect();
+            return;
+        }
         if (enabled && valid_id(group_id) && valid_id(edge_node_id)) {
             publish_birth();
             if (birth_sent) flush_history();
@@ -779,6 +796,9 @@ int Sparkplug_Configure(cJSON* cfg) {
                            strcmp(new_dev,   device_id) != 0 ||
                            strcmp(new_host,  primary_host) != 0 ||
                            new_spec != spec_version;
+
+    /* Nothing may be published under a new identity before its birth. */
+    if (identity_changed) birth_sent = 0;
 
     enabled      = new_enabled;
     spec_version = new_spec;
