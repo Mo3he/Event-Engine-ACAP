@@ -1,8 +1,20 @@
 # Release Notes
 
-## Unreleased
+## v1.10.3 - No pause after saving; MQTT and Sparkplug B fixes
 
-### Fixed
+Saving a rule or the Sparkplug B settings no longer pauses event handling, a
+corrected MQTT password takes effect at once, and Sparkplug B hosts get
+correct birth and death certificates when the node's identity changes or
+Sparkplug B is turned off.
+
+### Upgrading to 1.10.3
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. A Sparkplug B
+`bdSeq` above 255 saved by an earlier version is brought back into range on
+first start, so hosts see a new session as usual.
+
+### Fixes in 1.10.3
 
 - **Event handling stalled after saving rules or settings:** removing an event
   subscription blocked Event Engine for about 2 seconds per subscription, so
