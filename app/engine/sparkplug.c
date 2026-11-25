@@ -113,6 +113,8 @@ static int pending_unsub_count = 0;
 
 static Sparkplug_Command_Fn command_fn = NULL;
 
+static void publish_death(void);
+
 /* =====================================================
  * Helpers
  * ===================================================== */
@@ -797,6 +799,10 @@ int Sparkplug_Configure(cJSON* cfg) {
                            strcmp(new_host,  primary_host) != 0 ||
                            new_spec != spec_version;
 
+    /* Disabled while MQTT stays connected: no reconnect follows, so end the
+     * session explicitly or the host keeps the node online. */
+    if (!new_enabled) publish_death();
+
     /* Nothing may be published under a new identity before its birth. */
     if (identity_changed) birth_sent = 0;
 
@@ -915,21 +921,27 @@ int Sparkplug_Init(void) {
     return 1;
 }
 
+/* Caller must hold spb_lock. An explicit NDEATH for the current session: a
+ * clean MQTT DISCONNECT suppresses the will, and disabling Sparkplug while
+ * MQTT stays connected removes it. */
+static void publish_death(void) {
+    if (!enabled || !birth_sent || !MQTT_Is_Connected()) return;
+    SPB_Metric m;
+    memset(&m, 0, sizeof(m));
+    m.name         = SPB_METRIC_BDSEQ;
+    m.datatype     = SPB_DT_UINT64;
+    m.i64          = (int64_t)bdseq;
+    m.timestamp_ms = now_ms();
+    if (publish_payload("NDEATH", &m, 1, 0, 0, 1))
+        LOG("NDEATH published (bdSeq=%llu)", (unsigned long long)bdseq);
+}
+
 void Sparkplug_Cleanup(void) {
     if (!initialized) return;
     MQTT_Set_State_Callback(NULL, NULL);
 
     pthread_mutex_lock(&spb_lock);
-    if (enabled && birth_sent && MQTT_Is_Connected()) {
-        SPB_Metric m;
-        memset(&m, 0, sizeof(m));
-        m.name         = SPB_METRIC_BDSEQ;
-        m.datatype     = SPB_DT_UINT64;
-        m.i64          = (int64_t)bdseq;
-        m.timestamp_ms = now_ms();
-        if (publish_payload("NDEATH", &m, 1, 0, 0, 1))
-            LOG("NDEATH published (bdSeq=%llu)", (unsigned long long)bdseq);
-    }
+    publish_death();
     birth_sent = 0;
     clear_defs(0);
     enabled = 0;

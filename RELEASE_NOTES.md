@@ -17,6 +17,8 @@
   change made while connecting left the broker holding a death certificate for
   the old ID. Data now waits for the new birth, and a change during the
   handshake reconnects so the will matches.
+- **Sparkplug B:** turning Sparkplug B off while MQTT stayed on sent no death
+  certificate, so hosts kept showing the node online. It now sends NDEATH.
 
 ## v1.10.2 - Secrets left out of exports by default
 
