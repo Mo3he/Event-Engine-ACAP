@@ -213,7 +213,7 @@ static void load_bdseq(void) {
     cJSON* obj = ACAP_FILE_Read(SPB_BDSEQ_FILE);
     if (!obj) return;
     cJSON* v = cJSON_GetObjectItem(obj, "bdseq");
-    if (cJSON_IsNumber(v) && v->valuedouble >= 0) bdseq = (uint64_t)v->valuedouble;
+    if (cJSON_IsNumber(v) && v->valuedouble >= 0) bdseq = (uint64_t)v->valuedouble & 0xFF;
     cJSON_Delete(obj);
 }
 
@@ -460,7 +460,8 @@ static void mqtt_state_cb(int state, void* user_data) {
          * node forever. A retained OFFLINE will arrive right after SUBSCRIBE. */
         host_online = 1;
         if (enabled && valid_id(group_id) && valid_id(edge_node_id)) {
-            bdseq++;
+            /* Sparkplug 3.0: 0 to 255, wrapping to 0. */
+            bdseq = (bdseq + 1) & 0xFF;
             save_bdseq();
             birth_sent = 0;
             register_will();
