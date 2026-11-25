@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Event handling stalled after saving rules or settings:** removing an event
+  subscription blocked Event Engine for about 2 seconds per subscription, so
+  events and actions waited after every rule save (2.5 s instead of 0.6 s on a
+  P3288-LV) and after a Sparkplug B settings save (14 s with 7 event-bound
+  metrics). Subscriptions are now removed in the background, and the app also
+  restarts faster (9 s instead of 14 s).
 - **MQTT:** after the broker refused a login, or after a lost connection, the
   client waited out its backoff (up to 60 seconds) with a plain sleep, so a
   corrected password or broker address was not used until then, and stopping
