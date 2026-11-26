@@ -1,0 +1,4483 @@
+'use strict';
+
+function openRuleEditor(rule) {
+  editingRule = rule;
+  _ruleEditorDirty = false;
+  /* Tags live in the camera-side UI settings, not in the rule object */
+  if (rule && rule.id && !rule.tag) rule.tag = getRuleTag(rule.id);
+  triggerLogic = rule && rule.trigger_logic ? rule.trigger_logic : 'OR';
+  conditionLogic = rule && rule.condition_logic ? rule.condition_logic : 'AND';
+  triggerRows = rule ? (rule.triggers || []).map(t => ({ ...t })) : [];
+  conditionRows = rule ? (rule.conditions || []).map(c => ({ ...c })) : [];
+  actionRows = rule ? (rule.actions || []).map(a => {
+    /* Convert ms → seconds for display when loading saved speaker_display time durations */
+    if (a.type === 'speaker_display' && a.duration_type && a.duration_type !== 'repetitions' && a.duration_value > 100)
+      return { ...a, duration_value: Math.round(a.duration_value / 1000) };
+    return { ...a };
+  }) : [];
+
+  document.getElementById('modal-title').textContent = rule && rule.name ? 'Edit Rule — ' + rule.name : 'New Rule';
+  document.getElementById('modal-body').innerHTML = buildRuleForm(rule);
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  renderTriggerList();
+  renderConditionList();
+  renderActionList();
+
+  setTimeout(() => {
+    const body = document.getElementById('modal-body');
+    if (body) body.addEventListener('input', _markRuleEditorDirty, { capture: true });
+  }, 0);
+}
+
+let _ruleEditorDirty = false;
+function _markRuleEditorDirty() { _ruleEditorDirty = true; }
+
+function closeModal() {
+  if (_ruleEditorDirty && !confirm('You have unsaved changes. Discard?')) return;
+  _ruleEditorDirty = false;
+  const body = document.getElementById('modal-body');
+  if (body) body.removeEventListener('input', _markRuleEditorDirty, { capture: true });
+  document.getElementById('modal-overlay').classList.add('hidden');
+  editingRule = null;
+}
+
+function buildRuleForm(rule) {
+  return `
+    <div style="margin-bottom:12px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <span style="font-size:13px;">Enabled</span>
+        <label class="toggle">
+          <input type="checkbox" id="f-enabled" ${(!rule || rule.enabled !== false) ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </label>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>Rule Name</label>
+        <input id="f-name" type="text" value="${rule ? escHtml(rule.name) : ''}" placeholder="e.g. Motion → Record">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>Tag <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input id="f-tag" type="text" value="${rule && rule.tag ? escHtml(rule.tag) : ''}" placeholder="e.g. Security" list="tag-datalist">
+        <datalist id="tag-datalist">${getAllTags().map(t => `<option value="${escHtml(t)}">`).join('')}</datalist>
+      </div>
+    </div>
+
+    <!-- Triggers -->
+    <div class="section-header">
+      <span class="section-title">Triggers (IF)</span>
+      <div class="logic-toggle">
+        <button class="logic-btn ${!rule || (rule.trigger_logic||'OR')==='OR' ? 'active' : ''}" onclick="setLogic('trigger','OR',this)">OR</button>
+        <button class="logic-btn ${rule && (rule.trigger_logic==='AND' || rule.trigger_logic==='AND_ACTIVE') ? 'active' : ''}" onclick="setLogic('trigger','AND',this)">AND</button>
+        <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">OR = any trigger fires | AND = all must activate</span>
+      </div>
+    </div>
+    <div id="trigger-and-options" style="display:${rule && (rule.trigger_logic==='AND' || rule.trigger_logic==='AND_ACTIVE') ? 'block' : 'none'};">
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:8px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="and-mode" value="AND_ACTIVE" ${!rule || rule.trigger_logic !== 'AND' ? 'checked' : ''} onchange="setAndMode(this.value)">
+          All active simultaneously
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
+          <input type="radio" name="and-mode" value="AND" ${rule && rule.trigger_logic === 'AND' ? 'checked' : ''} onchange="setAndMode(this.value)">
+          Correlation window
+        </label>
+      </div>
+      <div class="form-hint" style="margin-bottom:8px;">Simultaneous = all triggers in their active state at the same time. Correlation = all must fire within a time window.</div>
+      <div id="trigger-window-row" style="display:${rule && rule.trigger_logic==='AND' ? 'flex' : 'none'};gap:16px;align-items:flex-start;margin-bottom:8px;">
+        <div class="form-group" style="flex:0 0 260px;">
+          <label>Correlation Window (s, 0 = no time limit)</label>
+          <input id="f-trigger-window" type="number" min="0" value="${escHtml(rule && rule.trigger_window ? rule.trigger_window : 0)}" placeholder="0 = no time limit">
+          <div class="form-hint">All triggers must fire within this time. 0 = no time limit.</div>
+        </div>
+      </div>
+    </div>
+    <div id="trigger-list"></div>
+    <button class="add-btn add-trigger" onclick="addTriggerRow()">+ Add Trigger</button>
+
+    <!-- Conditions -->
+    <div class="section-header">
+      <span class="section-title">Conditions (WHEN)</span>
+      <div class="logic-toggle">
+        <button class="logic-btn ${!rule || (rule.condition_logic||'AND')==='AND' ? 'active' : ''}" onclick="setLogic('condition','AND',this)">AND</button>
+        <button class="logic-btn ${rule && rule.condition_logic==='OR' ? 'active' : ''}" onclick="setLogic('condition','OR',this)">OR</button>
+        <span style="margin-left:8px;font-size:10px;color:var(--text-dim);">AND = all must pass | OR = any passing allows fire</span>
+      </div>
+    </div>
+    <div id="condition-list"></div>
+    <button class="add-btn add-condition" onclick="addConditionRow()">+ Add Condition</button>
+
+    <!-- Actions -->
+    <div class="section-header">
+      <span class="section-title">Actions (THEN)</span>
+    </div>
+    <div id="action-list"></div>
+    <button class="add-btn add-action" onclick="addActionRow()">+ Add Action</button>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label>Cooldown (s, 0 = off)</label>
+        <input id="f-cooldown" type="number" min="0" value="${escHtml(rule ? rule.cooldown || 0 : 0)}" placeholder="0 = no cooldown">
+        <div class="form-hint">Prevents the rule from firing again for this many seconds after it triggers. Useful to avoid alert floods.</div>
+      </div>
+      <div class="form-group">
+        <label>Max Executions</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input id="f-maxex" type="number" min="0" value="${escHtml(rule ? rule.max_executions || 0 : 0)}" placeholder="0 = unlimited" style="width:80px;">
+          <select id="f-maxex-period">
+            <option value=""       ${!(rule && rule.max_exec_period) ? 'selected' : ''}>lifetime</option>
+            <option value="minute" ${rule && rule.max_exec_period === 'minute' ? 'selected' : ''}>per minute</option>
+            <option value="hour"   ${rule && rule.max_exec_period === 'hour'   ? 'selected' : ''}>per hour</option>
+            <option value="day"    ${rule && rule.max_exec_period === 'day'    ? 'selected' : ''}>per day</option>
+          </select>
+        </div>
+        <div class="form-hint">0 = unlimited. Period resets automatically; lifetime resets when rule is saved.</div>
+      </div>
+    </div>
+  `;
+}
+
+/* Logic toggle */
+let triggerLogic = 'OR';
+let conditionLogic = 'AND';
+
+function setLogic(which, val, btn) {
+  const container = btn.closest('.logic-toggle');
+  container.querySelectorAll('.logic-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (which === 'trigger') {
+    const andOpts = document.getElementById('trigger-and-options');
+    if (val === 'AND') {
+      triggerLogic = 'AND_ACTIVE';
+      if (andOpts) andOpts.style.display = 'block';
+      const activeRadio = document.querySelector('input[name="and-mode"][value="AND_ACTIVE"]');
+      if (activeRadio) activeRadio.checked = true;
+      const twRow = document.getElementById('trigger-window-row');
+      if (twRow) twRow.style.display = 'none';
+    } else {
+      triggerLogic = 'OR';
+      if (andOpts) andOpts.style.display = 'none';
+    }
+  } else {
+    conditionLogic = val;
+  }
+}
+
+function setAndMode(val) {
+  triggerLogic = val;
+  const twRow = document.getElementById('trigger-window-row');
+  if (twRow) twRow.style.display = val === 'AND' ? 'flex' : 'none';
+}
+
+/* ===== Trigger rows ===== */
+const TRIGGER_GROUPS = [
+  { label: 'Camera / Device', types: [
+    { value: 'vapix_event',       label: 'Device Event' },
+    { value: 'io_input',          label: 'I/O Input' },
+    { value: 'aoa_scenario',      label: 'AOA Scenario' },
+  ]},
+  { label: 'Time', types: [
+    { value: 'schedule',          label: 'Schedule' },
+  ]},
+  { label: 'External', types: [
+    { value: 'mqtt_message',      label: 'MQTT Message' },
+    { value: 'sparkplug_command', label: 'Sparkplug Command' },
+    { value: 'http_webhook',      label: 'HTTP Webhook' },
+  ]},
+  { label: 'Logic', types: [
+    { value: 'counter_threshold', label: 'Counter Threshold' },
+    { value: 'rule_fired',        label: 'Rule Fired' },
+    { value: 'manual',            label: 'Manual (button / API)' },
+  ]},
+  { label: 'Modbus', types: [
+    { value: 'modbus_read',       label: 'Modbus Read' },
+    { value: 'modbus_error',      label: 'Modbus Error' },
+  ]},
+  { label: 'GPS', types: [
+    { value: 'gps_update',        label: 'GPS Update' },
+    { value: 'gps_speed',         label: 'GPS Speed' },
+    { value: 'gps_geofence',      label: 'GPS Geofence' },
+    { value: 'gps_fix',           label: 'GPS Fix' },
+  ]},
+];
+
+function triggerTypeOptions(selected) {
+  return TRIGGER_GROUPS.map(g =>
+    `<optgroup label="${escHtml(g.label)}">${
+      g.types.map(t =>
+        `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+      ).join('')
+    }</optgroup>`
+  ).join('');
+}
+
+function triggerFields(t, rowIdx) {
+  const type = t.type || 'vapix_event';
+  if (type === 'vapix_event') {
+    /* Topics arrive as {ns:val} objects (saved JSON) or flat topicN_ns/_val (after collectTriggerRow). */
+    const ns  = k => t[`${k}_ns`]  !== undefined ? t[`${k}_ns`]
+                   : (t[k] ? Object.keys(t[k])[0]   || '' : '');
+    const val = k => t[`${k}_val`] !== undefined ? t[`${k}_val`]
+                   : (t[k] ? Object.values(t[k])[0] || '' : '');
+    /* Hidden inputs so normalizeTrigger can still read topic values */
+    const hiddenTopics = ['topic0','topic1','topic2','topic3'].map(k =>
+      `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
+      `<input type="hidden" data-k="${k}_val" value="${escHtml(val(k))}">`
+    ).join('');
+
+    if (vapixEventCatalog === null) {
+      return `${hiddenTopics}
+      <div class="form-row"><div class="form-group">
+        <label>Device Event</label>
+        <select disabled><option>Loading events from camera…</option></select>
+      </div></div>`;
+    }
+
+    const matchIdx  = findCatalogMatch(t);
+    const dataKeys  = matchIdx >= 0 ? vapixEventCatalog[matchIdx].dataKeys  : [];
+    const dataTypes = matchIdx >= 0 ? (vapixEventCatalog[matchIdx].dataTypes || t._dataTypes || {}) : (t._dataTypes || {});
+
+    const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
+    const numericKeys = dataKeys.filter(k => dataTypes[k] === 'numeric');
+    const stringKeys  = dataKeys.filter(k => dataTypes[k] === 'string');
+    /* Fall back: if type info is missing for a key, show it in all lists */
+    const unknownKeys = dataKeys.filter(k => !dataTypes[k]);
+    const boolOpts    = [...boolKeys,    ...unknownKeys];
+    const numericOpts = [...numericKeys, ...unknownKeys];
+    const stringOpts  = [...stringKeys,  ...unknownKeys];
+
+    const condType  = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
+    const filterKey = t.filter_key || (boolOpts[0] || '');
+    const filterVal = t.filter_value;
+    const valueKey  = t.value_key  || (numericOpts[0] || dataKeys[0] || '');
+    const valueOp   = t.value_op   || 'gt';
+    const valueThr  = t.value_threshold  !== undefined ? t.value_threshold  : '';
+    const valueThr2 = t.value_threshold2 !== undefined ? t.value_threshold2 : '';
+    const valueHold = t.value_hold_secs || 0;
+    const stringKey   = t.string_key   || (stringOpts[0] || dataKeys[0] || '');
+    const stringValue = t.string_value || '';
+
+    /* Only show condition types that have matching fields (or no type info available) */
+    const showBoolean = boolOpts.length > 0;
+    const showNumeric = numericOpts.length > 0;
+    const showString  = stringOpts.length > 0;
+
+    const condRow = dataKeys.length ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Value Condition <span style="opacity:.6">(optional — only fire when…)</span></label>
+        <select data-k="cond_type" onchange="rerenderTrigger(this)" style="margin-bottom:8px">
+          <option value="none"    ${condType==='none'    ?'selected':''}>Fire on every event</option>
+          ${showBoolean ? `<option value="boolean" ${condType==='boolean' ?'selected':''}>Boolean match (true / false)</option>` : ''}
+          ${showNumeric ? `<option value="numeric" ${condType==='numeric' ?'selected':''}>Numeric threshold</option>` : ''}
+          ${showString  ? `<option value="string"  ${condType==='string'  ?'selected':''}>String match</option>` : ''}
+        </select>
+        ${condType === 'boolean' ? `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-k="filter_key">
+            <option value="">— pick field —</option>
+            ${boolOpts.map(k =>
+              `<option value="${escHtml(k)}" ${filterKey===k?'selected':''}>${escHtml(k)}</option>`
+            ).join('')}
+          </select>
+          <select data-k="filter_value">
+            <option value="true"  ${filterVal===true ||filterVal==='true' ?'selected':''}>= true</option>
+            <option value="false" ${filterVal===false||filterVal==='false'?'selected':''}>= false</option>
+          </select>
+        </div>` : ''}
+        ${condType === 'string' ? `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-k="string_key">
+            <option value="">— pick field —</option>
+            ${stringOpts.map(k =>
+              `<option value="${escHtml(k)}" ${stringKey===k?'selected':''}>${escHtml(k)}</option>`
+            ).join('')}
+          </select>
+          <span style="opacity:.7;font-size:12px">contains</span>
+          <input type="text" data-k="string_value"
+                 value="${escHtml(stringValue)}" placeholder="match substring">
+        </div>` : ''}
+        ${condType === 'numeric' ? `
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select data-k="value_key">
+            ${numericOpts.map(k =>
+              `<option value="${escHtml(k)}" ${valueKey===k?'selected':''}>${escHtml(k)}</option>`
+            ).join('')}
+          </select>
+          <select data-k="value_op" onchange="rerenderTrigger(this)">
+            <option value="gt"      ${valueOp==='gt'      ?'selected':''}>is above</option>
+            <option value="lt"      ${valueOp==='lt'      ?'selected':''}>is below</option>
+            <option value="gte"     ${valueOp==='gte'     ?'selected':''}>is above or equal to</option>
+            <option value="lte"     ${valueOp==='lte'     ?'selected':''}>is below or equal to</option>
+            <option value="eq"      ${valueOp==='eq'      ?'selected':''}>equals</option>
+            <option value="between" ${valueOp==='between' ?'selected':''}>is between</option>
+          </select>
+          ${valueOp === 'between' ? `
+          <input type="number" data-k="value_threshold" step="any"
+                 value="${escHtml(String(valueThr))}" placeholder="min"
+                 style="width:80px">
+          <span style="opacity:.7;font-size:12px">and</span>
+          <input type="number" data-k="value_threshold2" step="any"
+                 value="${escHtml(String(valueThr2))}" placeholder="max"
+                 style="width:80px">
+          ` : `
+          <input type="number" data-k="value_threshold" step="any"
+                 value="${escHtml(String(valueThr))}" placeholder="0"
+                 style="width:90px">
+          `}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap">
+          <span style="opacity:.7;font-size:12px">Hold for at least</span>
+          <input type="number" data-k="value_hold_secs" min="0" step="1"
+                 value="${escHtml(valueHold)}" style="width:70px">
+          <span style="opacity:.7;font-size:12px">seconds (0 = fire immediately)</span>
+        </div>` : ''}
+      </div>
+    </div>` : '';
+
+    return `${hiddenTopics}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device Event</label>
+        <select onchange="applyVapixEvent(${rowIdx}, this.value)">
+          <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
+          ${vapixEventCatalog.map((ev, i) =>
+            `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
+          ).join('')}
+        </select>
+        ${matchIdx < 0 && (t.topic0 || t.topic1)
+          ? `<div class="form-hint" style="color:var(--text-muted)">Saved event not found in this device's catalog — it may still work if the device supports it.</div>`
+          : `<div class="form-hint">Choose which device event fires this rule.</div>`}
+      </div>
+    </div>
+    ${condRow}`;
+  }
+  if (type === 'http_webhook') {
+    const tok = t.token || generateToken();
+    const base = `${window.location.protocol}//${window.location.hostname}/local/acap_event_engine/fire`;
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Token <span style="opacity:.6">(acts as a secret password for this webhook)</span></label>
+        <input type="text" data-k="token" value="${escHtml(tok)}" placeholder="secret-token"
+               oninput="updateWebhookUrl(this)">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Webhook URL — POST to this address to fire the rule</label>
+        <input class="webhook-url-display" type="text" readonly
+               value="${escHtml(`${base}?token=${tok}`)}"
+               style="font-size:11px;font-family:monospace;cursor:pointer;color:var(--accent)"
+               onclick="this.select()" title="Click to select all">
+        <div class="form-hint">Camera credentials (viewer or above) are required to call this URL. The token additionally identifies which rule to fire. Optionally send a JSON body — values are available as <code>{{trigger.KEY}}</code> in action templates.</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'schedule') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Schedule Type</label>
+        <select data-k="schedule_type" onchange="rerenderTrigger(this)">
+          <option value="daily_time"    ${(t.schedule_type||'daily_time')==='daily_time'    ? 'selected' : ''}>Daily Time</option>
+          <option value="interval"      ${t.schedule_type==='interval'      ? 'selected' : ''}>Interval</option>
+          <option value="cron"          ${t.schedule_type==='cron'          ? 'selected' : ''}>Cron Expression</option>
+          <option value="astronomical"  ${t.schedule_type==='astronomical'  ? 'selected' : ''}>Sunrise / Sunset</option>
+        </select>
+      </div>
+    </div>
+    ${(t.schedule_type||'daily_time') === 'daily_time' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Time (HH:MM)</label>
+        <input type="time" data-k="time" value="${escHtml(t.time || '08:00')}">
+      </div>
+      <div class="form-group">
+        <label>Days</label>
+        <input type="text" data-k="days_str" value="${escHtml(t.days_str ?? [].concat(t.days || [1,2,3,4,5]).join(','))}" placeholder="0=Sun,1=Mon,...6=Sat">
+        <div class="form-hint">Comma-separated day numbers (0=Sun)</div>
+      </div>
+    </div>` : ''}
+    ${t.schedule_type === 'interval' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Interval (seconds)</label>
+        <input type="number" data-k="interval_seconds" min="1" value="${escHtml(t.interval_seconds || 60)}">
+      </div>
+    </div>` : ''}
+    ${t.schedule_type === 'cron' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Cron Expression</label>
+        <input type="text" data-k="cron" value="${escHtml(t.cron || '0 * * * *')}" placeholder="0 * * * *">
+        <div class="form-hint">minute hour dom month dow  (e.g. "0 8 * * 1-5" = weekdays at 08:00)</div>
+      </div>
+    </div>` : ''}
+    ${t.schedule_type === 'astronomical' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event</label>
+        <select data-k="event" id="astro-event-${rowIdx}" onchange="refreshAstroTriggerPreview(${rowIdx})">
+          <option value="sunrise"    ${(t.event||'sunrise')==='sunrise'    ? 'selected' : ''}>Sunrise</option>
+          <option value="sunset"     ${t.event==='sunset'     ? 'selected' : ''}>Sunset</option>
+          <option value="solar_noon" ${t.event==='solar_noon' ? 'selected' : ''}>Solar Noon</option>
+          <option value="dawn"       ${t.event==='dawn'       ? 'selected' : ''}>Civil Dawn (−6°)</option>
+          <option value="dusk"       ${t.event==='dusk'       ? 'selected' : ''}>Civil Dusk (−6°)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Offset (minutes, + = later)</label>
+        <input type="number" data-k="offset_minutes" id="astro-offset-${rowIdx}"
+               value="${escHtml(t.offset_minutes || 0)}" placeholder="0"
+               oninput="refreshAstroTriggerPreview(${rowIdx})">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
+        <input type="number" step="0.0001" data-k="latitude" id="astro-lat-${rowIdx}"
+               value="${escHtml(t.latitude !== undefined ? t.latitude : engineLat)}" placeholder="e.g. 59.3293"
+               oninput="refreshAstroTriggerPreview(${rowIdx})">
+        <div class="form-hint">North is positive (e.g. 59.33), South is negative (e.g. −33.87)</div>
+      </div>
+      <div class="form-group">
+        <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(decimal degrees)</span></label>
+        <input type="number" step="0.0001" data-k="longitude" id="astro-lon-${rowIdx}"
+               value="${escHtml(t.longitude !== undefined ? t.longitude : engineLon)}" placeholder="e.g. 18.0686"
+               oninput="refreshAstroTriggerPreview(${rowIdx})">
+        <div class="form-hint">East is positive (e.g. 18.07), West is negative (e.g. −73.94)</div>
+      </div>
+    </div>
+    <div id="astro-preview-${rowIdx}"></div>` : ''}`;
+  if (type === 'io_input') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Port Number</label>
+        <input type="number" data-k="port" min="1" value="${escHtml(t.port || 1)}">
+      </div>
+      <div class="form-group">
+        <label>Edge</label>
+        <select data-k="edge">
+          <option value="rising"  ${(t.edge||'rising')==='rising'  ? 'selected' : ''}>Rising (activate)</option>
+          <option value="falling" ${t.edge==='falling' ? 'selected' : ''}>Falling (deactivate)</option>
+          <option value="both"    ${t.edge==='both'    ? 'selected' : ''}>Both</option>
+          <option value="cut"     ${t.edge==='cut'     ? 'selected' : ''}>Cut (wire cut — supervised)</option>
+          <option value="short"   ${t.edge==='short'   ? 'selected' : ''}>Short (wire short — supervised)</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Hold duration (s)</label>
+        <input type="number" data-k="hold_secs" min="0" value="${escHtml(t.hold_secs || 0)}">
+        <div class="form-hint">Fire only if state holds for this many seconds (0 = immediate)</div>
+      </div>
+    </div>`;
+  if (type === 'counter_threshold') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Counter Name</label>
+        <input type="text" data-k="counter_name" value="${escHtml(t.counter_name || '')}" placeholder="my_counter">
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="gt"  ${(t.op||'gt')==='gt'  ? 'selected' : ''}>&gt; (greater than)</option>
+          <option value="gte" ${t.op==='gte' ? 'selected' : ''}>&ge; (greater or equal)</option>
+          <option value="lt"  ${t.op==='lt'  ? 'selected' : ''}>&lt; (less than)</option>
+          <option value="lte" ${t.op==='lte' ? 'selected' : ''}>&le; (less or equal)</option>
+          <option value="eq"  ${t.op==='eq'  ? 'selected' : ''}>=  (equal)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="number" data-k="value" value="${escHtml(t.value !== undefined ? t.value : 0)}">
+      </div>
+    </div>`;
+  if (type === 'rule_fired') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Rule (leave empty to match any rule firing)</label>
+        <select data-k="rule_id">
+          <option value="" ${!t.rule_id ? 'selected' : ''}>— Any rule —</option>
+          ${allRules.map(r => `<option value="${escHtml(r.id)}" ${t.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+  if (type === 'mqtt_message') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Topic Filter</label>
+        <input type="text" data-k="topic_filter" value="${escHtml(t.topic_filter || '#')}" placeholder="sensors/# or home/+/temperature">
+        <div class="form-hint">Supports MQTT wildcards: + (single level) and # (multi-level). Requires MQTT configured in Settings.</div>
+      </div>
+      <div class="form-group">
+        <label>Payload Filter <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="payload_filter" value="${escHtml(t.payload_filter || '')}" placeholder="e.g. motion or &quot;state&quot;:true">
+        <div class="form-hint">Rule fires only if the payload contains this substring. Leave empty to match any payload.</div>
+      </div>
+    </div>`;
+  if (type === 'sparkplug_command') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Metric Name <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="metric" value="${escHtml(t.metric || '')}" placeholder="Speaker/Play">
+        <div class="form-hint">Fires when a Sparkplug host writes this metric via NCMD/DCMD. Leave empty to fire on any metric write. Injects <code>{{trigger.metric}}</code> and <code>{{trigger.value}}</code>.</div>
+      </div>
+      <div class="form-group">
+        <label>Value Filter <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="value_filter" value="${escHtml(t.value_filter || '')}" placeholder="true">
+        <div class="form-hint">Fires only on an exact value match. Booleans arrive as <code>true</code> / <code>false</code>.</div>
+      </div>
+    </div>`;
+  if (type === 'aoa_scenario') {
+    let scenarioControl;
+    if (aoaScenarios === null) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(t.scenario_id || 1)}" min="1" placeholder="Loading…">`;
+    } else if (!aoaScenarios.length) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(t.scenario_id || 1)}" min="1"><div class="form-hint">No scenarios found — enter the scenario number manually (1-based).</div>`;
+    } else {
+      const hasVal = t.scenario_id !== undefined;
+      const opts = aoaScenarios.map(s => {
+        const sel = hasVal && parseInt(t.scenario_id) === s.id ? 'selected' : '';
+        return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+      }).join('');
+      scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Scenario</label>
+        ${scenarioControl}
+        <div class="form-hint">Object Analytics scenario to monitor. Fires when the scenario generates an event.</div>
+      </div>
+      <div class="form-group">
+        <label>Object Class <span style="font-weight:normal;opacity:.7">(optional filter)</span></label>
+        <select data-k="object_class">
+          <option value="any"          ${(!t.object_class||t.object_class==='any')     ?'selected':''}>Any</option>
+          <option value="human"        ${t.object_class==='human'       ?'selected':''}>Human</option>
+          <option value="car"          ${t.object_class==='car'         ?'selected':''}>Car</option>
+          <option value="truck"        ${t.object_class==='truck'       ?'selected':''}>Truck</option>
+          <option value="bus"          ${t.object_class==='bus'         ?'selected':''}>Bus</option>
+          <option value="bike"         ${t.object_class==='bike'        ?'selected':''}>Bike</option>
+          <option value="otherVehicle" ${t.object_class==='otherVehicle'?'selected':''}>Other Vehicle</option>
+        </select>
+        <div class="form-hint">Only fire when this object class is detected. Leave as "Any" for all classes.</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'manual') return `
+    <div class="form-row">
+      <div class="form-group">
+        <div class="form-hint" style="color:var(--text-muted);">This rule has no automatic trigger. Use the <strong>Fire</strong> button in the rule list to run it manually, or call <code>POST /local/acap_event_engine/fire</code> with <code>{"id":"&lt;rule_id&gt;"}</code>.</div>
+      </div>
+    </div>`;
+  if (type === 'gps_update') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Update interval (seconds)</label>
+        <input type="number" data-k="interval_s" value="${escHtml(t.interval_s || 1)}" min="1" max="3600">
+        <div class="form-hint">Fires on a valid fix, at most once per interval. GPS input must be enabled in Settings.</div>
+      </div>
+    </div>`;
+  if (type === 'gps_speed') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op" onchange="rerenderTrigger(this)">
+          <option value="gt" ${t.op==='gt'?'selected':''}>Greater than</option>
+          <option value="gte" ${t.op==='gte'?'selected':''}>At least</option>
+          <option value="lt" ${t.op==='lt'?'selected':''}>Less than</option>
+          <option value="lte" ${t.op==='lte'?'selected':''}>At most</option>
+          <option value="between" ${t.op==='between'?'selected':''}>Between</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Speed</label>
+        <input type="number" data-k="value" value="${escHtml(t.value ?? 20)}" step="any">
+      </div>
+      <div class="form-group" data-gps-value2 style="display:${t.op==='between'?'block':'none'}">
+        <label>Upper speed</label>
+        <input type="number" data-k="value2" value="${escHtml(t.value2 ?? 30)}" step="any">
+      </div>
+      <div class="form-group">
+        <label>Unit</label>
+        <select data-k="unit">
+          <option value="kmh" ${(!t.unit||t.unit==='kmh')?'selected':''}>km/h</option>
+          <option value="mph" ${t.unit==='mph'?'selected':''}>mph</option>
+          <option value="knots" ${t.unit==='knots'?'selected':''}>knots</option>
+          <option value="mps" ${t.unit==='mps'?'selected':''}>m/s</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Hysteresis</label>
+        <input type="number" data-k="hysteresis" value="${escHtml(t.hysteresis ?? 0)}" min="0" step="any">
+      </div>
+    </div>
+    <div class="form-hint">Fires when the threshold first becomes true; hysteresis prevents repeated firing near the limit.</div>`;
+  if (type === 'gps_geofence') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event</label>
+        <select data-k="event">
+          <option value="enter" ${(!t.event||t.event==='enter')?'selected':''}>Enter</option>
+          <option value="exit" ${t.event==='exit'?'selected':''}>Exit</option>
+          <option value="both" ${t.event==='both'?'selected':''}>Enter and exit</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Center latitude</label>
+        <input type="number" data-k="latitude" value="${escHtml(t.latitude ?? 0)}" min="-90" max="90" step="any">
+      </div>
+      <div class="form-group">
+        <label>Center longitude</label>
+        <input type="number" data-k="longitude" value="${escHtml(t.longitude ?? 0)}" min="-180" max="180" step="any">
+      </div>
+      <div class="form-group">
+        <label>Radius (m)</label>
+        <input type="number" data-k="radius_m" value="${escHtml(t.radius_m ?? 100)}" min="1" max="100000" step="any">
+      </div>
+      <div class="form-group" style="align-self:flex-end;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="gpsUseCurrentPosition(${rowIdx})">Use current position</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Polygon points <span style="font-weight:normal;opacity:.7">(optional JSON [[lat,lon],...], overrides circle)</span></label>
+        <input type="text" data-k="points_text" value="${escHtml(t.points_text ?? JSON.stringify(t.points || []))}" placeholder="[[59.9,10.7],[59.91,10.7],[59.9,10.71]]">
+      </div>
+    </div>
+    <div class="form-hint">Fires on transitions after the first valid GPS position. A polygon needs at least 3 points.</div>`;
+  if (type === 'gps_fix') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Fix event</label>
+        <select data-k="event">
+          <option value="acquired" ${(!t.event||t.event==='acquired')?'selected':''}>Fix acquired</option>
+          <option value="lost" ${t.event==='lost'?'selected':''}>Fix lost</option>
+          <option value="stale" ${t.event==='stale'?'selected':''}>Fix became stale</option>
+        </select>
+        <div class="form-hint">Stale timeout is set in GPS Settings.</div>
+      </div>
+    </div>`;
+  if (type === 'modbus_read') {
+    const rtype = t.register_type || 'holding';
+    const bits = mbIsBits(rtype);
+    const mapRows = mbRowsFrom(t, 'map');
+    const mode = t.read_mode || (mapRows.length ? 'map' : 'single');
+    return `
+    ${mbConnFields(t, 'rerenderTrigger(this)')}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Slave ID</label>
+        <input type="number" data-k="slave_id" value="${escHtml(t.slave_id||1)}" min="1" max="247">
+        <div class="form-hint">Modbus device address (1-247)</div>
+      </div>
+      <div class="form-group">
+        <label>Register Type</label>
+        <select data-k="register_type" onchange="rerenderTrigger(this)">
+          <option value="holding"  ${rtype==='holding' ?'selected':''}>Holding Register</option>
+          <option value="input"    ${rtype==='input'   ?'selected':''}>Input Register</option>
+          <option value="coil"     ${rtype==='coil'    ?'selected':''}>Coil</option>
+          <option value="discrete" ${rtype==='discrete'?'selected':''}>Discrete Input</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Read</label>
+        <select data-k="read_mode" onchange="rerenderTrigger(this)">
+          <option value="single" ${mode==='single'?'selected':''}>One value</option>
+          <option value="map"    ${mode==='map'   ?'selected':''}>Block of values (register map)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Poll Interval (s)</label>
+        <input type="number" data-k="poll_interval" value="${escHtml(t.poll_interval||30)}" min="1">
+      </div>
+    </div>
+    ${mode === 'map' ? `
+    ${mbTable('map', mapRows, bits)}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Compare <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="compare" value="${escHtml(t.compare||'')}" placeholder="first variable in the map">
+        <div class="form-hint">Variable used for the threshold and <code>{{trigger.value}}</code>. Without a threshold the rule fires when any value changes.</div>
+      </div>
+    </div>` : `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Register Address</label>
+        <input type="number" data-k="register" value="${escHtml(t.register||0)}" min="0" max="65535">
+        <div class="form-hint">0-based register address</div>
+      </div>
+      <div class="form-group">
+        <label>Store in Variable <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="variable" value="${escHtml(t.variable||'')}" placeholder="e.g. tank_level">
+        <div class="form-hint">Every poll updates <code>{{var.NAME}}</code>.</div>
+      </div>
+    </div>
+    ${bits ? '' : mbTypeFields(t, 'data_type', 'word_order', 'rerenderTrigger(this)', true)}`}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Threshold Operator</label>
+        <select data-k="op">
+          <option value=""       ${!t.op           ?'selected':''}>Any change (no threshold)</option>
+          <option value="gt"     ${t.op==='gt'     ?'selected':''}>Greater than</option>
+          <option value="gte"    ${t.op==='gte'    ?'selected':''}>Greater than or equal</option>
+          <option value="lt"     ${t.op==='lt'     ?'selected':''}>Less than</option>
+          <option value="lte"    ${t.op==='lte'    ?'selected':''}>Less than or equal</option>
+          <option value="eq"     ${t.op==='eq'     ?'selected':''}>Equal</option>
+          <option value="between"${t.op==='between'?'selected':''}>Between</option>
+        </select>
+        <div class="form-hint">Compares the scaled value. Text values fire on any change.</div>
+      </div>
+      <div class="form-group">
+        <label>Threshold</label>
+        <input type="text" inputmode="decimal" data-k="threshold" value="${escHtml(t.threshold!==undefined?t.threshold:'')}" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label>Threshold 2 <span style="font-weight:normal;opacity:.7">(between only)</span></label>
+        <input type="text" inputmode="decimal" data-k="threshold2" value="${escHtml(t.threshold2!==undefined?t.threshold2:'')}" placeholder="100">
+      </div>
+    </div>`;
+  }
+  if (type === 'modbus_error') {
+    const fireOn = t.fire_on || 'change';
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="text" data-k="device" value="${escHtml(t.device||'')}" placeholder="any device, or e.g. 192.168.1.200">
+        <div class="form-hint">Matches part of the device: <code>host:port</code>, or the serial device path. Empty = any.</div>
+      </div>
+      <div class="form-group">
+        <label>Slave ID <span style="font-weight:normal;opacity:.7">(optional)</span></label>
+        <input type="number" data-k="slave_id" value="${escHtml(t.slave_id||'')}" min="0" max="247" placeholder="any">
+      </div>
+      <div class="form-group">
+        <label>Fire</label>
+        <select data-k="fire_on">
+          <option value="change" ${fireOn==='change'?'selected':''}>When it starts failing, and on recovery</option>
+          <option value="every"  ${fireOn==='every' ?'selected':''}>On every failed request, and on recovery</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-hint">Covers the reads and writes of all Modbus rules: timeouts, refused connections, CRC errors and exceptions such as <em>02 Illegal Data Address</em>. <code>{{trigger.state}}</code> is <code>failing</code> or <code>recovered</code>.</div>`;
+  }
+  return '';
+}
+
+/* ===== Modbus helpers ===== */
+const MB_TYPES = ['uint16', 'int16', 'uint32', 'int32', 'float32', 'uint64', 'int64', 'float64', 'string'];
+const MB_ORDERS = [
+  ['ABCD', 'ABCD (big-endian)'], ['CDAB', 'CDAB (word swap)'],
+  ['BADC', 'BADC (byte swap)'], ['DCBA', 'DCBA (little-endian)'],
+];
+/* 16-bit values and text have no words to swap, only the two bytes of each register. */
+const MB_BYTE_ORDERS = [['ABCD', 'AB (normal)'], ['BADC', 'BA (byte swap)']];
+const MB_ENCODINGS = [
+  ['utf-8', 'UTF-8'], ['ascii', 'ASCII'],
+  ['iso-8859-1', 'ISO-8859-1 (Latin-1)'], ['iso-8859-2', 'ISO-8859-2 (Latin-2)'],
+  ['windows-1250', 'Windows-1250 (Central European)'], ['windows-1252', 'Windows-1252 (Western)'],
+];
+/* How a string write fills the bytes the text doesn't use: value, label, short label for the table. */
+const MB_FILLS = [
+  ['nul', 'NUL (0x00)', 'NUL'], ['space_left', 'Spaces, text left', 'Space, left'],
+  ['space_right', 'Spaces, text right', 'Space, right'], ['space_center', 'Spaces, centered', 'Space, center'],
+];
+const MB_MAX_STRING_REGS = 125;
+const MB_TYPE_REGS = { uint16: 1, int16: 1, uint32: 2, int32: 2, float32: 2, uint64: 4, int64: 4, float64: 4 };
+
+function mbHasWords(type) { return (MB_TYPE_REGS[type] || 0) > 1; }
+/* The order a 16-bit value or text actually uses: only the byte swap counts. */
+function mbOrderFor(type, order) {
+  const o = order || 'ABCD';
+  if (mbHasWords(type || 'uint16')) return o;
+  return o === 'BADC' || o === 'DCBA' ? 'BADC' : 'ABCD';
+}
+
+function mbIsBits(rtype) { return rtype === 'coil' || rtype === 'discrete'; }
+
+function mbRegs(type, length) {
+  return type === 'string' ? (parseInt(length) || 8) : (MB_TYPE_REGS[type] || 1);
+}
+
+/* Rows of a map / values table: from the hidden JSON input after a re-render,
+ * or the array of a saved rule. */
+function mbRowsFrom(o, key) {
+  const j = o[key + '_json'];
+  if (typeof j === 'string' && j) {
+    try { const v = JSON.parse(j); if (Array.isArray(v)) return v; } catch (_) {}
+  }
+  return Array.isArray(o[key]) ? o[key] : [];
+}
+
+function mbConnFields(o, rerender) {
+  const ctype = o.connection_type || 'tcp';
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Connection Type</label>
+        <select data-k="connection_type" onchange="${rerender}">
+          <option value="tcp" ${ctype==='tcp'?'selected':''}>TCP (network Modbus device)</option>
+          <option value="serial_gateway" ${ctype==='serial_gateway'?'selected':''}>Serial Gateway (local RS-485 via PortManager)</option>
+          ${ctype==='rtu'?'<option value="rtu" selected>RTU direct (advanced)</option>':''}
+        </select>
+      </div>
+      ${(ctype === 'tcp' || ctype === 'serial_gateway') ? `
+      <div class="form-group">
+        <label>Host</label>
+        <input type="text" data-k="host" value="${escHtml(o.host||(ctype==='serial_gateway'?'127.0.0.1':''))}" placeholder="${ctype==='serial_gateway'?'127.0.0.1':'192.168.1.200'}">
+        ${ctype==='serial_gateway'?'<div class="form-hint">Use host 127.0.0.1 and port 4001. Configure RS-485 first via the Settings tab.</div>':''}
+      </div>
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" data-k="port" value="${escHtml(o.port||(ctype==='serial_gateway'?4001:502))}" min="1" max="65535">
+      </div>` : ''}
+    </div>
+    ${ctype === 'rtu' ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device</label>
+        <input type="text" data-k="device" value="${escHtml(o.device||'/dev/ttyS1')}" placeholder="/dev/ttyS1">
+      </div>
+      <div class="form-group">
+        <label>Baud Rate</label>
+        <input type="number" data-k="baud" value="${escHtml(o.baud||9600)}" min="1200">
+      </div>
+      <div class="form-group">
+        <label>Parity</label>
+        <select data-k="parity">
+          <option value="N" ${(!o.parity||o.parity==='N')?'selected':''}>None</option>
+          <option value="E" ${o.parity==='E'?'selected':''}>Even</option>
+          <option value="O" ${o.parity==='O'?'selected':''}>Odd</option>
+        </select>
+      </div>
+    </div>` : ''}`;
+}
+
+function mbTypeOptions(sel) {
+  return MB_TYPES.map(v => `<option value="${v}" ${(sel||'uint16')===v?'selected':''}>${v}</option>`).join('');
+}
+function mbOrderOptions(sel, type, short) {
+  const list = mbHasWords(type || 'uint16') ? MB_ORDERS : MB_BYTE_ORDERS;
+  const cur = mbOrderFor(type, sel);
+  return list.map(([v, l]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? l.split(' ')[0] : l}</option>`).join('');
+}
+function mbEncodingOptions(sel, short) {
+  const cur = (sel || 'utf-8').toLowerCase();
+  return MB_ENCODINGS.map(([v, l]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? l.split(' ')[0] : l}</option>`).join('');
+}
+function mbFillOptions(sel, short) {
+  const cur = sel || 'nul';
+  return MB_FILLS.map(([v, l, s]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? s : l}</option>`).join('');
+}
+
+/* Data type, word/byte order, scaling, string length and encoding of a
+ * single value. withDecimals: a read (scaling applies forwards). */
+function mbTypeFields(o, typeKey, orderKey, rerender, withDecimals) {
+  const type = o[typeKey] || 'uint16';
+  const num = (k, label, def, ph, hint) => `
+      <div class="form-group">
+        <label>${label}</label>
+        <input type="text" inputmode="decimal" data-k="${k}" value="${escHtml(o[k]!==undefined?o[k]:def)}" placeholder="${ph}">
+        ${hint ? `<div class="form-hint">${hint}</div>` : ''}
+      </div>`;
+  const words = mbHasWords(type);
+  const regs = mbRegs(type, o.length);
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Data Type</label>
+        <select data-k="${typeKey}" onchange="${rerender}">${mbTypeOptions(type)}</select>
+        <div class="form-hint">${type === 'string' ? 'Text, 2 bytes per register' : `${regs} register${regs > 1 ? 's' : ''}`}</div>
+      </div>
+      <div class="form-group">
+        <label>${words ? 'Word Order' : 'Byte Order'}</label>
+        <select data-k="${orderKey}">${mbOrderOptions(o[orderKey], type)}</select>
+        <div class="form-hint">${words ? 'Order of the bytes as the device sends them; A = most significant.'
+                                       : `Order of the two bytes in each register${type === 'string' ? ' (BA: the 2nd character first)' : ''}.`}</div>
+      </div>
+    </div>
+    <div class="form-row">
+      ${type === 'string' ? `
+      <div class="form-group">
+        <label>Length (registers)</label>
+        <input type="number" data-k="length" value="${escHtml(o.length!==undefined?o.length:8)}" min="1" max="${MB_MAX_STRING_REGS}" step="1">
+        <div class="form-hint">1-${MB_MAX_STRING_REGS} registers (2 bytes each). This is not a character count; UTF-8 characters may use multiple bytes. ${withDecimals ? 'Text stops at the first NUL.' : 'Fill sets what goes in the bytes shorter text leaves free.'}</div>
+      </div>
+      <div class="form-group">
+        <label>Encoding</label>
+        <select data-k="encoding">${mbEncodingOptions(o.encoding)}</select>
+        <div class="form-hint">Character set of the device. In UTF-8, letters such as ą or ż take 2 bytes.</div>
+      </div>${withDecimals ? '' : `
+      <div class="form-group">
+        <label>Fill</label>
+        <select data-k="fill">${mbFillOptions(o.fill)}</select>
+        <div class="form-hint">What goes in the bytes the text doesn't use. Use spaces if the device shows 0x00 as a character.</div>
+      </div>`}` : `
+      ${num('scale', 'Scale (multiplier)', '', '1', withDecimals ? 'value = raw × scale + offset' : 'raw = (value − offset) ÷ scale')}
+      ${num('offset', 'Offset', '', '0', 'e.g. -0.5')}
+      ${withDecimals ? num('decimals', 'Decimals', '', 'auto', 'Rounding') : ''}`}
+    </div>`;
+}
+
+/* Editable table of map entries (modbus_read) or values (modbus_write). The
+ * rows are kept as JSON in a hidden data-k input so they survive re-renders. */
+/* Column widths in px; the column without one (variable / value) takes the rest. */
+const MB_COLS = {
+  register: { label: 'Register', w: 76,  input: 'number' },
+  var:      { label: 'Variable', input: 'text', ph: 'name' },
+  value:    { label: 'Value',    input: 'text', ph: '0 or {{…}}' },
+  type:     { label: 'Type',     w: 92 },
+  order:    { label: 'Order',    w: 80 },
+  scale:    { label: 'Scale',    w: 64,  input: 'decimal', ph: '1', title: 'Scale (multiplier)' },
+  offset:   { label: 'Offset',   w: 64,  input: 'decimal', ph: '0' },
+  decimals: { label: 'Decimals', w: 72,  input: 'decimal', ph: 'auto', title: 'Decimals (rounding)' },
+  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8', title: 'String length in registers (2 bytes each; UTF-8 characters may use multiple bytes)' },
+  encoding: { label: 'Encoding', w: 104, title: 'Character encoding (text)' },
+  fill:     { label: 'Fill',     w: 116, title: 'Bytes the text doesn\'t use: NUL (0x00) or spaces with the text left, right or centered' },
+};
+
+function mbTableCols(kind, bits) {
+  if (kind === 'map') return bits ? ['register', 'var'] : ['register', 'var', 'type', 'order', 'scale', 'offset', 'decimals', 'length', 'encoding'];
+  return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length', 'encoding', 'fill'];
+}
+
+/* Cells that don't apply to the row's type: length, encoding and fill are for
+ * strings only, and scaling is for numbers only. */
+function mbCellOff(c, type) {
+  const str = (type || 'uint16') === 'string';
+  return c === 'length' || c === 'encoding' || c === 'fill' ? !str : (str && (c === 'scale' || c === 'offset' || c === 'decimals'));
+}
+
+function mbTableRow(kind, r, bits) {
+  const cells = mbTableCols(kind, bits).map(c => {
+    const def = MB_COLS[c];
+    const v = r[c] !== undefined ? r[c] : '';
+    const off = mbCellOff(c, r.type);
+    let ctl;
+    if (c === 'type') ctl = `<select data-mk="type" onchange="mbTableSync(this)">${mbTypeOptions(v)}</select>`;
+    else if (c === 'order') ctl = `<select data-mk="order" onchange="mbTableSync(this)" title="${mbHasWords(r.type || 'uint16') ? 'Word order' : 'Byte order'}">${mbOrderOptions(v, r.type, true)}</select>`;
+    else if (c === 'encoding') ctl = `<select data-mk="encoding" onchange="mbTableSync(this)" ${off ? 'hidden disabled' : ''}>${mbEncodingOptions(v, true)}</select>`;
+    else if (c === 'fill') ctl = `<select data-mk="fill" onchange="mbTableSync(this)" ${off ? 'hidden disabled' : ''}>${mbFillOptions(v, true)}</select>`;
+    else if (def.input === 'decimal') ctl = `<input type="text" inputmode="decimal" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}"
+                 ${off ? 'disabled' : ''} oninput="mbTableSync(this)">`;
+    else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}"
+                 ${c === 'length' ? `min="1" max="${MB_MAX_STRING_REGS}" step="1"` : ''} ${off ? 'disabled' : ''} oninput="mbTableSync(this)">`;
+    return `<td>${ctl}</td>`;
+  }).join('');
+  return `<tr class="mb-row">${cells}<td><button type="button" class="tca-remove" onclick="mbTableRemove(this)" title="Remove">&times;</button></td></tr>`;
+}
+
+function mbTable(kind, rows, bits) {
+  const cols = mbTableCols(kind, bits);
+  const colgroup = cols.map(c => MB_COLS[c].w ? `<col style="width:${MB_COLS[c].w}px">` : '<col>').join('') + '<col style="width:26px">';
+  const head = cols.map(c => `<th title="${escHtml(MB_COLS[c].title || MB_COLS[c].label)}">${MB_COLS[c].label}</th>`).join('');
+  const hint = (kind === 'map'
+    ? `Read from the lowest to the highest address, ${bits ? 'up to 2000 bits in one request' : 'up to 125 registers per request; larger maps are read in several requests (at most 2000 registers)'}. Each value is stored in its variable and is <code>{{trigger.NAME}}</code> in actions.`
+    : `Adjacent ${bits ? 'coils are written in one request (FC15, up to 1968)' : 'registers are written in one request (FC16, up to 123 registers); longer runs are split'}, and a gap starts a new request. Values can use placeholders.`)
+    + (!bits ? ' For string rows, Length counts 2-byte registers, not characters; UTF-8 characters may use multiple bytes.' : '');
+  return `
+    <div class="form-group mb-wrap" data-kind="${kind}" data-bits="${bits ? 1 : 0}">
+      <label>${kind === 'map' ? 'Register Map' : 'Values'}</label>
+      <div class="mb-scroll">
+        <table class="mb-table">
+          <colgroup>${colgroup}</colgroup>
+          <thead><tr>${head}<th></th></tr></thead>
+          <tbody>${rows.map(r => mbTableRow(kind, r, bits)).join('')}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="mbTableAdd(this)" style="margin-top:4px;">+ Add ${kind === 'map' ? 'value' : 'register'}</button>
+      <input type="hidden" data-k="${kind}_json" value="${escHtml(JSON.stringify(rows))}">
+      <div class="form-hint">${hint}</div>
+    </div>`;
+}
+
+function mbTableSync(el) {
+  const wrap = el.closest('.mb-wrap');
+  const rows = [...wrap.querySelectorAll('tr.mb-row')].map(tr => {
+    const o = {};
+    tr.querySelectorAll('[data-mk]').forEach(i => { if (i.value !== '') o[i.dataset.mk] = i.value; });
+    /* The order choices depend on the type: words for 32/64-bit, bytes otherwise */
+    const ord = tr.querySelector('select[data-mk="order"]');
+    if (ord) {
+      const words = mbHasWords(o.type || 'uint16');
+      if (words !== (ord.options.length === MB_ORDERS.length)) {
+        ord.innerHTML = mbOrderOptions(o.order, o.type, true);
+        ord.title = words ? 'Word order' : 'Byte order';
+      }
+      o.order = ord.value;
+    }
+    tr.querySelectorAll('input[data-mk], select[data-mk="encoding"], select[data-mk="fill"]').forEach(i => {
+      const c = i.dataset.mk;
+      i.disabled = mbCellOff(c, o.type);
+      if (c === 'encoding' || c === 'fill') i.hidden = i.disabled;
+      if (i.tagName === 'INPUT') i.placeholder = i.disabled ? '' : (MB_COLS[c].ph || '');
+      if (i.disabled) delete o[c];
+    });
+    return o;
+  });
+  wrap.querySelector(`[data-k="${wrap.dataset.kind}_json"]`).value = JSON.stringify(rows);
+}
+
+function mbTableAdd(btn) {
+  const wrap = btn.closest('.mb-wrap');
+  const kind = wrap.dataset.kind, bits = wrap.dataset.bits === '1';
+  const rows = mbRowsFrom({ x_json: wrap.querySelector(`[data-k="${kind}_json"]`).value }, 'x');
+  const last = rows[rows.length - 1];
+  const r = { register: last ? (parseInt(last.register) || 0) + (bits ? 1 : mbRegs(last.type, last.length)) : 0 };
+  if (last && !bits && last.type) r.type = last.type;
+  if (last && !bits && last.order) r.order = last.order;
+  if (kind === 'values') r.value = '';
+  wrap.querySelector('tbody').insertAdjacentHTML('beforeend', mbTableRow(kind, r, bits));
+  mbTableSync(btn);
+}
+
+function mbTableRemove(btn) {
+  const wrap = btn.closest('.mb-wrap');
+  btn.closest('tr').remove();
+  mbTableSync(wrap);
+}
+
+/* A number typed with a decimal point or comma ("-0,5"); undefined if empty
+ * or not a number. */
+function mbNum(v) {
+  if (typeof v === 'number') return v;
+  const s = String(v === undefined || v === null ? '' : v).trim().replace(/^([+-]?\d*),(\d+)$/, '$1.$2');
+  return s !== '' && !isNaN(Number(s)) ? Number(s) : undefined;
+}
+function mbBlank(v) { return v === undefined || v === null || String(v).trim() === ''; }
+/* A number field: the number, nothing if empty, or the text as typed so the
+ * editor (and the engine) can report it. */
+function mbNumOrText(v) {
+  if (mbBlank(v)) return undefined;
+  const n = mbNum(v);
+  return n !== undefined ? n : String(v).trim();
+}
+
+/* Copies the typed-value fields that differ from the defaults. */
+function mbNormField(src, out, typeKey, orderKey, withDecimals) {
+  const type = src[typeKey] || 'uint16';
+  if (type !== 'uint16') out[typeKey] = type;
+  const order = mbOrderFor(type, src[orderKey]);
+  if (order !== 'ABCD') out[orderKey] = order;
+  if (type === 'string') {
+    out.length = parseInt(src.length) || 8;
+    const enc = (src.encoding || 'utf-8').toLowerCase();
+    if (enc !== 'utf-8') out.encoding = enc;
+    if (!withDecimals && src.fill && src.fill !== 'nul') out.fill = src.fill;
+    return;
+  }
+  const scale = mbNumOrText(src.scale), offset = mbNumOrText(src.offset), decimals = mbNumOrText(src.decimals);
+  if (scale !== undefined && scale !== 1) out.scale = scale;
+  if (offset !== undefined && offset !== 0) out.offset = offset;
+  if (withDecimals && decimals !== undefined) out.decimals = typeof decimals === 'number' ? Math.round(decimals) : decimals;
+}
+
+function mbNormConn(src, out) {
+  out.connection_type = src.connection_type || 'tcp';
+  if (out.connection_type === 'rtu') {
+    out.device = src.device || '/dev/ttyS1';
+    out.baud   = parseInt(src.baud) || 9600;
+    out.parity = src.parity || 'N';
+  } else {
+    out.host = (src.host || '').trim() || '127.0.0.1';
+    out.port = parseInt(src.port) || (out.connection_type === 'serial_gateway' ? 4001 : 502);
+  }
+  out.slave_id = parseInt(src.slave_id) || 1;
+}
+
+/* A value to write: a number when it is one, else text (a string or a template). */
+function mbWriteValue(v, type) {
+  if (type === 'string') return v === undefined || v === null ? '' : String(v);
+  const s = String(v === undefined || v === null ? '' : v).trim();
+  const n = s.includes('{{') ? undefined : mbNum(s);
+  return n !== undefined ? n : s;
+}
+
+function normalizeModbusRead(t, out) {
+  mbNormConn(t, out);
+  out.register_type = t.register_type || 'holding';
+  out.poll_interval = parseInt(t.poll_interval) || 30;
+  const bits = mbIsBits(out.register_type);
+  const rows = mbRowsFrom(t, 'map');
+  const mode = t.read_mode || (rows.length ? 'map' : 'single');
+  if (mode === 'map') {
+    out.map = rows.map(r => {
+      const e = { register: parseInt(r.register) || 0, var: String(r.var || '').trim() };
+      if (!bits) mbNormField(r, e, 'type', 'order', true);
+      return e;
+    });
+    const cmp = String(t.compare || '').trim();
+    if (cmp) out.compare = cmp;
+  } else {
+    out.register = parseInt(t.register) || 0;
+    if (!bits) mbNormField(t, out, 'data_type', 'word_order', true);
+    const v = String(t.variable || '').trim();
+    if (v) out.variable = v;
+  }
+  if (t.op) {
+    out.op = t.op;
+    out.threshold = mbNumOrText(t.threshold) ?? 0;
+    if (t.op === 'between') out.threshold2 = mbNumOrText(t.threshold2) ?? 0;
+  }
+}
+
+function normalizeModbusWrite(a) {
+  const out = { type: a.type };
+  mbNormConn(a, out);
+  out.register_type = a.register_type || 'holding';
+  const bits = out.register_type === 'coil';
+  if (a.function && a.function !== 'auto') out.function = a.function;
+  const rows = mbRowsFrom(a, 'values');
+  const mode = a.write_mode || (rows.length ? 'block' : 'single');
+  if (mode === 'block') {
+    out.values = rows.map(r => {
+      const e = { register: parseInt(r.register) || 0 };
+      if (!bits) mbNormField(r, e, 'type', 'order', false);
+      e.value = mbWriteValue(r.value, bits ? 'uint16' : (r.type || 'uint16'));
+      return e;
+    });
+  } else {
+    out.register = parseInt(a.register) || 0;
+    if (!bits) mbNormField(a, out, 'data_type', 'word_order', false);
+    out.value = mbWriteValue(a.value, bits ? 'uint16' : (a.data_type || 'uint16'));
+  }
+  return out;
+}
+
+/* Problems the editor can spot before saving or testing a normalized
+ * modbus_read / modbus_write (the engine checks the rest). */
+function modbusRowError(o) {
+  const numErr = (f, where) => {
+    for (const [k, label] of [['scale', 'Scale'], ['offset', 'Offset'], ['decimals', 'Decimals'], ['threshold', 'Threshold'], ['threshold2', 'Threshold 2']]) {
+      if (typeof f[k] === 'string') return `${where}${label} "${f[k]}" is not a number`;
+    }
+    if (f.scale === 0) return `${where}Scale can't be 0`;
+    if ((f.type || f.data_type) === 'string' && (f.length < 1 || f.length > MB_MAX_STRING_REGS))
+      return `${where}Length must be 1-${MB_MAX_STRING_REGS} registers`;
+    return '';
+  };
+  const bits = o.register_type === 'coil' || o.register_type === 'discrete';
+  const valueErr = (f, type, where) => {
+    if (o.type !== 'modbus_write' || type === 'string') return '';
+    if (mbBlank(f.value)) return `${where}enter a value to write`;
+    return '';
+  };
+  const top = numErr(o, '');
+  if (top) return top;
+  const rows = o.type === 'modbus_read' ? o.map : o.values;
+  if (!rows) return valueErr(o, bits ? 'bool' : (o.data_type || 'uint16'), '');
+  if (!rows.length) return o.type === 'modbus_read' ? 'add at least one value to the register map' : 'add at least one register to write';
+  for (let i = 0; i < rows.length; i++) {
+    const where = `${o.type === 'modbus_read' ? 'map' : 'values'} row ${i + 1}: `;
+    if (o.type === 'modbus_read' && !rows[i].var) return `${where}enter a variable name`;
+    const e = numErr(rows[i], where) || valueErr(rows[i], bits ? 'bool' : (rows[i].type || 'uint16'), where);
+    if (e) return e;
+  }
+  return '';
+}
+
+async function gpsUseCurrentPosition(rowIdx) {
+  try {
+    const gps = await API.get('gps');
+    if (!gps.has_fix || !gps.fresh) {
+      toast('No fresh GPS fix is available', 'error');
+      return;
+    }
+    const row = document.getElementById(`trow-${rowIdx}`);
+    if (!row) return;
+    row.querySelector('[data-k="latitude"]').value = gps.latitude.toFixed(6);
+    row.querySelector('[data-k="longitude"]').value = gps.longitude.toFixed(6);
+    collectTriggerRow(rowIdx);
+    toast('Geofence center set to current GPS position', 'success');
+  } catch(e) {
+    toast('Could not read GPS position: ' + e.message, 'error');
+  }
+}
+
+function renderTriggerList() {
+  const list = document.getElementById('trigger-list');
+  if (!list) return;
+  if (!triggerRows.length) {
+    list.innerHTML = '';
+    return;
+  }
+  list.innerHTML = triggerRows.map((t, i) => `
+    <div class="tca-row" id="trow-${i}">
+      <div class="tca-row-header">
+        <span class="tca-type-badge tca-trigger">Trigger ${i + 1}</span>
+        <select onchange="changeTriggerType(${i}, this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;">
+          ${triggerTypeOptions(t.type || 'vapix_event')}
+        </select>
+        <button class="tca-remove" onclick="removeTriggerRow(${i})" title="Remove">&times;</button>
+      </div>
+      <div class="tca-fields">${triggerFields(t, i)}</div>
+    </div>
+  `).join('');
+  triggerRows.forEach((t, i) => {
+    if ((t.type === 'schedule' || t.schedule_type === 'astronomical') &&
+        t.schedule_type === 'astronomical')
+      refreshAstroTriggerPreview(i);
+  });
+}
+
+function flushTriggerRows() { triggerRows = collectRows(triggerRows, 'trow'); }
+function addTriggerRow() {
+  flushTriggerRows();
+  triggerRows.push({ type: 'vapix_event' });
+  renderTriggerList();
+}
+
+function removeTriggerRow(i) {
+  flushTriggerRows();
+  triggerRows.splice(i, 1);
+  renderTriggerList();
+}
+
+function changeTriggerType(i, type) {
+  flushTriggerRows();
+  triggerRows[i] = { type };
+  renderTriggerList();
+}
+
+function rerenderTrigger(sel) {
+  const row = sel.closest('.tca-row');
+  const i = parseInt(row.id.replace('trow-', ''));
+  collectTriggerRow(i);
+  renderTriggerList();
+}
+
+function collectTriggerRow(i) {
+  const el = document.getElementById('trow-' + i);
+  if (!el) return;
+  const type = triggerRows[i].type;
+  const data = { type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.value;
+  });
+  triggerRows[i] = data;
+}
+
+/* ===== Condition rows ===== */
+const CONDITION_GROUPS = [
+  { label: 'Time', types: [
+    { value: 'time_window',       label: 'Time Window' },
+    { value: 'day_night',         label: 'Day / Night' },
+  ]},
+  { label: 'Device State', types: [
+    { value: 'vapix_event_state', label: 'Device Event State' },
+    { value: 'io_state',          label: 'I/O State' },
+  ]},
+  { label: 'Data', types: [
+    { value: 'counter',           label: 'Counter Compare' },
+    { value: 'variable_compare',  label: 'Variable Compare' },
+    { value: 'trigger_data',      label: 'Trigger Data' },
+    { value: 'aoa_occupancy',     label: 'AOA Occupancy' },
+  ]},
+  { label: 'External', types: [
+    { value: 'http_check',        label: 'HTTP Check' },
+  ]},
+];
+
+function conditionTypeOptions(selected) {
+  return CONDITION_GROUPS.map(g =>
+    `<optgroup label="${escHtml(g.label)}">${
+      g.types.map(t =>
+        `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+      ).join('')
+    }</optgroup>`
+  ).join('');
+}
+
+function vapixCatalogTopicPath(ev) {
+  const parts = [];
+  ['topic0','topic1','topic2','topic3'].forEach(k => {
+    if (ev.topics && ev.topics[k]) {
+      const entries = Object.entries(ev.topics[k]);
+      if (entries.length > 0) {
+        const [ns, val] = entries[0];
+        if (val) parts.push(ns ? `${ns}:${val}` : val);
+      }
+    }
+  });
+  return parts.join('/');
+}
+
+function applyVapixEventState(rowIdx, idxStr) {
+  const idx = parseInt(idxStr);
+  if (idx < 0 || !vapixEventCatalog) return;
+  const ev = vapixEventCatalog[idx];
+  if (!ev) return;
+  const path = vapixCatalogTopicPath(ev);
+  const row = document.getElementById('crow-' + rowIdx);
+  const data = { type: 'vapix_event_state' };
+  if (row) row.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  data.event_key = path;
+  if (ev.dataKeys.length === 1) data.data_key = ev.dataKeys[0];
+  conditionRows[rowIdx] = data;
+  renderConditionList();
+}
+
+function conditionFields(c, rowIdx) {
+  const type = c.type || 'time_window';
+  if (type === 'time_window') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Start Time</label>
+        <input type="time" data-k="start" value="${escHtml(c.start || '08:00')}">
+      </div>
+      <div class="form-group">
+        <label>End Time</label>
+        <input type="time" data-k="end" value="${escHtml(c.end || '18:00')}">
+      </div>
+      <div class="form-group">
+        <label>Days (0=Sun,6=Sat)</label>
+        <input type="text" data-k="days_str" value="${escHtml(c.days_str ?? [].concat(c.days || [1,2,3,4,5]).join(','))}" placeholder="1,2,3,4,5">
+      </div>
+    </div>`;
+  if (type === 'counter') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Counter Name</label>
+        <input type="text" data-k="name" value="${escHtml(c.name || '')}" placeholder="my_counter">
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="gt"  ${(c.op||'gt')==='gt'  ? 'selected' : ''}>&gt;</option>
+          <option value="gte" ${c.op==='gte' ? 'selected' : ''}>&ge;</option>
+          <option value="lt"  ${c.op==='lt'  ? 'selected' : ''}>&lt;</option>
+          <option value="lte" ${c.op==='lte' ? 'selected' : ''}>&le;</option>
+          <option value="eq"  ${c.op==='eq'  ? 'selected' : ''}>=</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="number" data-k="value" value="${escHtml(c.value !== undefined ? c.value : 0)}">
+      </div>
+    </div>`;
+  if (type === 'trigger_data') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Field</label>
+        <input type="text" data-k="key" value="${escHtml(c.key || '')}" placeholder="carState">
+        <div class="form-hint">Any field of the event that fired the rule, the same names as <b>{{trigger.KEY}}</b></div>
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="eq"           ${(c.op||'eq')==='eq'         ? 'selected' : ''}>=</option>
+          <option value="ne"           ${c.op==='ne'                 ? 'selected' : ''}>≠</option>
+          <option value="contains"     ${c.op==='contains'           ? 'selected' : ''}>contains</option>
+          <option value="not_contains" ${c.op==='not_contains'       ? 'selected' : ''}>does not contain</option>
+          <option value="gt"           ${c.op==='gt'                 ? 'selected' : ''}>&gt;</option>
+          <option value="gte"          ${c.op==='gte'                ? 'selected' : ''}>&ge;</option>
+          <option value="lt"           ${c.op==='lt'                 ? 'selected' : ''}>&lt;</option>
+          <option value="lte"          ${c.op==='lte'                ? 'selected' : ''}>&le;</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(c.value || '')}" placeholder="new">
+        <div class="form-hint">Can use variables, e.g. <b>{{var.last_car}}</b></div>
+      </div>
+    </div>`;
+  if (type === 'variable_compare') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Variable Name</label>
+        <input type="text" data-k="name" value="${escHtml(c.name || '')}" placeholder="my_var">
+        <div class="form-hint">Tip: use <b>system.armed</b> = "true"/"false" for arm/disarm patterns</div>
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="eq"  ${(c.op||'eq')==='eq'  ? 'selected' : ''}>=</option>
+          <option value="ne"  ${c.op==='ne'  ? 'selected' : ''}>≠</option>
+          <option value="lt"  ${c.op==='lt'  ? 'selected' : ''}>&lt;</option>
+          <option value="gt"  ${c.op==='gt'  ? 'selected' : ''}>&gt;</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(c.value || '')}">
+      </div>
+    </div>`;
+  if (type === 'io_state') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Port</label>
+        <input type="number" data-k="port" min="1" value="${escHtml(c.port || 1)}">
+      </div>
+      <div class="form-group">
+        <label>Expected State</label>
+        <select data-k="state">
+          <option value="active"   ${(c.state||'active')==='active'   ? 'selected' : ''}>Active (high)</option>
+          <option value="inactive" ${c.state==='inactive' ? 'selected' : ''}>Inactive (low)</option>
+        </select>
+      </div>
+    </div>`;
+  if (type === 'http_check') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>URL</label>
+        <input type="text" data-k="url" value="${escHtml(c.url || '')}" placeholder="https://...">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Expected HTTP Status</label>
+        <input type="number" data-k="expected_status" value="${escHtml(c.expected_status || 200)}" placeholder="200">
+      </div>
+      <div class="form-group">
+        <label>Expected Body Contains (optional)</label>
+        <input type="text" data-k="expected_body" value="${escHtml(c.expected_body || '')}" placeholder="ok">
+        <div class="form-hint">Simple substring match in the response body</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>JSON Path (optional)</label>
+        <input type="text" data-k="json_path" value="${escHtml(c.json_path || '')}" placeholder="status.value">
+        <div class="form-hint">Dot-notation path into JSON response, e.g. <b>data.temperature</b></div>
+      </div>
+      <div class="form-group">
+        <label>JSON Expected Value</label>
+        <input type="text" data-k="json_expected" value="${escHtml(c.json_expected || '')}" placeholder="ok">
+        <div class="form-hint">Value at the JSON path must equal this (string comparison)</div>
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="allow_insecure" ${c.allow_insecure ? 'checked' : ''}>
+        Allow untrusted certificate (skip SSL verification)
+      </label>
+      <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
+    </div></div>
+    ${tlsProfileField(c.tls_profile)}`;
+  if (type === 'aoa_occupancy') {
+    const isRemote = c.remote_host_toggle === 'remote'
+      || (c.remote_host && c.remote_host_toggle !== 'local');
+    let scenarioControl;
+    if (isRemote) {
+      const host = (c.remote_host || '').trim();
+      const cached = host ? remoteCapCache[`${host}:::aoa`] : null;
+      const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="aoa" onclick="loadRemoteCondCap('${rowIdx}','aoa')" style="white-space:nowrap;margin-left:6px" title="Fetch scenarios from the remote device">Load</button>`;
+      if (cached && cached.length) {
+        const hasVal = c.scenario_id !== undefined;
+        const opts = cached.map(s => {
+          const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
+          return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+        }).join('');
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><select data-k="scenario_id" style="flex:1;min-width:0"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>${loadBtn}</div>`;
+      } else {
+        scenarioControl = `<div style="display:flex;align-items:center;gap:4px"><input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" style="flex:1;min-width:0">${loadBtn}</div>`;
+      }
+    } else if (aoaScenarios === null) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1" placeholder="Loading…">`;
+    } else if (!aoaScenarios.length) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(c.scenario_id || 1)}" min="1">`;
+    } else {
+      const hasVal = c.scenario_id !== undefined;
+      const opts = aoaScenarios.map(s => {
+        const sel = hasVal && parseInt(c.scenario_id) === s.id ? 'selected' : '';
+        return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+      }).join('');
+      scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Scenario</label>
+        ${scenarioControl}
+      </div>
+      <div class="form-group">
+        <label>Object Class</label>
+        <select data-k="object_class">
+          <option value="any"          ${(!c.object_class||c.object_class==='any')     ?'selected':''}>Any (total)</option>
+          <option value="human"        ${c.object_class==='human'       ?'selected':''}>Human</option>
+          <option value="car"          ${c.object_class==='car'         ?'selected':''}>Car</option>
+          <option value="truck"        ${c.object_class==='truck'       ?'selected':''}>Truck</option>
+          <option value="bus"          ${c.object_class==='bus'         ?'selected':''}>Bus</option>
+          <option value="bike"         ${c.object_class==='bike'        ?'selected':''}>Bike</option>
+          <option value="otherVehicle" ${c.object_class==='otherVehicle'?'selected':''}>Other Vehicle</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Operator</label>
+        <select data-k="op">
+          <option value="gt"  ${(c.op||'gt')==='gt'  ? 'selected' : ''}>&gt;</option>
+          <option value="gte" ${c.op==='gte' ? 'selected' : ''}>&ge;</option>
+          <option value="lt"  ${c.op==='lt'  ? 'selected' : ''}>&lt;</option>
+          <option value="lte" ${c.op==='lte' ? 'selected' : ''}>&le;</option>
+          <option value="eq"  ${c.op==='eq'  ? 'selected' : ''}>=</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Count</label>
+        <input type="number" data-k="value" value="${escHtml(c.value !== undefined ? c.value : 0)}" min="0">
+        <div class="form-hint">Current occupancy count must satisfy the condition to pass. This polls AOA on each rule evaluation.</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'day_night') {
+    const solarHint = dayNightHint(c.lat, c.lon, c.sunrise_offset_minutes, c.sunset_offset_minutes);
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Pass when it is</label>
+        <select data-k="state">
+          <option value="day"   ${(c.state||'day')==='day'   ? 'selected' : ''}>Daytime (after sunrise)</option>
+          <option value="night" ${c.state==='night' ? 'selected' : ''}>Nighttime (after sunset)</option>
+        </select>
+        <div class="form-hint" data-role="day-night-hint">${escHtml(solarHint)}</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Sunrise offset (minutes, + = later)</label>
+        <input type="number" data-k="sunrise_offset_minutes" min="-720" max="720" value="${escHtml(c.sunrise_offset_minutes || 0)}" placeholder="0" oninput="refreshDayNightHint(this)">
+        <div class="form-hint">E.g. 60 keeps it "night" until 1 hour after sunrise</div>
+      </div>
+      <div class="form-group">
+        <label>Sunset offset (minutes, + = later)</label>
+        <input type="number" data-k="sunset_offset_minutes" min="-720" max="720" value="${escHtml(c.sunset_offset_minutes || 0)}" placeholder="0" oninput="refreshDayNightHint(this)">
+        <div class="form-hint">E.g. -30 starts "night" 30 minutes before sunset</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
+        <input type="number" step="any" oninput="refreshDayNightHint(this)" data-k="lat" value="${escHtml(c.lat !== undefined ? c.lat : '')}" placeholder="From settings (${escHtml(engineLat)})">
+      </div>
+      <div class="form-group">
+        <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
+        <input type="number" step="any" oninput="refreshDayNightHint(this)" data-k="lon" value="${escHtml(c.lon !== undefined ? c.lon : '')}" placeholder="From settings (${escHtml(engineLon)})">
+      </div>
+    </div>`;
+  }
+  if (type === 'vapix_event_state') {
+    const isRemote = c.remote_host_toggle === 'remote'
+      || (c.remote_host && c.remote_host_toggle !== 'local');
+
+    /* --- Resolve event catalog, topic control, and data keys for both local and remote --- */
+    let topicSection, dataKeys = [], dataTypes = {};
+    if (isRemote) {
+      const host = (c.remote_host || '').trim();
+      const cachedEvents = host ? remoteCapCache[`${host}:::vapix_events`] : null;
+      const fullCatalog = host ? remoteCapCache[`${host}:::vapix_events_catalog`] : null;
+      const loadBtn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="vapix_events" onclick="loadRemoteCondCap('${rowIdx}','vapix_events')" style="white-space:nowrap;margin-left:6px" title="Fetch event instances from the remote device">Load</button>`;
+      if (cachedEvents && cachedEvents.length) {
+        const topicOpts = cachedEvents.map(ev => {
+          const sel = c.event_key && ev.topic && ev.topic === c.event_key ? 'selected' : '';
+          return `<option value="${escHtml(ev.topic)}" ${sel}>${escHtml(ev.topic)}</option>`;
+        }).join('');
+        topicSection = `
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Event Topic (partial match)</label>
+            <div style="display:flex;align-items:center;gap:4px">
+              <select data-k="event_key" onchange="rerenderCondition(this)" style="flex:1">
+                <option value="">— select event —</option>
+                ${topicOpts}
+              </select>${loadBtn}</div>
+            <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
+          </div>
+        </div>`;
+        const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic === c.event_key);
+        dataKeys = matchedEv && matchedEv.dataKeys ? matchedEv.dataKeys : [];
+        if (fullCatalog && matchedEv) {
+          const catEv = fullCatalog.find(ev => {
+            const p = vapixCatalogTopicPath(ev);
+            return p && c.event_key && p === c.event_key;
+          });
+          if (catEv) dataTypes = catEv.dataTypes || {};
+        }
+      } else {
+        topicSection = `
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Event Topic (partial match)</label>
+            <div style="display:flex;align-items:center;gap:4px">
+              <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput" style="flex:1">${loadBtn}</div>
+            <div class="form-hint">Click Load to fetch events from the remote device, then pick from the dropdown</div>
+          </div>
+        </div>`;
+      }
+    } else {
+      const catalogOpts = vapixEventCatalog && vapixEventCatalog.length
+        ? vapixEventCatalog.map((ev, i) => {
+            const path = vapixCatalogTopicPath(ev);
+            const sel = c.event_key && path && path === c.event_key ? 'selected' : '';
+            return `<option value="${i}" ${sel}>${escHtml(ev.label)}</option>`;
+          }).join('')
+        : '';
+      const matchIdx = vapixEventCatalog
+        ? vapixEventCatalog.findIndex(ev => { const p = vapixCatalogTopicPath(ev); return c.event_key && p && p === c.event_key; })
+        : -1;
+      if (matchIdx >= 0) {
+        dataKeys = vapixEventCatalog[matchIdx].dataKeys || [];
+        dataTypes = vapixEventCatalog[matchIdx].dataTypes || {};
+      }
+      topicSection = `
+      ${catalogOpts ? `
+      <div class="form-row">
+        <div class="form-group">
+          <label>Event <span style="color:var(--text-muted);font-weight:400;">(pick to auto-fill fields below)</span></label>
+          <select onchange="applyVapixEventState(${rowIdx}, this.value)">
+            <option value="-1" ${matchIdx < 0 ? 'selected' : ''}>— custom / enter manually —</option>
+            ${catalogOpts}
+          </select>
+        </div>
+      </div>` : ''}
+      <div class="form-row">
+        <div class="form-group">
+          <label>Event Topic (partial match)</label>
+          <input type="text" data-k="event_key" value="${escHtml(c.event_key || '')}" placeholder="tns1:Device/tnsaxis:IO/VirtualInput">
+          <div class="form-hint">Substring matched against the event topic path returned by the camera</div>
+        </div>
+      </div>`;
+    }
+
+    /* --- Data key dropdown (shared by both local/remote) --- */
+    const dataKeyCtrl = dataKeys.length
+      ? `<select data-k="data_key" onchange="rerenderCondition(this)">${dataKeys.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
+      : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
+
+    const selKey = c.data_key || (dataKeys[0] || '');
+    const selType = dataTypes[selKey] || '';
+
+    const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
+    const numericKeys = dataKeys.filter(k => dataTypes[k] === 'numeric');
+    const stringKeys  = dataKeys.filter(k => dataTypes[k] === 'string');
+    const unknownKeys = dataKeys.filter(k => !dataTypes[k]);
+    const boolOpts    = [...boolKeys,    ...unknownKeys];
+    const numericOpts = [...numericKeys, ...unknownKeys];
+    const stringOpts  = [...stringKeys,  ...unknownKeys];
+
+    /* Determine match mode: infer from saved fields or catalog type */
+    let matchMode = c.match_mode || '';
+    if (!matchMode) {
+      if (c.op === 'boolean')  matchMode = 'boolean';
+      else if (c.op === 'contains') matchMode = 'string';
+      else if (c.op && c.op !== 'eq_str') matchMode = 'numeric';
+      else if (c.expected !== undefined && c.expected !== '') matchMode = 'exact';
+      else if (selType === 'boolean') matchMode = 'boolean';
+      else if (selType === 'numeric') matchMode = 'numeric';
+      else matchMode = 'exact';
+    }
+
+    const showBoolean = boolOpts.length > 0 || selType === 'boolean' || !dataKeys.length;
+    const showNumeric = numericOpts.length > 0 || selType === 'numeric' || !dataKeys.length;
+    const showString  = stringOpts.length > 0 || selType === 'string' || !dataKeys.length;
+
+    const boolExpected = c.expected || 'true';
+    const numOp   = c.op || 'gt';
+    const numThr  = c.threshold !== undefined ? c.threshold : '';
+    const numThr2 = c.threshold2 !== undefined ? c.threshold2 : '';
+    const strExpected = c.expected || '';
+
+    const matchSection = `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Match Mode</label>
+        <select data-k="match_mode" onchange="rerenderCondition(this)">
+          ${showBoolean ? `<option value="boolean" ${matchMode==='boolean'?'selected':''}>Boolean (true / false)</option>` : ''}
+          ${showNumeric ? `<option value="numeric" ${matchMode==='numeric'?'selected':''}>Numeric threshold</option>` : ''}
+          ${showString  ? `<option value="string"  ${matchMode==='string' ?'selected':''}>String contains</option>` : ''}
+          <option value="exact" ${matchMode==='exact'?'selected':''}>Exact value</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:1;">
+        ${matchMode === 'boolean' ? `
+        <label>Expected</label>
+        <select data-k="expected">
+          <option value="true"  ${boolExpected==='true' ||boolExpected==='1' ?'selected':''}>true (active / on)</option>
+          <option value="false" ${boolExpected==='false'||boolExpected==='0'?'selected':''}>false (inactive / off)</option>
+        </select>` : ''}
+        ${matchMode === 'numeric' ? `
+        <label>Operator &amp; Threshold</label>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select data-k="op" onchange="rerenderCondition(this)" style="flex:0 0 auto;">
+            <option value="gt"      ${numOp==='gt'      ?'selected':''}>is above</option>
+            <option value="lt"      ${numOp==='lt'      ?'selected':''}>is below</option>
+            <option value="gte"     ${numOp==='gte'     ?'selected':''}>≥</option>
+            <option value="lte"     ${numOp==='lte'     ?'selected':''}>≤</option>
+            <option value="eq"      ${numOp==='eq'      ?'selected':''}>equals</option>
+            <option value="between" ${numOp==='between' ?'selected':''}>is between</option>
+          </select>
+          ${numOp === 'between' ? `
+          <input type="number" data-k="threshold" step="any" value="${escHtml(String(numThr))}" placeholder="min" style="width:80px">
+          <span style="opacity:.7;font-size:12px">and</span>
+          <input type="number" data-k="threshold2" step="any" value="${escHtml(String(numThr2))}" placeholder="max" style="width:80px">
+          ` : `
+          <input type="number" data-k="threshold" step="any" value="${escHtml(String(numThr))}" placeholder="0" style="width:90px">
+          `}
+        </div>` : ''}
+        ${matchMode === 'string' ? `
+        <label>Contains substring</label>
+        <input type="text" data-k="expected" value="${escHtml(strExpected)}" placeholder="match substring">` : ''}
+        ${matchMode === 'exact' ? `
+        <label>Expected Value</label>
+        <input type="text" data-k="expected" value="${escHtml(c.expected || '')}" placeholder="1 or true">` : ''}
+      </div>
+    </div>`;
+
+    return `${topicSection}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Data Key</label>
+        ${dataKeyCtrl}
+      </div>
+    </div>
+    ${matchSection}`;
+  }
+  return '';
+}
+
+function renderConditionList() {
+  const list = document.getElementById('condition-list');
+  if (!list) return;
+  list.innerHTML = conditionRows.map((c, i) => `
+    <div class="tca-row" id="crow-${i}">
+      <div class="tca-row-header">
+        <span class="tca-type-badge tca-condition">Condition ${i + 1}</span>
+        <select onchange="changeConditionType(${i}, this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;">
+          ${conditionTypeOptions(c.type || 'time_window')}
+        </select>
+        <button class="tca-remove" onclick="removeConditionRow(${i})">&times;</button>
+      </div>
+      <div class="tca-fields">${conditionRemoteDeviceFields(c)}${conditionFields(c, i)}</div>
+    </div>
+  `).join('');
+}
+
+function flushConditionRows() { conditionRows = collectRows(conditionRows, 'crow'); }
+function addConditionRow() { flushConditionRows(); conditionRows.push({ type: 'time_window' }); renderConditionList(); }
+function removeConditionRow(i) { flushConditionRows(); conditionRows.splice(i, 1); renderConditionList(); }
+function changeConditionType(i, type) { flushConditionRows(); conditionRows[i] = { type }; renderConditionList(); }
+
+function collectConditionRow(i) {
+  const el = document.getElementById('crow-' + i);
+  if (!el) return;
+  const type = conditionRows[i] ? conditionRows[i].type : 'time_window';
+  const data = { type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    if (inp.type === 'checkbox') data[inp.dataset.k] = inp.checked;
+    else data[inp.dataset.k] = inp.value;
+  });
+  conditionRows[i] = data;
+}
+
+/* Mirrors cond_day_night: empty or 0/0 coordinates fall back to Location settings */
+function dayNightHint(latIn, lonIn, sunriseOffset, sunsetOffset) {
+  let lat = parseFloat(latIn), lon = parseFloat(lonIn);
+  if (isNaN(lat)) lat = 0;
+  if (isNaN(lon)) lon = 0;
+  if (lat === 0 && lon === 0) { lat = parseFloat(engineLat) || 0; lon = parseFloat(engineLon) || 0; }
+  const riseOff = parseFloat(sunriseOffset) || 0;
+  const setOff  = parseFloat(sunsetOffset) || 0;
+  const rise = calcSolarEvent(lat, lon, 'sunrise', riseOff);
+  const set  = calcSolarEvent(lat, lon, 'sunset', setOff);
+  if (!rise || !set) {
+    if (lat === 0 && lon === 0) return 'Set latitude/longitude in Location';
+    return isMidnightSun(lat) ? 'No sunset today (midnight sun): day all day'
+                              : 'No sunrise today (polar night): night all day';
+  }
+  const offNote = riseOff || setOff ? ' (with offsets)' : '';
+  return `Today: day starts ${rise}, night starts ${set}${offNote}`;
+}
+
+/* Live-update the day_night hint while coordinates/offsets are typed */
+function refreshDayNightHint(inp) {
+  const row = inp.closest('.tca-row');
+  if (!row) return;
+  const val = k => { const e = row.querySelector(`[data-k="${k}"]`); return e ? e.value : ''; };
+  const hint = row.querySelector('[data-role="day-night-hint"]');
+  if (hint) hint.textContent = dayNightHint(val('lat'), val('lon'), val('sunrise_offset_minutes'), val('sunset_offset_minutes'));
+}
+
+function rerenderCondition(sel) {
+  const row = sel.closest('.tca-row');
+  const i = parseInt(row.id.replace('crow-', ''));
+  collectConditionRow(i);
+  renderConditionList();
+}
+
+/* ===== Action rows ===== */
+const ACTION_GROUPS = [
+  { label: 'Notifications', types: [
+    { value: 'http_request',      label: 'HTTP Request' },
+    { value: 'slack_webhook',     label: 'Slack' },
+    { value: 'teams_webhook',     label: 'Microsoft Teams' },
+    { value: 'telegram',          label: 'Telegram' },
+    { value: 'email',             label: 'Email (SMTP)' },
+    { value: 'mqtt_publish',      label: 'MQTT Publish' },
+    { value: 'ftp_upload',        label: 'FTP Upload' },
+    { value: 'snapshot_upload',   label: 'Snapshot Upload' },
+    { value: 'influxdb_write',    label: 'InfluxDB Write' },
+    { value: 'send_syslog',       label: 'Send Syslog' },
+  ]},
+  { label: 'Camera', types: [
+    { value: 'recording',         label: 'Recording' },
+    { value: 'ptz_preset',        label: 'PTZ Preset' },
+    { value: 'guard_tour',        label: 'Guard Tour' },
+    { value: 'overlay_text',      label: 'Overlay Text' },
+    { value: 'overlay_image',     label: 'Overlay Image' },
+    { value: 'ir_cut_filter',     label: 'IR Cut Filter' },
+    { value: 'privacy_mask',      label: 'Privacy Mask' },
+    { value: 'wiper',             label: 'Wiper' },
+    { value: 'light_control',     label: 'Light Control' },
+    { value: 'audio_clip',        label: 'Audio Clip' },
+    { value: 'siren_light',       label: 'Siren / Light' },
+    { value: 'speaker_display',   label: 'Speaker Display' },
+  ]},
+  { label: 'I/O', types: [
+    { value: 'io_output',         label: 'I/O Output' },
+    { value: 'io_flash',          label: 'I/O Flash' },
+  ]},
+  { label: 'Logic', types: [
+    { value: 'delay',             label: 'Delay' },
+    { value: 'set_variable',      label: 'Set Variable' },
+    { value: 'increment_counter', label: 'Increment Counter' },
+    { value: 'run_rule',          label: 'Run Rule' },
+    { value: 'set_rule_enabled',   label: 'Enable / Disable Rule' },
+    { value: 'digest',            label: 'Notification Digest' },
+  ]},
+  { label: 'Paging Console', types: [
+    { value: 'paging_console_execute', label: 'Execute Paging Action' },
+    { value: 'paging_console_button',  label: 'Reassign Button' },
+  ]},
+  { label: 'Advanced', types: [
+    { value: 'fire_vapix_event',  label: 'Fire ACAP Event' },
+    { value: 'vapix_query',       label: 'Device Event Query' },
+    { value: 'set_device_param',  label: 'Set Device Parameter' },
+    { value: 'acap_control',      label: 'ACAP Control' },
+    { value: 'aoa_get_counts',    label: 'AOA Get Counts' },
+  ]},
+  { label: 'Modbus', types: [
+    { value: 'modbus_write',      label: 'Modbus Write' },
+  ]},
+  { label: 'Industrial', types: [
+    { value: 'sparkplug_publish', label: 'Sparkplug B Publish' },
+  ]},
+];
+
+function actionTypeOptions(selected) {
+  return ACTION_GROUPS.map(g =>
+    `<optgroup label="${escHtml(g.label)}">${
+      g.types.map(t =>
+        `<option value="${t.value}" ${selected === t.value ? 'selected' : ''}>${t.label}</option>`
+      ).join('')
+    }</optgroup>`
+  ).join('');
+}
+
+function getTriggerTokens() {
+  const tokens = ['{{trigger_json}}'];  /* always available — full trigger data as JSON */
+  for (const t of triggerRows) {
+    if (t.type === 'vapix_event') {
+      tokens.push('{{trigger.active}}');  /* present in most VAPIX events */
+      const idx = findCatalogMatch(t);
+      if (idx >= 0 && vapixEventCatalog[idx].dataKeys.length) {
+        for (const k of vapixEventCatalog[idx].dataKeys) tokens.push(`{{trigger.${k}}}`);
+      }
+    } else if (t.type === 'mqtt_message') {
+      tokens.push('{{trigger.topic}}', '{{trigger.payload}}');
+    } else if (t.type === 'http_webhook') {
+      tokens.push('{{trigger.payload}}', '{{trigger.<field>}}');
+    } else if (t.type === 'counter_threshold') {
+      tokens.push('{{trigger.counter_name}}', '{{trigger.counter_value}}');
+    } else if (t.type === 'io_input') {
+      tokens.push('{{trigger.port}}', '{{trigger.state}}');
+    } else if (t.type === 'aoa_scenario') {
+      tokens.push('{{trigger.scenario_id}}', '{{trigger.active}}', '{{trigger.reason}}');
+    } else if (t.type === 'rule_fired') {
+      tokens.push('{{trigger.fired_rule_id}}');
+    } else if (t.type === 'modbus_read') {
+      tokens.push('{{trigger.value}}', '{{trigger.register}}', '{{trigger.register_type}}', '{{trigger.slave_id}}',
+                  '{{trigger.data_type}}');
+      const mode = t.read_mode || (mbRowsFrom(t, 'map').length ? 'map' : 'single');
+      if (mode === 'map') {
+        for (const r of mbRowsFrom(t, 'map')) {
+          const v = String(r.var || '').trim();
+          if (v) tokens.push(`{{trigger.${v}}}`, `{{var.${v}}}`);
+        }
+      } else if (t.variable) {
+        tokens.push(`{{var.${String(t.variable).trim()}}}`);
+      }
+    } else if (t.type === 'modbus_error') {
+      tokens.push('{{trigger.state}}', '{{trigger.device}}', '{{trigger.slave_id}}', '{{trigger.error}}',
+                  '{{trigger.message}}', '{{trigger.exception_code}}', '{{trigger.exception_name}}',
+                  '{{trigger.operation}}', '{{trigger.function}}', '{{trigger.register}}', '{{trigger.fail_count}}');
+    }
+  }
+  /* vapix_query actions inject event data as {{trigger.FIELD}} — resolve from catalog */
+  for (const a of actionRows) {
+    if (a.type !== 'vapix_query') continue;
+    const host = (a.remote_host || '').trim();
+    const topicKeys = ['topic0','topic1','topic2','topic3'];
+    /* Topics may be stored as objects {topicN: {ns: val}} or flat {topicN_ns, topicN_val} */
+    const getTopic = k => {
+      if (a[k] && typeof a[k] === 'object') return a[k];
+      if (a[`${k}_val`]) return { [a[`${k}_ns`] || '']: a[`${k}_val`] };
+      return null;
+    };
+    const cmp = (x, y) => {
+      if (!x && !y) return true; if (!x || !y) return false;
+      const ak = Object.keys(x)[0], bk = Object.keys(y)[0];
+      return ak === bk && x[ak] === y[bk];
+    };
+    let keys = [];
+    if (host) {
+      const cached = (typeof remoteCapCache !== 'undefined')
+        ? remoteCapCache[`${host}:::vapix_events_catalog`] : null;
+      if (cached) {
+        const ev = cached.find(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
+        if (ev && ev.dataKeys) keys = ev.dataKeys;
+      }
+    } else if (vapixEventCatalog) {
+      const idx = vapixEventCatalog.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
+      if (idx >= 0 && vapixEventCatalog[idx].dataKeys) keys = vapixEventCatalog[idx].dataKeys;
+    }
+    for (const k of keys) tokens.push(`{{trigger.${k}}}`);
+  }
+  return [...new Set(tokens)];
+}
+
+/* Token picker — uses a position:fixed panel appended to document.body so it
+ * is never clipped by the modal's overflow:auto container. */
+let _tokenPickerBtn    = null;  /* the button that opened the current panel */
+let _tokenTargetInput  = null;  /* the input/textarea to insert into */
+
+function toggleTokenPicker(btn) {
+  const existingPanel = document.getElementById('_token_picker_panel');
+
+  if (existingPanel && _tokenPickerBtn === btn) {
+    existingPanel.remove();
+    _tokenPickerBtn = null;
+    _tokenTargetInput = null;
+    return;
+  }
+  if (existingPanel) existingPanel.remove();
+
+  /* remember the target input (sibling in same .form-group) */
+  const group = btn.closest('.form-group');
+  _tokenTargetInput = group && (group.querySelector('textarea') || group.querySelector('input[type="text"]'));
+  _tokenPickerBtn   = btn;
+
+  /* Sync form state into actionRows/triggerRows before building tokens so that
+   * newly configured actions (e.g. vapix_query) are reflected immediately. */
+  actionRows  = collectRows(actionRows,  'arow');
+  triggerRows = collectRows(triggerRows, 'trow');
+
+  const triggerTokens = getTriggerTokens();
+  const hasSnapshot = actionRows.some(a =>
+    ['http_request', 'email', 'mqtt_publish', 'slack_webhook', 'teams_webhook', 'telegram'].includes(a.type) && a.attach_snapshot
+  );
+  const hasAlpvImage = actionRows.some(a => a.type === 'http_request' && a.attach_alpv_image);
+  const groups = [
+    { label: 'Time',    tokens: ['{{timestamp}}', '{{date}}', '{{time}}'] },
+    { label: 'Camera',  tokens: ['{{camera.serial}}', '{{camera.model}}', '{{camera.ip}}',
+                                 ...(hasSnapshot ? ['{{trigger.snapshot_base64}}'] : []),
+                                 ...(hasAlpvImage ? ['{{trigger.alpv_image_base64}}'] : [])] },
+  ];
+  groups.push({ label: 'GPS', tokens: ['{{gps.speed_kmh}}', '{{gps.latitude}}', '{{gps.longitude}}',
+                                      '{{gps.heading_cardinal}}', '{{gps.heading}}', '{{gps.altitude_m}}',
+                                      '{{gps.satellites}}', '{{gps.fix}}', '{{gps.utc}}', '{{gps.age}}'] });
+  if (triggerTokens.length)
+    groups.push({ label: 'Trigger', tokens: triggerTokens });
+  if (knownVarNames.length)
+    groups.push({ label: 'Variables', tokens: knownVarNames.map(n => `{{var.${n}}}`) });
+  if (knownCounterNames.length)
+    groups.push({ label: 'Counters', tokens: knownCounterNames.map(n => `{{counter.${n}}}`) });
+  else
+    groups.push({ label: 'Counters', tokens: ['{{counter.NAME}}'] });
+
+  const row = (t) =>
+    `<button type="button" onclick="insertTokenFromPicker(${escHtml(JSON.stringify(t))})"
+       style="display:block;width:100%;text-align:left;padding:4px 12px;font-size:11px;
+              font-family:monospace;background:none;border:none;color:var(--text);
+              cursor:pointer;white-space:nowrap"
+       onmouseover="this.style.background='var(--surface2)'"
+       onmouseout="this.style.background='none'">${escHtml(t)}</button>`;
+
+  const label = (l) =>
+    `<div style="padding:6px 8px 2px;font-size:10px;color:var(--text-dim);
+                 font-weight:600;text-transform:uppercase;letter-spacing:.05em">${l}</div>`;
+
+  const panel = document.createElement('div');
+  panel.id = '_token_picker_panel';
+  panel.style.cssText =
+    'position:fixed;z-index:9999;background:var(--surface);border:1px solid var(--border);' +
+    'border-radius:6px;max-height:240px;overflow-y:auto;min-width:200px;' +
+    'box-shadow:0 4px 16px rgba(0,0,0,.5);padding:4px 0';
+  const header = `<div style="padding:6px 12px 4px;font-size:11px;color:var(--text-dim);border-bottom:1px solid var(--border);margin-bottom:2px;">Click to insert into field above</div>`;
+  panel.innerHTML = header + groups.map(g => label(g.label) + g.tokens.map(row).join('')).join('');
+  document.body.appendChild(panel);
+
+  /* Position inside viewport: clamp horizontally and flip upward near bottom edge. */
+  const rect = btn.getBoundingClientRect();
+  const margin = 8;
+  const gap = 4;
+
+  const panelW = Math.max(200, panel.offsetWidth || 210);
+  let left = rect.left;
+  if (left + panelW > window.innerWidth - margin) left = rect.right - panelW;
+  left = Math.max(margin, Math.min(left, window.innerWidth - panelW - margin));
+
+  const spaceBelow = window.innerHeight - rect.bottom - margin;
+  const spaceAbove = rect.top - margin;
+  const preferBelow = spaceBelow >= 140 || spaceBelow >= spaceAbove;
+  const available = Math.max(120, Math.min(240, preferBelow ? spaceBelow : spaceAbove));
+  panel.style.maxHeight = available + 'px';
+
+  const panelH = panel.offsetHeight;
+  let top;
+  if (preferBelow) {
+    top = rect.bottom + gap;
+    if (top + panelH > window.innerHeight - margin)
+      top = Math.max(margin, window.innerHeight - panelH - margin);
+  } else {
+    top = rect.top - panelH - gap;
+    if (top < margin)
+      top = margin;
+  }
+
+  panel.style.left = left + 'px';
+  panel.style.top = top + 'px';
+
+  setTimeout(() => {
+    document.addEventListener('click', function _close(e) {
+      if (!panel.contains(e.target) && e.target !== btn) {
+        panel.remove();
+        _tokenPickerBtn = null;
+        _tokenTargetInput = null;
+      }
+      document.removeEventListener('click', _close);
+    });
+  }, 0);
+}
+
+function insertTokenFromPicker(token) {
+  const target = _tokenTargetInput;
+  const panel  = document.getElementById('_token_picker_panel');
+  if (panel) panel.remove();
+  _tokenPickerBtn   = null;
+  _tokenTargetInput = null;
+  if (!target) return;
+  const s = target.selectionStart ?? target.value.length;
+  const e = target.selectionEnd   ?? s;
+  target.value = target.value.slice(0, s) + token + target.value.slice(e);
+  target.selectionStart = target.selectionEnd = s + token.length;
+  target.focus();
+}
+
+function getTokenInsertWidget() {
+  return `<div class="form-hint">
+    <button type="button" class="btn btn-ghost btn-sm"
+            onclick="toggleTokenPicker(this)"
+            title="Insert a dynamic value placeholder — e.g. {{timestamp}} or {{trigger.Temperature}}"
+            style="font-size:11px;padding:2px 8px;font-family:monospace;">&#123;&#125; Insert variable</button>
+    <span style="margin-left:6px;opacity:0.6;font-size:11px;">— dynamically replaced when the rule fires. Append <code>|N</code> to round decimals, e.g. <code>{{trigger.Temperature|2}}</code></span>
+  </div>`;
+}
+
+function renderOnFailureFields(a, hint) {
+  /* on_failure is stored as array; for UI we support one fallback action.
+   * Also handle the flat form fields used during re-render after collectRows. */
+  const fb = (a.on_failure && a.on_failure[0]) || {};
+  const fbType = a.on_failure_type || fb.type || '';
+  const hintText = hint || 'Executed when the action fails (non-2xx response or network error).';
+  return `
+  <div class="form-row" style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px;">
+    <div class="form-group">
+      <label>On Failure — Fallback action</label>
+      <select data-k="on_failure_type" onchange="rerenderAction(this)">
+        <option value=""              ${!fbType              ? 'selected' : ''}>None</option>
+        <option value="send_syslog"  ${fbType==='send_syslog'  ? 'selected' : ''}>Log message</option>
+        <option value="mqtt_publish" ${fbType==='mqtt_publish' ? 'selected' : ''}>MQTT publish</option>
+        <option value="http_request" ${fbType==='http_request' ? 'selected' : ''}>HTTP request</option>
+      </select>
+      <div class="form-hint">${hintText}</div>
+    </div>
+  </div>
+  ${fbType === 'send_syslog' ? `
+  <div class="form-row"><div class="form-group">
+    <label>Log Message</label>
+    <input type="text" data-k="on_failure_message" value="${escHtml(a.on_failure_message || fb.message || 'HTTP request failed')}" placeholder="HTTP request failed">
+  </div></div>` : ''}
+  ${fbType === 'mqtt_publish' ? `
+  <div class="form-row">
+    <div class="form-group">
+      <label>Fallback MQTT Topic</label>
+      <input type="text" data-k="on_failure_topic" value="${escHtml(a.on_failure_topic || fb.topic || '')}">
+    </div>
+    <div class="form-group">
+      <label>Fallback Payload</label>
+      <input type="text" data-k="on_failure_payload" value="${escHtml(a.on_failure_payload || fb.payload || 'http_request_failed')}">
+    </div>
+  </div>` : ''}
+  ${fbType === 'http_request' ? `
+  <div class="form-row"><div class="form-group">
+    <label>Fallback URL (GET)</label>
+    <input type="text" data-k="on_failure_url" value="${escHtml(a.on_failure_url || fb.url || '')}" placeholder="https://example.com/alert">
+  </div></div>` : ''}`;
+}
+
+const REMOTE_CAPABLE_ACTIONS = new Set([
+  'recording', 'overlay_text', 'overlay_image', 'ptz_preset', 'io_output', 'io_flash',
+  'audio_clip', 'siren_light', 'guard_tour', 'set_device_param',
+  'ir_cut_filter', 'privacy_mask', 'wiper', 'light_control',
+  'acap_control', 'speaker_display', 'vapix_query',
+  'paging_console_execute', 'paging_console_button'
+]);
+
+/* Remote device section for conditions; rerenderFn is the onchange handler name */
+function remoteDeviceSection(obj, rerenderFn) {
+  const isRemote = obj.remote_host_toggle === 'remote'
+    || (obj.remote_host && obj.remote_host_toggle !== 'local');
+  return `
+  <div class="form-row" style="flex-wrap:wrap;border-top:1px solid var(--border);padding-top:8px;margin-top:4px;">
+    <div class="form-group" style="flex:0 0 160px;">
+      <label>Target Device</label>
+      <select data-k="remote_host_toggle" onchange="${rerenderFn}(this)">
+        <option value="local"  ${!isRemote ? 'selected' : ''}>Local (this camera)</option>
+        <option value="remote" ${isRemote  ? 'selected' : ''}>Remote device</option>
+      </select>
+    </div>
+    ${isRemote ? `
+    <div class="form-group" style="flex:1;min-width:120px;">
+      <label>IP / Hostname</label>
+      <input type="text" data-k="remote_host" value="${escHtml(obj.remote_host || '')}" placeholder="192.168.1.100">
+    </div>
+    <div class="form-group" style="flex:0 0 110px;min-width:0;">
+      <label>Username</label>
+      <input type="text" data-k="remote_user" value="${escHtml(obj.remote_user || '')}" placeholder="root" autocomplete="off">
+    </div>
+    <div class="form-group" style="flex:0 0 130px;min-width:0;">
+      <label>Password</label>
+      <input type="password" data-k="remote_pass" value="${escHtml(obj.remote_pass || '')}" autocomplete="new-password">
+    </div>
+    <div class="form-group" style="flex:0 0 auto;">
+      <label>&nbsp;</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer" title="Use HTTPS to reach this device. Required for OS 13 cameras that are HTTPS-only; the camera's self-signed certificate is accepted.">
+        <input type="checkbox" data-k="remote_https" ${obj.remote_https ? 'checked' : ''}> Use HTTPS
+      </label>
+    </div>
+    ` : ''}
+  </div>`;
+}
+
+const REMOTE_CAPABLE_CONDITIONS  = new Set(['io_state', 'vapix_event_state', 'aoa_occupancy']);
+
+function conditionRemoteDeviceFields(c) {
+  if (!REMOTE_CAPABLE_CONDITIONS.has(c.type)) return '';
+  return remoteDeviceSection(c, 'rerenderCondition');
+}
+
+function remoteDeviceFields(a) {
+  if (!REMOTE_CAPABLE_ACTIONS.has(a.type)) return '';
+  const isRemote = a.remote_host_toggle === 'remote'
+    || (a.remote_host && a.remote_host_toggle !== 'local');
+  return `
+  <div class="form-row" style="flex-wrap:wrap;border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:4px;">
+    <div class="form-group" style="flex:0 0 160px;">
+      <label>Target Device</label>
+      <select data-k="remote_host_toggle" onchange="rerenderAction(this)">
+        <option value="local" ${!isRemote ? 'selected' : ''}>Local (this camera)</option>
+        <option value="remote" ${isRemote ? 'selected' : ''}>Remote device</option>
+      </select>
+    </div>
+    ${isRemote ? `
+    <div class="form-group" style="flex:1;min-width:120px;">
+      <label>IP / Hostname</label>
+      <input type="text" data-k="remote_host" value="${escHtml(a.remote_host || '')}" placeholder="192.168.1.100" onchange="rerenderAction(this)">
+    </div>
+    <div class="form-group" style="flex:0 0 110px;min-width:0;">
+      <label>Username</label>
+      <input type="text" data-k="remote_user" value="${escHtml(a.remote_user || '')}" placeholder="root" autocomplete="off">
+    </div>
+    <div class="form-group" style="flex:0 0 130px;min-width:0;">
+      <label>Password</label>
+      <input type="password" data-k="remote_pass" value="${escHtml(a.remote_pass || '')}" placeholder="" autocomplete="new-password">
+    </div>
+    <div class="form-group" style="flex:0 0 auto;">
+      <label>&nbsp;</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer" title="Use HTTPS to reach this device. Required for OS 13 cameras that are HTTPS-only; the camera's self-signed certificate is accepted.">
+        <input type="checkbox" data-k="remote_https" ${a.remote_https ? 'checked' : ''}> Use HTTPS
+      </label>
+    </div>
+    ` : ''}
+  </div>`;
+}
+
+/* Returns the remote-device control HTML, or null when the action targets the local device. */
+function remoteCapControl(a, rowIdx, query, dataKey, currentVal, placeholder) {
+  const isRemote = a.remote_host_toggle === 'remote'
+    || (a.remote_host && a.remote_host_toggle !== 'local');
+  if (!isRemote) return null;
+  const host = (a.remote_host || '').trim();
+  const key = `${host}:::${query}`;
+  const cached = host && (typeof remoteCapCache !== 'undefined') ? remoteCapCache[key] : null;
+  const btn = `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="${query}" onclick="loadRemoteCap('${rowIdx}','${query}')" style="white-space:nowrap;margin-left:6px" title="Fetch available options from the remote device">Load</button>`;
+  if (cached && cached.length) {
+    const isPtz = query === 'ptz';
+    const items = isPtz
+      ? cached.flatMap(c => (c.presets || []).map(n => ({ value: `${c.channel}:${n}`, label: `[Ch${c.channel}] ${n}` })))
+      : query === 'audio'
+        ? cached.map(it => ({ value: it.id || '', label: it.name || it.id || '' }))
+        : cached.map(it => ({ value: it.name || it.id || it.package || '', label: it.niceName || it.name || it.id || '' }));
+    let opts = `<option value="">— select —</option>`;
+    const matchVal = isPtz ? `${a.channel || 1}:${currentVal || ''}` : (currentVal || '');
+    for (const it of items) {
+      opts += `<option value="${escHtml(it.value)}" ${matchVal === it.value ? 'selected' : ''}>${escHtml(it.label)}</option>`;
+    }
+    if (isPtz) {
+      return `<div style="display:flex;align-items:center;gap:4px;flex:1;">
+        <select onchange="applyRemotePtzPreset(this,${rowIdx})" style="flex:1">${opts}</select>
+        <input type="hidden" data-k="preset"  value="${escHtml(currentVal || '')}">
+        <input type="hidden" data-k="channel" value="${escHtml(a.channel || 1)}">
+        ${btn}
+      </div>`;
+    }
+    return `<div style="display:flex;align-items:center;gap:4px;flex:1;"><select data-k="${dataKey}" style="flex:1">${opts}</select>${btn}</div>`;
+  }
+  return `<div style="display:flex;align-items:center;gap:4px;flex:1;"><input type="text" data-k="${dataKey}" value="${escHtml(currentVal || '')}" placeholder="${placeholder}" style="flex:1">${btn}</div>`;
+}
+
+function applyRemotePtzPreset(sel, rowIdx) {
+  const val = sel.value;
+  const colon = val.indexOf(':');
+  if (colon < 0) return;
+  const row = document.getElementById('arow-' + rowIdx);
+  if (!row) return;
+  const chInput = row.querySelector('[data-k="channel"]');
+  const presetInput = row.querySelector('[data-k="preset"]');
+  if (chInput) chInput.value = val.slice(0, colon);
+  if (presetInput) presetInput.value = val.slice(colon + 1);
+}
+
+/* TLS profile picker for HTTPS actions and conditions (profiles live in Settings) */
+function tlsProfileLabel(p) {
+  const parts = [];
+  if (p.cert) parts.push('client certificate');
+  if (p.ca) parts.push('private CA');
+  if (p.insecure) parts.push('server not verified');
+  return parts.length ? ` — ${parts.join(', ')}` : '';
+}
+
+function insecureField(a) {
+  return `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="allow_insecure" ${a.allow_insecure ? 'checked' : ''}>
+        Allow untrusted certificate (skip SSL verification)
+      </label>
+      <div class="form-hint">Enable when the server uses a self-signed or expired certificate.</div>
+    </div></div>`;
+}
+
+function tlsProfileField(cur) {
+  const list = Array.isArray(tlsProfiles) ? tlsProfiles : [];
+  const missing = cur && !list.some(p => p.name === cur);
+  return `
+    <div class="form-row"><div class="form-group">
+      <label>TLS certificates <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+      <select data-k="tls_profile">
+        <option value="">None — public CAs, no client certificate</option>
+        ${list.map(p => `<option value="${escHtml(p.name)}" ${p.name === cur ? 'selected' : ''}>${escHtml(p.name)}${escHtml(tlsProfileLabel(p))}</option>`).join('')}
+        ${missing ? `<option value="${escHtml(cur)}" selected>${escHtml(cur)} (missing — add it in Settings)</option>` : ''}
+      </select>
+      <div class="form-hint">For servers that use their own CA or require a client certificate (mutual TLS). ${list.length ? '' : 'No profiles yet: '}Add certificates in <b>Settings → TLS Certificates</b>.</div>
+    </div></div>`;
+}
+
+/* Optional overlay text colours: empty = not sent, the camera's default. */
+function overlayColorOptions(value) {
+  const opts = [['', 'Default'], ['white', 'White'], ['black', 'Black'], ['red', 'Red'],
+                ['transparent', 'Transparent'], ['semiTransparent', 'Semi-transparent']];
+  return opts.map(([v, label]) =>
+    `<option value="${v}" ${(value || '') === v ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function actionFields(a, rowIdx) {
+  const type = a.type || 'http_request';
+  const hint = getTokenInsertWidget();
+  if (type === 'http_request') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>URL</label>
+        <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="https://...">
+        ${hint}
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Method</label>
+        <select data-k="method">
+          <option value="GET"  ${(a.method||'GET')==='GET'  ? 'selected' : ''}>GET</option>
+          <option value="POST" ${a.method==='POST' ? 'selected' : ''}>POST</option>
+          <option value="PUT"  ${a.method==='PUT'  ? 'selected' : ''}>PUT</option>
+          <option value="DELETE" ${a.method==='DELETE' ? 'selected' : ''}>DELETE</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Password <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="password" data-k="password" value="${escHtml(a.password || '')}" placeholder="(unchanged)" autocomplete="new-password">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Headers (one per line, key: value)</label>
+        <textarea data-k="headers" placeholder="Content-Type: application/json">${escHtml(a.headers || '')}</textarea>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Body</label>
+        <textarea data-k="body" placeholder='{"key": "{{trigger.value}}"}'>${escHtml(a.body || '')}</textarea>
+        ${hint}
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Attach camera snapshot
+      </label>
+      <div class="form-hint">Fetches a JPEG from the camera and injects it as <b>{{trigger.snapshot_base64}}</b> — use in the body to send the image as base64.</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="attach_alpv_image" ${a.attach_alpv_image ? 'checked' : ''}>
+        Attach ALPV image
+      </label>
+      <div class="form-hint">For AXIS License Plate Verifier events: fetches the image ALPV saved for the car (plate crop, vehicle crop, 480x270 or full frame, per ALPV's <b>Save full frame</b> setting) as <b>{{trigger.alpv_image_base64}}</b>.</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="allow_insecure" ${a.allow_insecure ? 'checked' : ''}>
+        Allow untrusted certificate (skip SSL verification)
+      </label>
+      <div class="form-hint">Enable when the target URL uses a self-signed or expired certificate.</div>
+    </div></div>
+    ${tlsProfileField(a.tls_profile)}
+    ${renderOnFailureFields(a)}`;
+  if (type === 'recording') {
+    const recStart = (a.operation || 'start') === 'start';
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="start" ${recStart ? 'selected' : ''}>Start Recording</option>
+          <option value="stop"  ${!recStart ? 'selected' : ''}>Stop Recording</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Max Duration (s, 0=unlimited)</label>
+        <input type="number" data-k="duration" min="0" value="${escHtml(a.duration || 0)}">
+      </div>
+    </div>
+    ${recStart ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Stream Profile</label>
+        <input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Quality">
+        <div class="form-hint">Name of a stream profile configured on the camera. Leave blank to use Stream Options below, or the camera default.</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Stream Options (advanced)</label>
+        <input type="text" data-k="options" value="${escHtml(a.options || '')}" placeholder="resolution=1920x1080&amp;fps=15">
+        <div class="form-hint">Raw VAPIX stream options, e.g. <b>resolution=1920x1080</b>, <b>videocodec=h265</b>, or <b>fps=15</b> (combine with <b>&amp;</b>). Takes precedence over Stream Profile. If both are blank, recording defaults to <b>videocodec=h264</b> at the sensor's native resolution.</div>
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically stop when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
+  }
+  if (type === 'overlay_text' || type === 'overlay_image') {
+    const clearing = a.operation === 'clear';
+    const isImage = type === 'overlay_image';
+    const isRemote = a.remote_host_toggle === 'remote' || (a.remote_host && a.remote_host_toggle !== 'local');
+    let imageControl = '';
+    if (isImage) {
+      const cur = a.image || '';
+      if (isRemote || !Array.isArray(overlayImages) || !overlayImages.length) {
+        imageControl = `<input type="text" data-k="image" value="${escHtml(cur)}" placeholder="${overlayImages === null && !isRemote ? 'Loading images…' : 'File name or /etc/overlays/… path'}">`;
+      } else {
+        const files = overlayImages.includes(cur) || !cur ? overlayImages : [cur, ...overlayImages];
+        let opts = `<option value="">— select image —</option>`;
+        for (const f of files) {
+          opts += `<option value="${escHtml(f)}" ${cur === f ? 'selected' : ''}>${escHtml(f.replace(/^.*\//, ''))}</option>`;
+        }
+        imageControl = `<select data-k="image">${opts}</select>`;
+      }
+    }
+    return `
+    <div class="form-row" style="flex-wrap:wrap;">
+      <div class="form-group" style="flex:0 0 150px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="set"   ${!clearing ? 'selected' : ''}>Show / update</option>
+          <option value="clear" ${clearing  ? 'selected' : ''}>Clear</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 80px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}">
+      </div>
+      <div class="form-group" style="flex:1 1 200px;">
+        <label>Overlay name (optional)</label>
+        <input type="text" data-k="overlay" maxlength="63" value="${escHtml(a.overlay || '')}" placeholder="${isImage ? 'e.g. plate_alert_frame' : 'e.g. plate_alert'}">
+        <div class="form-hint">Actions with the same name and channel control the same ${isImage ? 'image ' : ''}overlay, also across rules. Leave empty to use the channel's shared ${isImage ? 'image ' : ''}overlay.</div>
+      </div>
+    </div>
+    ${clearing ? '' : `
+    <div class="form-row">
+      <div class="form-group">${isImage ? `
+        <label>Image</label>
+        ${imageControl}
+        <div class="form-hint">Upload images once in the camera's settings under <strong>Video &gt; Overlays</strong>.${isRemote ? ' For a remote device, enter the image\'s file name as shown in its overlay list.' : ''}</div>` : `
+        <label>Text</label>
+        <input type="text" data-k="text" value="${escHtml(a.text || '')}" placeholder="MOTION DETECTED at {{time}}">
+        ${hint}`}
+      </div>
+    </div>
+    <div class="form-row" style="flex-wrap:wrap;">
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Duration (s, 0=keep)</label>
+        <input type="number" data-k="duration" min="0" value="${escHtml(a.duration || 0)}" onchange="rerenderAction(this)">
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Position</label>
+        <select data-k="position" onchange="rerenderAction(this)">
+          <option value="keep"        ${a.position==='keep'        ? 'selected':''}>Keep current</option>
+          <option value="topLeft"     ${(a.position||'topLeft')==='topLeft'     ? 'selected':''}>Top Left</option>
+          <option value="topRight"    ${a.position==='topRight'    ? 'selected':''}>Top Right</option>
+          <option value="bottomLeft"  ${a.position==='bottomLeft'  ? 'selected':''}>Bottom Left</option>
+          <option value="bottomRight" ${a.position==='bottomRight' ? 'selected':''}>Bottom Right</option>
+          <option value="top"         ${a.position==='top'         ? 'selected':''}>Top Centre</option>
+          <option value="bottom"      ${a.position==='bottom'      ? 'selected':''}>Bottom Centre</option>
+          <option value="custom"      ${a.position==='custom'      ? 'selected':''}>Custom (X,Y)</option>
+        </select>
+      </div>
+      ${a.position==='custom' ? `
+      <div class="form-group" style="flex:0 0 70px;">
+        <label>X (-1..1)</label>
+        <input type="number" step="0.01" min="-1" max="1" data-k="pos_x" value="${escHtml(a.pos_x !== undefined ? a.pos_x : -0.99)}">
+      </div>
+      <div class="form-group" style="flex:0 0 70px;">
+        <label>Y (-1..1)</label>
+        <input type="number" step="0.01" min="-1" max="1" data-k="pos_y" value="${escHtml(a.pos_y !== undefined ? a.pos_y : -0.99)}">
+      </div>` : ''}
+      ${isImage ? '' : `<div class="form-group" style="flex:0 0 120px;">
+        <label>Text Colour</label>
+        <select data-k="text_color">
+          <option value="white"         ${(a.text_color||'white')==='white'         ? 'selected':''}>White</option>
+          <option value="black"         ${a.text_color==='black'         ? 'selected':''}>Black</option>
+          <option value="red"           ${a.text_color==='red'           ? 'selected':''}>Red</option>
+          <option value="transparent"   ${a.text_color==='transparent'   ? 'selected':''}>Transparent</option>
+          <option value="semiTransparent" ${a.text_color==='semiTransparent' ? 'selected':''}>Semi-transparent</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Font size</label>
+        <input type="number" data-k="font_size" min="16" max="200" value="${escHtml(a.font_size || '')}" placeholder="Default">
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Background</label>
+        <select data-k="bg_color">${overlayColorOptions(a.bg_color)}</select>
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Outline</label>
+        <select data-k="outline_color">${overlayColorOptions(a.outline_color)}</select>
+      </div>`}
+    </div>
+    ${!(parseInt(a.duration) > 0) ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically clear overlay when the triggering condition clears
+      </label>
+    </div></div>` : ''}`}`;
+  }
+  if (type === 'ptz_preset') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'ptz', 'preset', a.preset || '', 'HomePosition');
+    if (remoteCtrl) {
+      return `
+    <div class="form-row">
+      <div class="form-group"><label>Preset</label>${remoteCtrl}</div>
+    </div>`;
+    }
+    let presetControl, channelControl = '';
+    if (ptzPresets === null) {
+      presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="Loading presets…" disabled>`;
+      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}"></div>`;
+    } else if (!ptzPresets.length) {
+      presetControl = `<input type="text" data-k="preset" value="${escHtml(a.preset || '')}" placeholder="HomePosition">`;
+      channelControl = `<div class="form-group" style="flex:0 0 100px;"><label>Channel</label><input type="number" data-k="channel" min="1" value="${escHtml(a.channel || 1)}"></div>`;
+    } else {
+      let opts = `<option value=":">— select preset —</option>`;
+      for (const ch of ptzPresets) {
+        opts += `<optgroup label="Camera ${escHtml(ch.channel)}">`;
+        for (const name of ch.presets) {
+          const sel = (a.preset === name && (parseInt(a.channel) || 1) === ch.channel) ? 'selected' : '';
+          opts += `<option value="${escHtml(ch.channel)}:${escHtml(name)}" ${sel}>${escHtml(name)}</option>`;
+        }
+        opts += `</optgroup>`;
+      }
+      presetControl = `<select data-k="ptz_combined" onchange="applyPtzPreset(this)">${opts}</select>
+        <input type="hidden" data-k="preset"  value="${escHtml(a.preset || '')}">
+        <input type="hidden" data-k="channel" value="${escHtml(a.channel || 1)}">`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group"><label>Preset</label>${presetControl}</div>
+      ${channelControl}
+    </div>`;
+  }
+  if (type === 'io_output') {
+    const ioDur = parseInt(a.duration) || 0;
+    const states = ioOutputStates(a);
+    const isRemote = a.remote_host_toggle === 'remote' || (a.remote_host && a.remote_host_toggle !== 'local');
+    const known = !isRemote && Array.isArray(ioOutputs) && ioOutputs.length;
+    const ports = known ? ioOutputs.map(o => ({ port: o.port, name: o.name })) : [1, 2, 3, 4].map(p => ({ port: p, name: '' }));
+    Object.keys(states).forEach(p => { if (!ports.some(o => o.port === +p)) ports.push({ port: +p, name: '' }); });
+    ports.sort((x, y) => x.port - y.port);
+    const cells = ports.map(o => {
+      const st = states[o.port] || '';
+      return `
+      <div class="form-group" style="flex:0 0 150px;">
+        <label>Port ${o.port}${o.name ? ' · ' + escHtml(o.name) : ''}</label>
+        <select data-k="io_p${o.port}">
+          <option value=""         ${st === ''         ? 'selected' : ''}>Leave as is</option>
+          <option value="active"   ${st === 'active'   ? 'selected' : ''}>On (active)</option>
+          <option value="inactive" ${st === 'inactive' ? 'selected' : ''}>Off (inactive)</option>
+        </select>
+      </div>`;
+    }).join('');
+    return `
+    <div class="form-row" style="flex-wrap:wrap;">${cells}</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Duration (s, 0=permanent)</label>
+        <input type="number" data-k="duration" min="0" value="${ioDur}" onchange="rerenderAction(this)">
+      </div>
+      <div class="form-group">
+        <div class="form-hint" style="margin-top:22px;">All selected ports are switched together in one request. With a duration, they return to how they were before.</div>
+      </div>
+    </div>
+    ${ioDur === 0 ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically reset the ports when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
+  }
+  if (type === 'io_flash') {
+    const portsStr = Array.isArray(a.ports) ? a.ports.join(', ') : (a.ports_str ?? a.ports ?? '');
+    const mode = a.mode === 'together' ? 'together' : 'sequence';
+    const stop = ['count', 'time', 'disabled'].includes(a.stop) ? a.stop : 'count';
+    const isRemote = a.remote_host_toggle === 'remote' || (a.remote_host && a.remote_host_toggle !== 'local');
+    let outputsHint = '';
+    if (!isRemote && Array.isArray(ioOutputs)) {
+      outputsHint = ioOutputs.length
+        ? 'Outputs on this device (click to add): ' + ioOutputs.map(o =>
+            `<a href="#" onclick="ioFlashAddPort(this, ${o.port});return false;">${o.port}${o.name ? ' ' + escHtml(o.name) : ''}</a>`
+          ).join(' · ')
+        : 'No ports on this device are configured as outputs.';
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Output ports (in flash order)</label>
+        <input type="text" data-k="ports_str" value="${escHtml(portsStr)}" placeholder="e.g. 1, 3">
+        <div class="form-hint">${outputsHint || 'Comma-separated port numbers, up to 8.'}</div>
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Pattern</label>
+        <select data-k="mode">
+          <option value="sequence" ${mode==='sequence' ? 'selected' : ''}>One after another</option>
+          <option value="together" ${mode==='together' ? 'selected' : ''}>All together</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 110px;">
+        <label>On time (ms)</label>
+        <input type="number" data-k="on_ms" min="100" max="60000" value="${escHtml(a.on_ms ?? 500)}">
+      </div>
+      <div class="form-group" style="flex:0 0 110px;">
+        <label>Gap (ms)</label>
+        <input type="number" data-k="off_ms" min="0" max="60000" value="${escHtml(a.off_ms ?? '')}" placeholder="auto">
+      </div>
+      <div class="form-group" style="flex:0 0 190px;">
+        <label>Stop after</label>
+        <select data-k="stop" onchange="rerenderAction(this)">
+          <option value="count"    ${stop==='count'    ? 'selected' : ''}>Number of flashes</option>
+          <option value="time"     ${stop==='time'     ? 'selected' : ''}>Time</option>
+          <option value="disabled" ${stop==='disabled' ? 'selected' : ''}>Until rule is disabled</option>
+        </select>
+      </div>
+      ${stop === 'count' ? `
+      <div class="form-group" style="flex:0 0 90px;">
+        <label>Flashes</label>
+        <input type="number" data-k="count" min="1" max="100000" value="${escHtml(a.count ?? 10)}">
+      </div>` : ''}
+      ${stop === 'time' ? `
+      <div class="form-group" style="flex:0 0 90px;">
+        <label>Seconds</label>
+        <input type="number" data-k="duration" min="1" max="86400" value="${escHtml(a.duration ?? 60)}">
+      </div>` : ''}
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Stop early when the triggering condition clears
+      </label>
+      <div class="form-hint">Gap is the off time between flashes; blank = none for one-after-another, same as the on time for all-together. One flash = every listed port once. Ports are always left off when flashing stops. Disabling, editing or deleting the rule stops it, and so does an I/O Output action on one of its ports.</div>
+    </div></div>`;
+  }
+  if (type === 'audio_clip') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'audio', 'clip_name', a.clip_name || '', 'Clip name or ID');
+    let clipControl;
+    if (remoteCtrl) {
+      clipControl = remoteCtrl;
+    } else if (audioClips === null) {
+      clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Loading clips…" disabled>`;
+    } else if (!audioClips.length) {
+      clipControl = `<input type="text" data-k="clip_name" value="${escHtml(a.clip_name || '')}" placeholder="Clip ID (e.g. 36)">`;
+    } else {
+      let opts = `<option value="">— select clip —</option>`;
+      for (const c of audioClips) {
+        const sel = a.clip_name === c.id ? 'selected' : '';
+        opts += `<option value="${escHtml(c.id)}" ${sel}>${escHtml(c.name)}</option>`;
+      }
+      clipControl = `<select data-k="clip_name">${opts}</select>`;
+    }
+    const loopCount = parseInt(a.loop_count) || 1;
+    const isLooping = loopCount === 0;
+    return `
+    <div class="form-row">
+      <div class="form-group"><label>Audio Clip</label>${clipControl}</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Volume (%)</label>
+        <input type="number" data-k="volume" min="0" max="100" value="${escHtml(a.volume !== undefined ? a.volume : '')}" placeholder="default">
+        <div class="form-hint">Leave empty for device default</div>
+      </div>
+      <div class="form-group" style="flex:0 0 150px;">
+        <label>Loop count</label>
+        <input type="number" data-k="loop_count" min="0" value="${loopCount}" onchange="rerenderAction(this)">
+        <div class="form-hint">0 = loop until trigger clears</div>
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" min="1" value="${escHtml(a.channel || '')}" placeholder="default">
+        <div class="form-hint">Leave empty for default</div>
+      </div>
+    </div>
+    ${isLooping ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically stop the clip when the triggering condition clears
+      </label>
+    </div></div>` : ''}`;
+  }
+  if (type === 'siren_light') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'siren', 'profile', a.profile || '', 'Profile name (e.g. Green)');
+    let profileControl;
+    if (remoteCtrl) {
+      profileControl = remoteCtrl;
+    } else if (sirenProfiles === null) {
+      profileControl = `<input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Loading profiles..." disabled>`;
+    } else if (!sirenProfiles.length) {
+      profileControl = `<input type="text" data-k="profile" value="${escHtml(a.profile || '')}" placeholder="Profile name (e.g. Green)">`;
+    } else {
+      let opts = `<option value="">— select profile —</option>`;
+      for (const p of sirenProfiles) {
+        const sel = a.profile === p.name ? 'selected' : '';
+        opts += `<option value="${escHtml(p.name)}" ${sel}>${escHtml(p.label)}</option>`;
+      }
+      profileControl = `<select data-k="profile">${opts}</select>`;
+    }
+    const isStart = (a.signal_action || 'start') === 'start';
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Action</label>
+        <select data-k="signal_action" onchange="rerenderAction(this)">
+          <option value="start" ${isStart ? 'selected':''}>Start</option>
+          <option value="stop"  ${!isStart ? 'selected':''}>Stop</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Profile</label>${profileControl}
+        <div class="form-hint">Profile names are configured in the ${a.remote_host ? 'remote device' : "camera's"} Siren and Light settings.</div>
+      </div>
+    </div>
+    ${isStart ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+          Run while active - automatically stop when the triggering condition clears
+        </label>
+      </div>
+    </div>` : ''}`;
+  }
+  if (type === 'send_syslog') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Message</label>
+        <input type="text" data-k="message" value="${escHtml(a.message || '')}" placeholder="Event fired at {{timestamp}}">
+        ${hint}
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Level</label>
+        <select data-k="level">
+          <option value="info"    ${(a.level||'info')==='info'    ? 'selected' : ''}>Info</option>
+          <option value="warning" ${a.level==='warning' ? 'selected' : ''}>Warning</option>
+          <option value="error"   ${a.level==='error'   ? 'selected' : ''}>Error</option>
+        </select>
+      </div>
+    </div>`;
+  if (type === 'vapix_query') {
+    /* Topics arrive as {ns:val} objects (saved JSON) or flat topicN_ns/_val (after collectRows). */
+    const ns  = k => a[`${k}_ns`]  !== undefined ? a[`${k}_ns`]
+                   : (a[k] ? Object.keys(a[k])[0]   || '' : '');
+    const val = k => a[`${k}_val`] !== undefined ? a[`${k}_val`]
+                   : (a[k] ? Object.values(a[k])[0] || '' : '');
+    const hiddenTopics = ['topic0','topic1','topic2','topic3'].map(k =>
+      `<input type="hidden" data-k="${k}_ns" value="${escHtml(ns(k))}">` +
+      `<input type="hidden" data-k="${k}_val" value="${escHtml(val(k))}">`
+    ).join('');
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const host = (a.remote_host || '').trim();
+    const cmp = (x, y) => {
+      if (!x && !y) return true; if (!x || !y) return false;
+      const ak = Object.keys(x)[0], bk = Object.keys(y)[0];
+      return ak === bk && x[ak] === y[bk];
+    };
+    const topicKeys = ['topic0','topic1','topic2','topic3'];
+    const getTopic = k => {
+      if (a[k] && typeof a[k] === 'object') return a[k];
+      const v = val(k); return v ? { [ns(k)]: v } : null;
+    };
+    let eventDropdown;
+    if (isRemote) {
+      const cacheKey = `${host}:::vapix_events_catalog`;
+      const cached = host && (typeof remoteCapCache !== 'undefined') ? remoteCapCache[cacheKey] : null;
+      if (cached && cached.length) {
+        const matchIdx = cached.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))));
+        eventDropdown = `
+        <select onchange="applyRemoteVapixEventAction(this, ${escJsArg(host)})">
+          <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
+          ${cached.map((ev, i) =>
+            `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
+          ).join('')}
+        </select>`;
+      } else {
+        const t0 = getTopic('topic0'), t1 = getTopic('topic1'), t2 = getTopic('topic2'), t3 = getTopic('topic3');
+        eventDropdown = `
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="text" value="${escHtml(t0 ? vapixCatalogTopicPath({topics:{topic0:t0,topic1:t1,topic2:t2,topic3:t3}}) : '')}" placeholder="Enter IP and click Load Events" readonly style="flex:1;opacity:.7;">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="loadRemoteActionVapixEvents('${rowIdx}')" style="white-space:nowrap">Load Events</button>
+        </div>`;
+      }
+    } else {
+      const matchIdx = vapixEventCatalog
+        ? vapixEventCatalog.findIndex(ev => topicKeys.every(k => cmp(ev.topics[k], getTopic(k))))
+        : -1;
+      eventDropdown = `
+        <select onchange="applyVapixEventAction(this)">
+          <option value="-1" disabled ${matchIdx < 0 ? 'selected':''}>— Select a device event —</option>
+          ${(vapixEventCatalog || []).map((ev, i) =>
+            `<option value="${i}" ${i===matchIdx?'selected':''}>${escHtml(ev.label)}</option>`
+          ).join('')}
+        </select>`;
+    }
+    return `${hiddenTopics}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Device Event to Query</label>
+        ${eventDropdown}
+        <div class="form-hint">Fetches the latest data from this event and injects it as <code>{{trigger.FIELD}}</code> tokens for all subsequent actions in this rule.${isRemote ? ' When targeting a remote device, click <strong>Load Events</strong> to browse available events.' : ' Useful with a Schedule trigger to poll current sensor values on demand.'}</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'fire_vapix_event') {
+    const events = Array.isArray(acapEvents) ? acapEvents : [];
+    const selId = a.event_id || '';
+    const selEvent = selId ? events.find(e => e.id === selId) || null : null;
+    const isStateful = selEvent ? !!selEvent.state : false;
+    const evFields = selEvent && Array.isArray(selEvent.data) ? selEvent.data.filter(f => f && f.name) : [];
+    const evFieldVal = n => a['evd_' + n] !== undefined ? a['evd_' + n]
+      : (a.data && a.data[n] !== undefined ? a.data[n] : '');
+    const isAdding = a._adding === 'true';
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Event</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select data-k="event_id" onchange="rerenderAction(this)" style="flex:1;">
+            ${events.length === 0 ? '<option value="">— No events declared —</option>' : `<option value="" disabled ${selId ? '' : 'selected'}>— Select an event —</option>`}
+            ${events.map(e => `<option value="${escHtml(e.id)}" ${e.id === selId ? 'selected' : ''}>${escHtml(e.name || e.id)}${e.state ? ' (stateful)' : ''}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventStartAdd(this)" title="Create a new custom ACAP event">＋ New</button>
+        </div>
+        ${selEvent ? `<div class="form-hint">${escHtml(selEvent.name || selEvent.id)} · ${selEvent.system ? 'System event' : 'Custom event'} · ${selEvent.state ? 'Stateful (High/Low)' : 'Stateless (pulse)'}${evFields.length ? ' · ' + evFields.map(f => `${escHtml(f.name)} (${escHtml(String(f.type).toLowerCase())})`).join(', ') : ''}</div>` : '<div class="form-hint">No events available — use ＋ New to create one.</div>'}
+        ${selEvent && !selEvent.system ? `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;color:var(--danger,#e05252);" onclick="acapEventDelete(${escJsArg(selId)})">Remove Event</button>` : ''}
+      </div>
+    </div>
+    ${isStateful ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>State</label>
+        <select data-k="state">
+          <option value="true"  ${a.state === true || a.state === 'true'  ? 'selected' : ''}>High (on)</option>
+          <option value="false" ${a.state === false || a.state === 'false' ? 'selected' : ''}>Low (off)</option>
+        </select>
+      </div>
+    </div>` : ''}
+    ${evFields.length ? `
+    <div class="form-row" style="flex-wrap:wrap;">
+      ${evFields.map(f => `
+      <div class="form-group" style="min-width:160px;">
+        <label>${escHtml(f.name)} <span style="color:var(--text-muted);font-weight:400;">(${escHtml(String(f.type).toLowerCase())})</span></label>
+        <input type="text" data-k="evd_${escHtml(f.name)}" value="${escHtml(evFieldVal(f.name))}" placeholder="{{trigger.${escHtml(f.name)}}}" autocomplete="off">
+      </div>`).join('')}
+    </div>
+    <div class="form-hint">Text or templates such as <code>{{trigger.KEY}}</code>, <code>{{trigger.payload}}</code> or <code>{{var.NAME}}</code>; the result is sent as the field's type. Empty sends "" / 0 / false.</div>` : ''}
+    ${isAdding ? `
+    <div class="form-row" style="background:var(--bg-2,#1e2230);border-radius:6px;padding:12px;gap:8px;flex-wrap:wrap;">
+      <div class="form-group" style="min-width:140px;">
+        <label>Event ID</label>
+        <input type="text" data-k="_new_id" value="${escHtml(a._new_id || '')}" placeholder="e.g. DoorOpenAlert" autocomplete="off">
+        <div class="form-hint">Letters, digits and underscores only.</div>
+      </div>
+      <div class="form-group" style="min-width:160px;">
+        <label>Display Name</label>
+        <input type="text" data-k="_new_name" value="${escHtml(a._new_name !== undefined ? a._new_name : 'Event Engine: ')}" placeholder="e.g. Event Engine: Door Open" autocomplete="off">
+      </div>
+      <div class="form-group" style="min-width:200px;">
+        <label>Data fields <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="_new_fields" value="${escHtml(a._new_fields || '')}" placeholder="e.g. plate:string, count:int" autocomplete="off">
+        <div class="form-hint">name:type, comma-separated; types string, int, double, bool.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Type</label>
+        <select data-k="_new_stateful">
+          <option value=""     ${!a._new_stateful ? 'selected' : ''}>Stateless (pulse)</option>
+          <option value="true" ${a._new_stateful === 'true' ? 'selected' : ''}>Stateful (High/Low)</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;align-self:flex-end;display:flex;gap:6px;">
+        <button type="button" class="btn btn-primary btn-sm" onclick="acapEventSaveNew(this)">Create</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="acapEventCancelAdd(this)">Cancel</button>
+      </div>
+    </div>` : ''}
+    <div class="form-hint" style="margin-top:4px;">ACAP events appear in the camera's built-in Action Rules and are visible to other ACAP applications on this device.</div>`
+  }
+  if (type === 'delay') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Wait (seconds)</label>
+        <input type="number" data-k="seconds" min="1" value="${escHtml(a.seconds || 5)}">
+        <div class="form-hint">Actions after this row execute after the delay</div>
+      </div>
+    </div>`;
+  if (type === 'set_variable') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Variable Name</label>
+        <input type="text" data-k="name" value="${escHtml(a.name || '')}" placeholder="my_var">
+      </div>
+      <div class="form-group">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(a.value || '')}" placeholder="{{trigger.data}}">
+        ${hint}
+      </div>
+    </div>`;
+  if (type === 'increment_counter') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Counter Name</label>
+        <input type="text" data-k="name" value="${escHtml(a.name || '')}" placeholder="my_counter">
+      </div>
+      <div class="form-group">
+        <label>Operation</label>
+        <select data-k="operation">
+          <option value="increment" ${(a.operation||'increment')==='increment' ? 'selected' : ''}>Increment</option>
+          <option value="decrement" ${a.operation==='decrement' ? 'selected' : ''}>Decrement</option>
+          <option value="reset"     ${a.operation==='reset'     ? 'selected' : ''}>Reset to 0</option>
+          <option value="set"       ${a.operation==='set'       ? 'selected' : ''}>Set to value</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Delta / Value</label>
+        <input type="number" data-k="delta" value="${escHtml(a.delta !== undefined ? a.delta : 1)}">
+      </div>
+    </div>`;
+  if (type === 'sparkplug_publish') {
+    const lines = Array.isArray(a.metrics)
+      ? a.metrics.map(m => `${m.name || ''}=${m.value || ''}`).join('\n')
+      : (a.metric_lines || '');
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Metrics</label>
+        <textarea data-k="metric_lines" rows="4" placeholder="Speaker/Motion={{trigger.active}}">${escHtml(lines)}</textarea>
+        <div class="form-hint">One <code>MetricName=value</code> per line. Names must already be declared in
+        <strong>Settings &rarr; Sparkplug B</strong>, otherwise they are missing from the birth
+        certificate and will be rejected. Values are template-aware.</div>
+        ${hint}
+      </div>
+    </div>`;
+  }
+  if (type === 'mqtt_publish') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Topic</label>
+        <input type="text" data-k="topic" value="${escHtml(a.topic || '')}" placeholder="home/alerts/motion">
+        ${hint}
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Payload</label>
+        <textarea data-k="payload" placeholder='{"camera":"{{camera.serial}}","time":"{{timestamp}}"}'>${escHtml(a.payload || '')}</textarea>
+        ${hint}
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>QoS</label>
+        <select data-k="qos">
+          <option value="0" ${(a.qos === 0 || a.qos === undefined) ? 'selected':''}>0 – At most once</option>
+          <option value="1" ${a.qos === 1 ? 'selected':''}>1 – At least once</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Retain</label>
+        <select data-k="retain">
+          <option value="false" ${!a.retain ? 'selected':''}>No</option>
+          <option value="true"  ${ a.retain ? 'selected':''}>Yes</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 220px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
+          <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+          Include snapshot as {{trigger.snapshot_base64}}
+        </label>
+      </div>
+    </div>
+    ${renderOnFailureFields(a, 'Executed when the broker is unreachable or the connection is broken. Does not fire on QoS\u00a01 delivery timeout.')}`;
+  if (type === 'slack_webhook') return `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://hooks.slack.com/services/...">
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Message</label>
+      <textarea data-k="message" placeholder="Motion detected on {{camera.name}} at {{timestamp}}">${escHtml(a.message || '')}</textarea>
+      ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Include snapshot as {{trigger.snapshot_base64}}
+      </label>
+    </div></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Channel <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
+        <input type="text" data-k="channel" value="${escHtml(a.channel || '')}" placeholder="#alerts">
+      </div>
+      <div class="form-group">
+        <label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}" placeholder="Camera Bot">
+      </div>
+    </div>`;
+  if (type === 'teams_webhook') return `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://...webhook.office.com/...">
+      <div class="form-hint">Use a Power Automate / Workflows incoming webhook connector</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Title <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+      <input type="text" data-k="title" value="${escHtml(a.title || '')}" placeholder="Alert from {{camera.name}}">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Message</label>
+      <textarea data-k="message" placeholder="Motion detected at {{timestamp}}">${escHtml(a.message || '')}</textarea>
+      ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Include snapshot as {{trigger.snapshot_base64}}
+      </label>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Theme Colour <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input type="color" value="#${escHtml(a.theme_color || 'FF0000')}"
+          oninput="this.nextElementSibling.value=this.value.slice(1)"
+          style="width:36px;height:32px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:none;">
+        <input type="text" data-k="theme_color" value="${escHtml(a.theme_color || '')}" placeholder="FF0000" maxlength="6" style="width:80px;"
+          oninput="if(/^[0-9a-fA-F]{6}$/.test(this.value))this.previousElementSibling.value='#'+this.value">
+      </div>
+    </div></div>`;
+  if (type === 'influxdb_write') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>InfluxDB URL</label>
+        <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="http://influxdb:8086">
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Version</label>
+        <select data-k="version">
+          <option value="v2" ${(a.version||'v2')==='v2' ? 'selected' : ''}>v2</option>
+          <option value="v1" ${a.version==='v1' ? 'selected' : ''}>v1</option>
+        </select>
+      </div>
+    </div>
+    ${(a.version||'v2') === 'v1' ? `
+    <div class="form-row">
+      <div class="form-group"><label>Database</label>
+        <input type="text" data-k="database" value="${escHtml(a.database || '')}">
+      </div>
+      <div class="form-group"><label>Username <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}">
+      </div>
+      <div class="form-group"><label>Password <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="password" data-k="token" value="${escHtml(a.token || '')}" autocomplete="new-password">
+      </div>
+    </div>` : `
+    <div class="form-row">
+      <div class="form-group"><label>Organization</label>
+        <input type="text" data-k="org" value="${escHtml(a.org || '')}">
+      </div>
+      <div class="form-group"><label>Bucket</label>
+        <input type="text" data-k="bucket" value="${escHtml(a.bucket || '')}">
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>API Token</label>
+      <input type="password" data-k="token" value="${escHtml(a.token || '')}" autocomplete="new-password">
+    </div></div>`}
+    <div class="form-row"><div class="form-group">
+      <label>Measurement</label>
+      <input type="text" data-k="measurement" value="${escHtml(a.measurement || '')}" placeholder="camera_events">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Tags <span style="color:var(--text-muted);font-weight:400;">(optional, comma-separated key=value)</span></label>
+      <input type="text" data-k="tags" value="${escHtml(a.tags || '')}" placeholder="camera={{camera.serial}},location=entrance">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Fields <span style="color:var(--text-muted);font-weight:400;">(comma-separated key=value)</span></label>
+      <input type="text" data-k="fields" value="${escHtml(a.fields || '')}" placeholder="co2={{trigger.CO2}},temperature={{trigger.Temperature}}">
+      ${hint}
+      <div class="form-hint">Numeric values sent as-is. Wrap strings in double quotes: <code>name="{{trigger.name}}"</code></div>
+    </div></div>
+    ${insecureField(a)}
+    ${tlsProfileField(a.tls_profile)}`;
+  if (type === 'telegram') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Bot Token</label>
+        <input type="password" data-k="bot_token" value="${escHtml(a.bot_token || '')}" placeholder="123456:ABC-DEF..." autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Chat ID</label>
+        <input type="text" data-k="chat_id" value="${escHtml(a.chat_id || '')}" placeholder="-1001234567890">
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>Message</label>
+      <textarea data-k="message" placeholder="Motion detected on {{camera.name}} at {{timestamp}}">${escHtml(a.message || '')}</textarea>
+      ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Send camera snapshot as photo attachment
+      </label>
+      <div class="form-hint">Uses Telegram <code>sendPhoto</code> when enabled. Also exposes <b>{{trigger.snapshot_base64}}</b> in templates.</div>
+    </div></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Parse Mode</label>
+        <select data-k="parse_mode">
+          <option value=""         ${!a.parse_mode ? 'selected' : ''}>Plain text</option>
+          <option value="Markdown" ${a.parse_mode==='Markdown' ? 'selected' : ''}>Markdown</option>
+          <option value="HTML"     ${a.parse_mode==='HTML'     ? 'selected' : ''}>HTML</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Disable Link Preview</label>
+        <input type="checkbox" data-k="disable_preview" ${a.disable_preview ? 'checked' : ''}>
+      </div>
+    </div>`;
+  if (type === 'email') return `
+    <div class="form-row"><div class="form-group">
+      <label>To</label>
+      <input type="text" data-k="to" value="${escHtml(a.to || '')}" placeholder="alerts@example.com">
+      <div class="form-hint">Comma-separated for multiple recipients. SMTP server is configured in the Settings tab.</div>
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Subject</label>
+      <input type="text" data-k="subject" value="${escHtml(a.subject || '')}" placeholder="Alert from {{camera.name}}">
+      ${hint}
+    </div></div>
+    <div class="form-row"><div class="form-group">
+      <label>Body</label>
+      <textarea data-k="body" placeholder="Motion detected at {{timestamp}}&#10;Camera: {{camera.serial}}">${escHtml(a.body || '')}</textarea>
+      ${hint}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:8px;">
+        <input type="checkbox" data-k="attach_snapshot" ${a.attach_snapshot ? 'checked' : ''}>
+        Attach camera snapshot (JPEG)
+      </label>
+      <div class="form-hint">Adds a <b>snapshot.jpg</b> attachment to the email and exposes <b>{{trigger.snapshot_base64}}</b> for template use.</div>
+    </div></div>`;
+  if (type === 'ftp_upload') return `
+    <div class="form-row"><div class="form-group">
+      <label>FTP URL</label>
+      <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="ftp://server/cameras/{{camera.serial}}/{{date}}_{{time}}.jpg">
+      ${hint}
+      <div class="form-hint">Supports FTP, FTPS and SFTP. Directories are created automatically. Use <code>sftp://</code> for SFTP, <code>ftps://</code> for implicit FTPS (port 990).</div>
+    </div></div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" data-k="password" value="${escHtml(a.password || '')}" autocomplete="new-password">
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="use_tls" ${a.use_tls ? 'checked' : ''}>
+        Use TLS (FTPS)
+      </label>
+      <div class="form-hint">Encrypts an <code>ftp://</code> connection (explicit FTPS, AUTH TLS) and fails if the server doesn't support it. Not needed for <code>ftps://</code>; doesn't apply to <code>sftp://</code>, which uses SSH.</div>
+    </div></div>
+    ${insecureField(a)}
+    ${tlsProfileField(a.tls_profile)}`;
+  if (type === 'digest') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Deliver via</label>
+        <select data-k="deliver_via" onchange="rerenderAction(this)">
+          <option value="slack"    ${(a.deliver_via||'slack')==='slack'    ? 'selected' : ''}>Slack</option>
+          <option value="teams"    ${a.deliver_via==='teams'    ? 'selected' : ''}>Teams</option>
+          <option value="telegram" ${a.deliver_via==='telegram' ? 'selected' : ''}>Telegram</option>
+          <option value="email"    ${a.deliver_via==='email'    ? 'selected' : ''}>Email</option>
+          <option value="mqtt"     ${a.deliver_via==='mqtt'     ? 'selected' : ''}>MQTT</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Flush every</label>
+        <input type="number" data-k="interval" value="${escHtml(a.interval || 300)}" min="30" step="30"> <span style="color:var(--text-muted);">sec</span>
+      </div>
+    </div>
+    ${(a.deliver_via||'slack') === 'slack' ? `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://hooks.slack.com/services/...">
+    </div></div>` : ''}
+    ${a.deliver_via === 'teams' ? `
+    <div class="form-row"><div class="form-group">
+      <label>Webhook URL</label>
+      <input type="text" data-k="webhook_url" value="${escHtml(a.webhook_url || '')}" placeholder="https://...webhook.office.com/...">
+    </div></div>` : ''}
+    ${a.deliver_via === 'telegram' ? `
+    <div class="form-row">
+      <div class="form-group"><label>Bot Token</label>
+        <input type="password" data-k="bot_token" value="${escHtml(a.bot_token || '')}" autocomplete="new-password">
+      </div>
+      <div class="form-group"><label>Chat ID</label>
+        <input type="text" data-k="chat_id" value="${escHtml(a.chat_id || '')}">
+      </div>
+    </div>` : ''}
+    ${a.deliver_via === 'email' ? `
+    <div class="form-row">
+      <div class="form-group"><label>To</label><input type="text" data-k="to" value="${escHtml(a.to || '')}" placeholder="alerts@example.com">
+        <div class="form-hint">SMTP server configured in the Settings tab</div>
+      </div>
+    </div>
+    <div class="form-row"><div class="form-group">
+      <label>Subject</label>
+      <input type="text" data-k="subject" value="${escHtml(a.subject || '')}" placeholder="Digest from {{camera.name}}">
+    </div></div>` : ''}
+    ${a.deliver_via === 'mqtt' ? `
+    <div class="form-row"><div class="form-group">
+      <label>Topic</label>
+      <input type="text" data-k="topic" value="${escHtml(a.topic || '')}" placeholder="cameras/{{camera.serial}}/digest">
+    </div></div>` : ''}
+    <div class="form-row"><div class="form-group">
+      <label>Line Template <span style="color:var(--text-muted);font-weight:400;">(per event)</span></label>
+      <input type="text" data-k="line" value="${escHtml(a.line || '')}" placeholder="{{timestamp}} — {{trigger_json}}">
+      ${hint}
+      <div class="form-hint">Each event adds one line. All lines are combined and sent as a single message at the flush interval.</div>
+    </div></div>`;
+  if (type === 'run_rule') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Target Rule</label>
+        <select data-k="rule_id">
+          <option value="">Select a rule...</option>
+          ${allRules.map(r => `<option value="${escHtml(r.id)}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+        </select>
+      </div>
+    </div>`;
+  if (type === 'set_rule_enabled') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Target Rule</label>
+        <select data-k="rule_id">
+          <option value="">Select a rule...</option>
+          ${allRules.map(r => `<option value="${escHtml(r.id)}" ${a.rule_id === r.id ? 'selected' : ''}>${escHtml(r.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Action</label>
+        <select data-k="enabled">
+          <option value="true"  ${a.enabled !== false ? 'selected' : ''}>Enable</option>
+          <option value="false" ${a.enabled === false  ? 'selected' : ''}>Disable</option>
+        </select>
+      </div>
+    </div>`;
+  if (type === 'guard_tour') {
+    const isStart = (a.operation || 'start') === 'start';
+    let tourControl = '';
+    if (isStart) {
+      const remoteCtrl = remoteCapControl(a, rowIdx, 'guardtour', 'tour_id', a.tour_id || '', 'e.g. Guard Tour 1');
+      if (remoteCtrl) {
+        tourControl = remoteCtrl;
+      } else if (guardTours === null) {
+        tourControl = `<input type="text" data-k="tour_id" value="${escHtml(a.tour_id || '')}" placeholder="Loading tours…" disabled>`;
+      } else if (!guardTours.length) {
+        tourControl = `<input type="text" data-k="tour_id" value="${escHtml(a.tour_id || '')}" placeholder="e.g. Guard Tour 1">`;
+      } else {
+        let opts = `<option value="">— select tour —</option>`;
+        for (const gt of guardTours) {
+          const sel = a.tour_id === gt.name ? 'selected' : '';
+          opts += `<option value="${escHtml(gt.name)}" ${sel}>${escHtml(gt.name)}</option>`;
+        }
+        tourControl = `<select data-k="tour_id">${opts}</select>`;
+      }
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="start" ${isStart  ? 'selected':''}>Start</option>
+          <option value="stop"  ${!isStart ? 'selected':''}>Stop</option>
+        </select>
+      </div>
+      ${isStart ? `
+      <div class="form-group">
+        <label>Guard Tour</label>${tourControl}
+      </div>` : ''}
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
+      </div>
+    </div>`;
+  }
+  if (type === 'set_device_param') {
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const paramListId = `param-list-${Math.random().toString(36).slice(2)}`;
+    const valListId   = `val-list-${Math.random().toString(36).slice(2)}`;
+    const remoteHost  = (a.remote_host || '').trim();
+    const cachedAllParams = isRemote && remoteHost && (typeof remoteCapCache !== 'undefined')
+      ? remoteCapCache[`${remoteHost}:::allparams`] : null;
+    let paramDl = '';
+    let listAttr = '';
+    if (!isRemote && deviceParams && deviceParams.length) {
+      paramDl   = `<datalist id="${paramListId}">${deviceParams.map(p => `<option value="${escHtml(p)}">`).join('')}</datalist>`;
+      listAttr  = `list="${paramListId}"`;
+    } else if (cachedAllParams && cachedAllParams.length) {
+      paramDl   = `<datalist id="${paramListId}">${cachedAllParams.map(p => `<option value="${escHtml(p.name || '')}">`).join('')}</datalist>`;
+      listAttr  = `list="${paramListId}"`;
+    }
+    const placeholder = 'e.g. root.ImageSource.I0.Sensor.Sharpness';
+    const hintText = isRemote
+      ? 'The <code>root.</code> prefix is added automatically if omitted. Tab out to look up the current value and allowed values on the remote device.'
+      : 'The <code>root.</code> prefix is added automatically if omitted. Tab out of this field to look up allowed values.';
+    return `${paramDl}<datalist class="param-val-list" id="${valListId}"></datalist>
+    <div class="form-row">
+      <div class="form-group" style="width:100%">
+        <div style="background:rgba(255,160,0,0.12);border:1px solid rgba(255,160,0,0.5);border-radius:6px;padding:8px 12px;font-size:12px;">
+          <strong>For expert users only.</strong> Only change these settings if you know what you are doing — incorrect values can disrupt camera operation.
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Parameter</label>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <input type="text" data-k="parameter" value="${escHtml(a.parameter || '')}" placeholder="${placeholder}" ${listAttr} ${!isRemote && deviceParams === null ? 'disabled' : ''}
+                 onblur="fetchParamValues(this)" style="flex:1">
+          ${isRemote
+            ? `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="allparams" onclick="loadRemoteCap('${rowIdx}','allparams')" style="white-space:nowrap" title="Load all parameter names from the remote device">Load</button>`
+            : ''}
+          <button type="button" class="btn btn-ghost btn-sm" style="white-space:nowrap"
+                  onclick="fetchParamValues(this.closest('.form-group').querySelector('[data-k=parameter]'))"
+                  title="Look up current value and allowed values for the typed parameter">Look up</button>
+        </div>
+        <div class="form-hint">${hintText}</div>
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(a.value || '')}" list="${valListId}">
+        <div class="form-hint param-val-hint">${a.parameter ? 'Tab or click Look up to see allowed values.' : ''}</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'snapshot_upload') return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>URL</label>
+        <input type="text" data-k="url" value="${escHtml(a.url || '')}" placeholder="https://example.com/upload">
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Method</label>
+        <select data-k="method">
+          <option value="POST" ${(a.method||'POST')==='POST' ? 'selected':''}>POST</option>
+          <option value="PUT"  ${a.method==='PUT'           ? 'selected':''}>PUT</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 80px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Username</label>
+        <input type="text" data-k="username" value="${escHtml(a.username || '')}">
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Password</label>
+        <input type="password" data-k="password" value="${escHtml(a.password || '')}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Extra Headers</label>
+        <textarea data-k="headers" rows="2" placeholder="X-Token: abc123">${escHtml(a.headers || '')}</textarea>
+      </div>
+    </div>
+    ${insecureField(a)}
+    ${tlsProfileField(a.tls_profile)}`;
+  if (type === 'ir_cut_filter') return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 180px;">
+        <label>Mode</label>
+        <select data-k="mode">
+          <option value="day"   ${a.mode==='day'             ? 'selected':''}>On (day — filter in)</option>
+          <option value="night" ${a.mode==='night'           ? 'selected':''}>Off (night — filter out)</option>
+          <option value="auto"  ${(a.mode||'auto')==='auto'  ? 'selected':''}>Auto</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
+      </div>
+    </div>`;
+  if (type === 'privacy_mask') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'privacy', 'mask_id', a.mask_id || '', 'e.g. Mask 1');
+    let maskControl;
+    if (remoteCtrl) {
+      maskControl = remoteCtrl;
+    } else if (privacyMasks === null) {
+      maskControl = `<input type="text" data-k="mask_id" value="${escHtml(a.mask_id || '')}" placeholder="Loading masks…" disabled>`;
+    } else if (!privacyMasks.length) {
+      maskControl = `<input type="text" data-k="mask_id" value="${escHtml(a.mask_id || '')}" placeholder="e.g. Mask 1">`;
+    } else {
+      let opts = `<option value="">— select mask —</option>`;
+      for (const m of privacyMasks) {
+        const sel = a.mask_id === m.name ? 'selected' : '';
+        opts += `<option value="${escHtml(m.name)}" ${sel}>${escHtml(m.name)}</option>`;
+      }
+      maskControl = `<select data-k="mask_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Privacy Mask</label>${maskControl}
+      </div>
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Action</label>
+        <select data-k="enabled">
+          <option value="true"  ${(a.enabled !== false) ? 'selected':''}>Enable</option>
+          <option value="false" ${a.enabled === false   ? 'selected':''}>Disable</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Channel</label>
+        <input type="number" data-k="channel" value="${escHtml(a.channel || 1)}" min="1" max="8">
+      </div>
+    </div>`;
+  }
+  if (type === 'wiper') return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Operation</label>
+        <select data-k="operation">
+          <option value="start" ${(a.operation||'start')==='start' ? 'selected':''}>Start</option>
+          <option value="stop"  ${a.operation==='stop'             ? 'selected':''}>Stop</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 100px;">
+        <label>Device ID</label>
+        <input type="number" data-k="id" value="${escHtml(a.id || 1)}" min="1">
+        <div class="form-hint">Use <b>getServiceInfo</b> to find IDs.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Duration (s, optional)</label>
+        <input type="number" data-k="duration" value="${escHtml(a.duration || '')}" min="1" placeholder="Default">
+        <div class="form-hint">Variable-duration wipers only.</div>
+      </div>
+    </div>`;
+  if (type === 'light_control') {
+    const op = a.operation || 'on';
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="on"    ${op==='on'    ? 'selected':''}>On</option>
+          <option value="off"   ${op==='off'   ? 'selected':''}>Off</option>
+          <option value="auto"  ${op==='auto'  ? 'selected':''}>Auto</option>
+          <option value="flash" ${op==='flash' ? 'selected':''}>Flash</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Light ID</label>
+        <input type="text" data-k="light_id" value="${escHtml(a.light_id || 'led0')}" placeholder="led0">
+      </div>
+      ${op === 'on' || op === 'flash' ? `
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Intensity (0–100, optional)</label>
+        <input type="number" data-k="intensity" value="${escHtml(a.intensity ?? '')}" min="0" max="100" placeholder="Auto">
+        <div class="form-hint">Leave blank to use the camera's current intensity setting.</div>
+      </div>` : ''}
+    </div>
+    ${op === 'flash' ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Flash duration (ms)</label>
+        <input type="number" data-k="duration_ms" value="${escHtml(a.duration_ms ?? '')}" min="50" max="5000" placeholder="300">
+        <div class="form-hint">On-time per pulse (50–5000 ms). Bypasses the 1s schedule minimum.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Flash count</label>
+        <input type="number" data-k="count" value="${escHtml(a.count ?? '')}" min="1" max="20" placeholder="1">
+        <div class="form-hint">Number of pulses (1–20).</div>
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Gap (ms)</label>
+        <input type="number" data-k="gap_ms" value="${escHtml(a.gap_ms ?? '')}" min="50" max="5000" placeholder="= duration">
+        <div class="form-hint">Off-time between pulses. Only used when count &gt; 1.</div>
+      </div>
+    </div>
+    <div class="form-warning">
+      &#9888; Sub-second flashing drives the illuminator directly, bypassing the firmware's 1&nbsp;second minimum. Rapid or repeated switching may exceed what the illuminator is rated for. Confirm the illuminator supports sub-second/strobe operation (especially on certified or explosion-protected models such as the Q8752) before using in production.
+    </div>` : ''}`;
+  }
+  if (type === 'acap_control') {
+    const remoteCtrl = remoteCapControl(a, rowIdx, 'acap', 'package', a.package || '', 'e.g. com.axis.myapp');
+    let pkgControl;
+    if (remoteCtrl) {
+      pkgControl = remoteCtrl;
+    } else if (acapApps === null) {
+      pkgControl = `<input type="text" data-k="package" value="${escHtml(a.package || '')}" placeholder="Loading apps…" disabled>`;
+    } else if (!acapApps.length) {
+      pkgControl = `<input type="text" data-k="package" value="${escHtml(a.package || '')}" placeholder="e.g. com.axis.myapp">`;
+    } else {
+      let opts = `<option value="">— select app —</option>`;
+      for (const app of acapApps) {
+        const sel = a.package === app.package ? 'selected' : '';
+        opts += `<option value="${escHtml(app.package)}" ${sel}>${escHtml(app.niceName)}</option>`;
+      }
+      pkgControl = `<select data-k="package">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Application</label>${pkgControl}
+      </div>
+      <div class="form-group" style="flex:0 0 140px;">
+        <label>Operation</label>
+        <select data-k="operation">
+          <option value="start"   ${(a.operation||'start')==='start'   ? 'selected':''}>Start</option>
+          <option value="stop"    ${a.operation==='stop'               ? 'selected':''}>Stop</option>
+          <option value="restart" ${a.operation==='restart'            ? 'selected':''}>Restart</option>
+        </select>
+      </div>
+    </div>`;
+  }
+  if (type === 'aoa_get_counts') {
+    let scenarioControl;
+    if (aoaScenarios === null) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(a.scenario_id || 1)}" min="1" placeholder="Loading…">`;
+    } else if (!aoaScenarios.length) {
+      scenarioControl = `<input type="number" data-k="scenario_id" value="${escHtml(a.scenario_id || 1)}" min="1">`;
+    } else {
+      const hasVal = a.scenario_id !== undefined;
+      const opts = aoaScenarios.map(s => {
+        const sel = hasVal && parseInt(a.scenario_id) === s.id ? 'selected' : '';
+        return `<option value="${escHtml(s.id)}" ${sel}>${escHtml(s.id)}: ${escHtml(s.name || s.type || 'Scenario ' + s.id)}</option>`;
+      }).join('');
+      scenarioControl = `<select data-k="scenario_id"><option value="" disabled ${hasVal ? '' : 'selected'}>— Select a scenario —</option>${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Scenario</label>
+        ${scenarioControl}
+        <div class="form-hint">Fetches accumulated crossline counts and injects them as <code>{{aoa_total}}</code>, <code>{{aoa_human}}</code>, <code>{{aoa_car}}</code>, etc.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 auto;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:18px;">
+          <span style="font-size:13px;">Reset after fetch</span>
+          <label class="toggle">
+            <input type="checkbox" data-k="reset_after" ${a.reset_after ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </label>
+        </label>
+        <div class="form-hint">Resets the accumulated counts after reading them.</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'speaker_display') {
+    const op = a.operation || 'show';
+    const speed = (a.scrollSpeed !== undefined && a.scrollSpeed !== '') ? a.scrollSpeed : 5;
+    const durType = a.duration_type || '';
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 120px;">
+        <label>Operation</label>
+        <select data-k="operation" onchange="rerenderAction(this)">
+          <option value="show" ${op === 'show' ? 'selected' : ''}>Show</option>
+          <option value="stop" ${op === 'stop' ? 'selected' : ''}>Stop</option>
+        </select>
+      </div>
+      ${op === 'show' ? `
+      <div class="form-group">
+        <label>Message</label>
+        <textarea data-k="message" rows="2" style="width:100%;resize:vertical;font-family:inherit;">${escHtml(a.message || '')}</textarea>
+        ${hint}
+      </div>` : `
+      <div class="form-group">
+        <div class="form-hint" style="margin-top:18px;">Stops any ongoing notification on the display immediately.</div>
+      </div>`}
+    </div>
+    ${op === 'show' ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Text Size</label>
+        <select data-k="textSize">
+          <option value="small"  ${(a.textSize||'medium')==='small'  ? 'selected':''}>Small</option>
+          <option value="medium" ${(a.textSize||'medium')==='medium' ? 'selected':''}>Medium</option>
+          <option value="large"  ${(a.textSize||'medium')==='large'  ? 'selected':''}>Large</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 160px;">
+        <label>Text Color</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="color" value="${escHtml(a.textColor || '#FFFFFF')}"
+            oninput="this.nextElementSibling.value=this.value"
+            style="width:36px;height:32px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:none;">
+          <input type="text" data-k="textColor" value="${escHtml(a.textColor || '#FFFFFF')}" placeholder="#FFFFFF" maxlength="7"
+            oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))this.previousElementSibling.value=this.value"
+            style="width:80px;">
+        </div>
+      </div>
+      <div class="form-group" style="flex:0 0 180px;">
+        <label>Background Color</label>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <input type="color" value="${escHtml(a.backgroundColor || '#000000')}"
+            oninput="this.nextElementSibling.value=this.value"
+            style="width:36px;height:32px;padding:2px;border:1px solid var(--border);border-radius:6px;cursor:pointer;background:none;">
+          <input type="text" data-k="backgroundColor" value="${escHtml(a.backgroundColor || '')}" placeholder="#000000 (optional)" maxlength="7"
+            oninput="if(/^#[0-9a-fA-F]{6}$/.test(this.value))this.previousElementSibling.value=this.value"
+            style="width:80px;">
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 170px;">
+        <label>Scroll Direction</label>
+        <select data-k="scrollDirection">
+          <option value=""               ${!a.scrollDirection                    ? 'selected':''}>None (static)</option>
+          <option value="fromRightToLeft" ${a.scrollDirection==='fromRightToLeft' ? 'selected':''}>Right → Left</option>
+          <option value="fromBottomToTop" ${a.scrollDirection==='fromBottomToTop' ? 'selected':''}>Bottom → Top</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 130px;">
+        <label>Scroll Speed (0–10)</label>
+        <input type="number" data-k="scrollSpeed" value="${escHtml(speed)}" min="0" max="10">
+        <div class="form-hint">0 = static, 10 = fastest.</div>
+      </div>
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>Duration</label>
+        <select data-k="duration_type" onchange="rerenderAction(this)">
+          <option value=""                   ${durType===''                   ? 'selected':''}>Indefinite</option>
+          <option value="repetitions"         ${durType==='repetitions'         ? 'selected':''}>Repetitions</option>
+          <option value="time"                ${durType==='time'                ? 'selected':''}>Time (ms)</option>
+          <option value="timeCompleteMessage" ${durType==='timeCompleteMessage' ? 'selected':''}>Time + complete scroll</option>
+        </select>
+        <div class="form-hint">Stays on screen until replaced or stopped.</div>
+      </div>
+    </div>
+    ${durType ? `
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 200px;">
+        <label>${durType === 'repetitions' ? 'Repetitions' : 'Seconds'}</label>
+        <input type="number" data-k="duration_value" value="${escHtml(a.duration_value || (durType==='repetitions' ? 3 : 10))}" min="1">
+      </div>
+    </div>` : ''}
+    ${!durType ? `
+    <div class="form-row"><div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" data-k="while_active" ${a.while_active ? 'checked' : ''}>
+        Run while active - automatically stop the display when the triggering condition clears
+      </label>
+    </div></div>` : ''}` : ''}`;
+  }
+  if (type === 'paging_console_execute') {
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const host = (a.remote_host || '').trim();
+    const cachedActions = isRemote && host ? (remoteCapCache[`${host}:::paging_actions`] || null) : null;
+    const srcActions = isRemote ? cachedActions : pagingActions;
+    const loadBtn = isRemote
+      ? `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="paging" onclick="loadRemotePagingCap('${rowIdx}')" style="white-space:nowrap;margin-left:6px" title="Fetch paging actions from the remote device">Load</button>`
+      : '';
+    let actionCtrl;
+    if (srcActions === null) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="${isRemote ? 'Click Load to fetch actions' : 'Loading…'}" ${isRemote ? '' : 'disabled'}>`;
+    } else if (!srcActions.length) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="UUID (no paging-console actions found)">`;
+    } else {
+      let opts = `<option value="">— select action —</option>`;
+      for (const act of srcActions) {
+        const sel = a.action_id === act.id ? 'selected' : '';
+        opts += `<option value="${escHtml(act.id)}" ${sel}>${escHtml(act.label)}</option>`;
+      }
+      actionCtrl = `<select data-k="action_id">${opts}</select>`;
+    }
+    return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Paging Console Action</label>
+        <div style="display:flex;align-items:center;gap:4px">${actionCtrl}${loadBtn}</div>
+        <div class="form-hint">Executes the selected paging-console action immediately (callContact, announcement, showContacts, etc.).</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'paging_console_button') {
+    const isRemote = a.remote_host_toggle === 'remote'
+      || (a.remote_host && a.remote_host_toggle !== 'local');
+    const host = (a.remote_host || '').trim();
+    const cachedActions = isRemote && host ? (remoteCapCache[`${host}:::paging_actions`] || null) : null;
+    const cachedPages   = isRemote && host ? (remoteCapCache[`${host}:::paging_pages`]   || null) : null;
+    const srcActions = isRemote ? cachedActions : pagingActions;
+    const srcPages   = isRemote ? cachedPages   : pagingPages;
+    const loadBtn = isRemote
+      ? `<button type="button" class="btn btn-ghost btn-sm remote-load-btn" data-q="paging" onclick="loadRemotePagingCap('${rowIdx}')" style="white-space:nowrap;margin-left:6px" title="Fetch paging data from the remote device">Load</button>`
+      : '';
+    let pageCtrl, actionCtrl;
+
+    if (srcPages === null) {
+      pageCtrl = `<input type="text" data-k="page_id" value="${escHtml(a.page_id || '')}" placeholder="${isRemote ? 'Click Load' : 'Loading…'}" ${isRemote ? '' : 'disabled'}>`;
+    } else if (!srcPages.length) {
+      pageCtrl = `<input type="text" data-k="page_id" value="${escHtml(a.page_id || '')}" placeholder="Page UUID">`;
+    } else {
+      let opts = `<option value="">— select page —</option>`;
+      for (const pg of srcPages) {
+        const sel = a.page_id === pg.id ? 'selected' : '';
+        opts += `<option value="${escHtml(pg.id)}" ${sel}>${escHtml(pg.name)}</option>`;
+      }
+      pageCtrl = `<select data-k="page_id">${opts}</select>`;
+    }
+
+    if (srcActions === null) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="${isRemote ? 'Click Load' : 'Loading…'}" ${isRemote ? '' : 'disabled'}>`;
+    } else if (!srcActions.length) {
+      actionCtrl = `<input type="text" data-k="action_id" value="${escHtml(a.action_id || '')}" placeholder="Leave empty to clear slot">`;
+    } else {
+      let opts = `<option value="">— clear slot (empty) —</option>`;
+      for (const act of srcActions) {
+        const sel = a.action_id === act.id ? 'selected' : '';
+        opts += `<option value="${escHtml(act.id)}" ${sel}>${escHtml(act.label)}</option>`;
+      }
+      actionCtrl = `<select data-k="action_id">${opts}</select>`;
+    }
+
+    return `
+    <div class="form-row">
+      <div class="form-group" style="flex:1;min-width:200px;">
+        <label>Page</label>
+        <div style="display:flex;align-items:center;gap:4px">${pageCtrl}${loadBtn}</div>
+      </div>
+      <div class="form-group" style="flex:0 0 80px;">
+        <label>Slot</label>
+        <input type="number" data-k="slot" value="${escHtml(a.slot || 1)}" min="1" max="32">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Assign Action</label>${actionCtrl}
+        <div class="form-hint">Select an action to assign to this button slot, or choose <em>clear slot</em> to leave it empty.</div>
+      </div>
+    </div>`;
+  }
+  if (type === 'modbus_write') {
+    const rtype = a.register_type || 'holding';
+    const bits = rtype === 'coil';
+    const rows = mbRowsFrom(a, 'values');
+    const mode = a.write_mode || (rows.length ? 'block' : 'single');
+    const fn = a.function || 'auto';
+    const fnOpts = bits ? [['auto', 'Auto (FC05 / FC15)'], ['fc05', 'FC05 Write Single Coil'], ['fc15', 'FC15 Write Multiple Coils']]
+                        : [['auto', 'Auto (FC06 / FC16)'], ['fc06', 'FC06 Write Single Register'], ['fc16', 'FC16 Write Multiple Registers']];
+    return `
+    ${mbConnFields(a, 'rerenderAction(this)')}
+    <div class="form-row">
+      <div class="form-group">
+        <label>Slave ID</label>
+        <input type="number" data-k="slave_id" value="${escHtml(a.slave_id||1)}" min="1" max="247">
+        <div class="form-hint">Modbus device address (1-247)</div>
+      </div>
+      <div class="form-group">
+        <label>Register Type</label>
+        <select data-k="register_type" onchange="rerenderAction(this)">
+          <option value="holding" ${rtype==='holding'?'selected':''}>Holding Register</option>
+          <option value="coil"    ${rtype==='coil'?'selected':''}>Coil</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Write</label>
+        <select data-k="write_mode" onchange="rerenderAction(this)">
+          <option value="single" ${mode==='single'?'selected':''}>One value</option>
+          <option value="block"  ${mode==='block' ?'selected':''}>Several registers</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Function</label>
+        <select data-k="function">${fnOpts.map(([v, l]) => `<option value="${v}" ${(fnOpts.some(o => o[0] === fn) ? fn : 'auto')===v?'selected':''}>${l}</option>`).join('')}</select>
+        <div class="form-hint">Auto uses the single write for one ${bits ? 'coil' : 'register'}, else the multiple write.</div>
+      </div>
+    </div>
+    ${mode === 'block' ? mbTable('values', rows, bits) : `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Register Address</label>
+        <input type="number" data-k="register" value="${escHtml(a.register||0)}" min="0" max="65535">
+        <div class="form-hint">0-based register address</div>
+      </div>
+      <div class="form-group" style="flex:2;">
+        <label>Value</label>
+        <input type="text" data-k="value" value="${escHtml(a.value!==undefined?a.value:0)}" placeholder="${bits ? '1' : '0'}">
+        ${getTokenInsertWidget()}
+        <div class="form-hint">${bits ? 'Coil: 0/1, on/off or true/false.' : 'A number or text, or a placeholder such as <code>{{trigger.value}}</code>.'}</div>
+      </div>
+    </div>
+    ${bits ? '' : mbTypeFields(a, 'data_type', 'word_order', 'rerenderAction(this)', false)}`}`;
+  }
+  return '';
+}
+
+function renderActionList() {
+  const list = document.getElementById('action-list');
+  if (!list) return;
+  list.innerHTML = actionRows.map((a, i) => `
+    <div class="tca-row" id="arow-${i}">
+      <div class="tca-row-header">
+        <span class="tca-type-badge tca-action">Action ${i + 1}</span>
+        <select onchange="changeActionType(${i}, this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:12px;">
+          ${actionTypeOptions(a.type || 'http_request')}
+        </select>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveAction(${i}, -1)" title="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="btn btn-ghost btn-sm btn-icon" onclick="moveAction(${i},  1)" title="Move down" ${i === actionRows.length - 1 ? 'disabled' : ''}>↓</button>
+        <button class="btn btn-ghost btn-sm" id="atest-${i}" onclick="testActionRow(${i})" title="Send a test — executes this action with sample data now">Test</button>
+        <button class="tca-remove" onclick="removeActionRow(${i})">&times;</button>
+      </div>
+      <div class="tca-fields">${remoteDeviceFields(a)}${actionFields(a, i)}</div>
+    </div>
+  `).join('');
+}
+
+function rerenderAction(sel) {
+  const row = sel.closest('.tca-row');
+  const i = parseInt(row.id.replace('arow-', ''));
+  const el = document.getElementById('arow-' + i);
+  if (!el) return;
+  const data = { type: actionRows[i].type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[i] = data;
+  renderActionList();
+}
+function flushActionRows() { actionRows = collectRows(actionRows, 'arow'); }
+/* Port → 'active' | 'inactive' for an io_output action, from the form fields
+ * (io_pN), the saved "ports" list, or the older single port/state form. */
+function ioOutputStates(a) {
+  const states = {};
+  const formKeys = Object.keys(a).filter(k => /^io_p\d+$/.test(k));
+  if (formKeys.length) {
+    formKeys.forEach(k => { if (a[k] === 'active' || a[k] === 'inactive') states[parseInt(k.slice(4), 10)] = a[k]; });
+  } else if (Array.isArray(a.ports)) {
+    a.ports.forEach(p => { const n = parseInt(p.port, 10); if (n >= 1 && n <= 32) states[n] = p.state === 'inactive' ? 'inactive' : 'active'; });
+  } else if (a.port !== undefined && a.port !== '') {
+    const n = parseInt(a.port, 10);
+    if (n >= 1 && n <= 32) states[n] = a.state === 'inactive' ? 'inactive' : 'active';
+  }
+  return states;
+}
+function ioFlashAddPort(link, port) {
+  const input = link.closest('.form-group').querySelector('[data-k="ports_str"]');
+  if (!input) return;
+  const ports = input.value.split(/[\s,;]+/).filter(Boolean);
+  if (!ports.includes(String(port))) ports.push(String(port));
+  input.value = ports.join(', ');
+}
+function addActionRow() { flushActionRows(); actionRows.push({ type: 'http_request' }); renderActionList(); }
+function removeActionRow(i) { flushActionRows(); actionRows.splice(i, 1); renderActionList(); }
+function changeActionType(i, type) { flushActionRows(); actionRows[i] = { type }; renderActionList(); }
+function moveAction(i, dir) {
+  flushActionRows();
+  const j = i + dir;
+  if (j < 0 || j >= actionRows.length) return;
+  [actionRows[i], actionRows[j]] = [actionRows[j], actionRows[i]];
+  renderActionList();
+}
+
+async function testActionRow(i) {
+  const el = document.getElementById('arow-' + i);
+  if (!el) return;
+  const data = { type: actionRows[i].type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  const normalized = normalizeAction(data);
+  if (normalized.type === 'modbus_write') {
+    const err = modbusRowError(normalized);
+    if (err) { toast(`Action ${i + 1} test: ${err}`, 'error'); return; }
+  }
+  const btn = document.getElementById('atest-' + i);
+  const origText = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = '…'; btn.disabled = true; }
+  try {
+    const resp = await API.testAction(normalized.type, normalized);
+    const result = await resp.json().catch(() => ({}));
+    if (resp.ok && result.success !== false) {
+      toast(`Action ${i + 1} test: OK${result.message ? ' — ' + result.message : ''}`, 'success');
+    } else {
+      toast(`Action ${i + 1} test failed: ${result.error || result.message || resp.status}`, 'error');
+    }
+  } catch(e) {
+    toast(`Action ${i + 1} test failed: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
+}
+
+/* ===== Collect form data ===== */
+function collectRows(rows, prefix) {
+  return rows.map((_, i) => {
+    const el = document.getElementById(`${prefix}-${i}`);
+    if (!el) return _;
+    const data = { type: _.type };
+    /* Editor-only state (e.g. _adding, _dataTypes) has no input; keep it */
+    for (const k of Object.keys(_)) if (k.startsWith('_')) data[k] = _[k];
+    el.querySelectorAll('[data-k]').forEach(inp => {
+      data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+    });
+    return data;
+  });
+}
+
+function normalizeTrigger(t) {
+  const out = { type: t.type };
+  if (t.type === 'vapix_event' || t.type === 'io_input') {
+    /* Accept both flat topicN_ns/_val and {topicN: {ns: val}} so topics are never silently dropped. */
+    ['topic0','topic1','topic2','topic3'].forEach(k => {
+      if (t[`${k}_val`])          out[k] = { [t[`${k}_ns`] || '']: t[`${k}_val`] };
+      else if (t[k] && typeof t[k] === 'object') out[k] = t[k];
+    });
+    const condType = t.cond_type || (t.value_key ? 'numeric' : (t.filter_key ? 'boolean' : (t.string_key ? 'string' : 'none')));
+    if (condType === 'boolean') {
+      if (t.filter_key) out.filter_key = t.filter_key;
+      if (t.filter_value === 'true' || t.filter_value === true)   out.filter_value = true;
+      else if (t.filter_value === 'false' || t.filter_value === false) out.filter_value = false;
+    } else if (condType === 'numeric') {
+      if (t.value_key) out.value_key = t.value_key;
+      out.value_op        = t.value_op || 'gt';
+      out.value_threshold = parseFloat(t.value_threshold) || 0;
+      if (out.value_op === 'between') out.value_threshold2 = parseFloat(t.value_threshold2) || 0;
+      const hold = parseInt(t.value_hold_secs) || 0;
+      if (hold > 0) out.value_hold_secs = hold;
+    } else if (condType === 'string') {
+      if (t.string_key)   out.string_key   = t.string_key;
+      if (t.string_value) out.string_value = t.string_value;
+    }
+    if (t.type === 'io_input') {
+      out.port = parseInt(t.port) || 1;
+      out.edge = t.edge || 'rising';
+      const hold = parseInt(t.hold_secs) || 0;
+      if (hold > 0) out.hold_secs = hold;
+    }
+  } else if (t.type === 'http_webhook') {
+    out.token = t.token || '';
+  } else if (t.type === 'schedule') {
+    out.schedule_type = t.schedule_type || 'daily_time';
+    if (out.schedule_type === 'daily_time') {
+      out.time = t.time || '08:00';
+      out.days = (t.days_str || '1,2,3,4,5').split(',').map(Number).filter(n => n >= 0 && n <= 6);
+    } else if (out.schedule_type === 'interval') {
+      out.interval_seconds = parseInt(t.interval_seconds) || 60;
+    } else if (out.schedule_type === 'cron') {
+      out.cron = t.cron || '0 * * * *';
+    } else if (out.schedule_type === 'astronomical') {
+      out.event = t.event || 'sunrise';
+      out.latitude = parseFloat(t.latitude) || 0;
+      out.longitude = parseFloat(t.longitude) || 0;
+      const offMin = parseFloat(t.offset_minutes) || 0;
+      if (offMin !== 0) out.offset_minutes = offMin;
+    }
+  } else if (t.type === 'mqtt_message') {
+    out.topic_filter = t.topic_filter || '#';
+    if (t.payload_filter) out.payload_filter = t.payload_filter;
+  } else if (t.type === 'sparkplug_command') {
+    if (t.metric)       out.metric       = t.metric.trim();
+    if (t.value_filter) out.value_filter = t.value_filter.trim();
+  } else if (t.type === 'aoa_scenario') {
+    out.scenario_id = parseInt(t.scenario_id) || 1;
+    if (t.object_class && t.object_class !== 'any') out.object_class = t.object_class;
+  } else if (t.type === 'counter_threshold') {
+    out.counter_name = t.counter_name; out.op = t.op || 'gt'; out.value = parseFloat(t.value) || 0;
+  } else if (t.type === 'rule_fired') {
+    out.rule_id = t.rule_id || '';
+  } else if (t.type === 'modbus_read') {
+    normalizeModbusRead(t, out);
+  } else if (t.type === 'modbus_error') {
+    const dev = String(t.device || '').trim();
+    if (dev) out.device = dev;
+    const slave = parseInt(t.slave_id) || 0;
+    if (slave > 0) out.slave_id = slave;
+    out.fire_on = t.fire_on === 'every' ? 'every' : 'change';
+  } else if (t.type === 'gps_update') {
+    out.interval_s = Math.min(3600, Math.max(1, parseInt(t.interval_s) || 1));
+  } else if (t.type === 'gps_speed') {
+    out.op = t.op || 'gt';
+    out.unit = t.unit || 'kmh';
+    out.value = parseFloat(t.value);
+    if (out.op === 'between') out.value2 = parseFloat(t.value2);
+    out.hysteresis = Math.max(0, parseFloat(t.hysteresis) || 0);
+  } else if (t.type === 'gps_geofence') {
+    out.event = t.event || 'enter';
+    out.latitude = parseFloat(t.latitude);
+    out.longitude = parseFloat(t.longitude);
+    out.radius_m = parseFloat(t.radius_m);
+    const text = String(t.points_text || '').trim();
+    if (text && text !== '[]') {
+      try { out.points = JSON.parse(text); }
+      catch(e) { out.points = []; }
+    }
+  } else if (t.type === 'gps_fix') {
+    out.event = t.event || 'acquired';
+  }
+  /* manual trigger has no extra fields */
+  return out;
+}
+
+function normalizeCondition(c) {
+  const out = { type: c.type };
+  if (c.type === 'time_window') {
+    out.start = c.start; out.end = c.end;
+    out.days = (c.days_str || '1,2,3,4,5').split(',').map(Number).filter(n => n >= 0 && n <= 6);
+  } else if (c.type === 'counter') {
+    out.name = c.name; out.op = c.op || 'gt'; out.value = parseFloat(c.value) || 0;
+  } else if (c.type === 'variable_compare') {
+    out.name = c.name; out.op = c.op || 'eq'; out.value = c.value;
+  } else if (c.type === 'trigger_data') {
+    out.key = (c.key || '').trim(); out.op = c.op || 'eq'; out.value = c.value || '';
+  } else if (c.type === 'io_state') {
+    out.port = parseInt(c.port) || 1; out.state = c.state || 'active';
+    { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
+      if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
+  } else if (c.type === 'http_check') {
+    out.url = c.url; out.expected_status = parseInt(c.expected_status) || 200;
+    if (c.expected_body) out.expected_body = c.expected_body;
+    if (c.json_path) { out.json_path = c.json_path; out.json_expected = c.json_expected || ''; }
+    if (c.allow_insecure === true) out.allow_insecure = true;
+    if (c.tls_profile) out.tls_profile = c.tls_profile;
+  } else if (c.type === 'aoa_occupancy') {
+    out.scenario_id = parseInt(c.scenario_id) || 1;
+    out.object_class = c.object_class || 'any';
+    out.op = c.op || 'gt';
+    out.value = parseFloat(c.value) || 0;
+    { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
+      if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
+  } else if (c.type === 'day_night') {
+    out.state = c.state || 'day';
+    if (c.lat !== undefined && c.lat !== '') out.lat = parseFloat(c.lat);
+    if (c.lon !== undefined && c.lon !== '') out.lon = parseFloat(c.lon);
+    const riseOff = parseFloat(c.sunrise_offset_minutes) || 0;
+    const setOff  = parseFloat(c.sunset_offset_minutes) || 0;
+    if (riseOff !== 0) out.sunrise_offset_minutes = riseOff;
+    if (setOff !== 0)  out.sunset_offset_minutes = setOff;
+  } else if (c.type === 'vapix_event_state') {
+    out.event_key = c.event_key || '';
+    out.data_key  = c.data_key || '';
+    const mode = c.match_mode || 'exact';
+    if (mode === 'boolean') {
+      out.op = 'boolean';
+      out.expected = c.expected || 'true';
+    } else if (mode === 'numeric') {
+      out.op = c.op || 'gt';
+      out.threshold = parseFloat(c.threshold) || 0;
+      if (out.op === 'between') out.threshold2 = parseFloat(c.threshold2) || 0;
+    } else if (mode === 'string') {
+      out.op = 'contains';
+      out.expected = c.expected || '';
+    } else {
+      /* exact / legacy */
+      out.expected = c.expected || '';
+    }
+    { const isRemote = c.remote_host_toggle === 'remote' || (c.remote_host && c.remote_host_toggle !== 'local');
+      if (isRemote && c.remote_host) { out.remote_host = c.remote_host.trim(); if (c.remote_user) out.remote_user = c.remote_user.trim(); if (c.remote_pass) out.remote_pass = c.remote_pass; } }
+  }
+  return out;
+}
+
+function normalizeAction(a) {
+  if (a.type === 'modbus_write') return normalizeModbusWrite(a);
+  const out = { type: a.type };
+  const pass = ['url','method','headers','body','username','password','operation','duration','text','channel',
+                 'preset','port','state','clip_name','message','level','event_id','profile',
+                 'seconds','name','value','delta','rule_id','cron','interval_seconds',
+                 'schedule_type','time','counter_name','op','token','edge',
+                 'topic','payload','qos','position','text_color','font_size','bg_color','outline_color',
+                 'tour_id','parameter','mask_id','light_id','package','id','mode',
+                 'webhook_url','title','theme_color','version','database','org','bucket',
+                 'measurement','tags','fields','bot_token','chat_id','parse_mode',
+                 'smtp_server','from','to','subject','deliver_via','line',
+                 'event_key','data_key','expected','interval',
+                 'action_id','page_id','slot','duration_ms','gap_ms','count','tls_profile'];
+  pass.forEach(k => { if (a[k] !== undefined && a[k] !== '') out[k] = a[k]; });
+  if (out.duration !== undefined) out.duration = parseInt(out.duration) || 0;
+  const isRemote = a.remote_host_toggle === 'remote'
+    || (a.remote_host && a.remote_host_toggle !== 'local');
+  if (isRemote && REMOTE_CAPABLE_ACTIONS.has(a.type)) {
+    if (a.remote_host) out.remote_host = a.remote_host.trim();
+    if (a.remote_user) out.remote_user = a.remote_user.trim();
+    if (a.remote_pass) out.remote_pass = a.remote_pass;
+  }
+  if (out.seconds  !== undefined) out.seconds  = parseInt(out.seconds)  || 1;
+  if (out.port     !== undefined) out.port     = parseInt(out.port)     || 1;
+  if (out.slot     !== undefined) out.slot     = parseInt(out.slot)     || 1;
+  if (out.channel  !== undefined && a.type !== 'slack_webhook') out.channel = parseInt(out.channel) || 1;
+  if (out.delta    !== undefined) out.delta    = parseFloat(out.delta)  || 1;
+  if (out.value    !== undefined && a.type === 'increment_counter')
+    out.delta = parseFloat(out.value) || 0;
+  if (a.type === 'fire_vapix_event') {
+    const events = Array.isArray(acapEvents) ? acapEvents : [];
+    out.event_id = a.event_id || (events[0] ? events[0].id : 'RuleFired');
+    const selEvent = events.find(e => e.id === out.event_id);
+    if (selEvent && selEvent.state) {
+      out.state = a.state === 'true' || a.state === true;
+    }
+    const evFields = selEvent && Array.isArray(selEvent.data) ? selEvent.data.filter(f => f && f.name) : [];
+    if (evFields.length) {
+      out.data = {};
+      evFields.forEach(f => {
+        const v = a['evd_' + f.name] !== undefined ? a['evd_' + f.name] : (a.data ? a.data[f.name] : undefined);
+        if (v !== undefined && v !== '') out.data[f.name] = String(v);
+      });
+    }
+    /* Drop internal UI-only keys */
+    delete out._adding;
+    delete out._new_id;
+    delete out._new_name;
+    delete out._new_stateful;
+    delete out._new_fields;
+  }
+  if (a.type === 'mqtt_publish') {
+    out.retain = a.retain === 'true' || a.retain === true;
+    out.qos    = parseInt(a.qos) || 0;
+    out.attach_snapshot = a.attach_snapshot === true;
+    const fbType = a.on_failure_type || '';
+    if (fbType === 'send_syslog') {
+      out.on_failure = [{ type: 'send_syslog', message: a.on_failure_message || 'MQTT publish failed' }];
+    } else if (fbType === 'mqtt_publish') {
+      out.on_failure = [{ type: 'mqtt_publish', topic: a.on_failure_topic || '', payload: a.on_failure_payload || 'mqtt_publish_failed', qos: 0, retain: false }];
+    } else if (fbType === 'http_request') {
+      out.on_failure = [{ type: 'http_request', url: a.on_failure_url || '', method: 'GET' }];
+    }
+  }
+  if (a.type === 'sparkplug_publish') {
+    /* The form edits a "Name=value" text block; the engine wants an array */
+    const src = a.metric_lines !== undefined
+      ? a.metric_lines
+      : (Array.isArray(a.metrics) ? a.metrics.map(m => `${m.name || ''}=${m.value || ''}`).join('\n') : '');
+    out.metrics = String(src).split('\n').map(line => {
+      const eq = line.indexOf('=');
+      if (eq < 0) return null;
+      const name = line.slice(0, eq).trim();
+      if (!name) return null;
+      return { name, value: line.slice(eq + 1).trim() };
+    }).filter(Boolean);
+    delete out.metric_lines;
+  }
+  if (a.type === 'vapix_query') {
+    /* Reconstruct topic0-3 objects from the hidden _ns / _val fields (flat form after collectRows)
+     * or directly from object form (when saving without having re-rendered the action list). */
+    ['topic0','topic1','topic2','topic3'].forEach(k => {
+      const v = a[`${k}_val`];
+      if (v) out[k] = { [a[`${k}_ns`] || '']: v };
+      else if (a[k] && typeof a[k] === 'object') out[k] = a[k];
+    });
+  }
+  if (a.type === 'siren_light') {
+    out.signal_action = a.signal_action || 'start';
+    out.profile = a.profile || '';
+    if (out.signal_action === 'start') out.while_active = a.while_active === true;
+  }
+  if (a.type === 'recording' && (out.operation || 'start') === 'start')
+    out.while_active = a.while_active === true;
+  if (a.type === 'overlay_text' || a.type === 'overlay_image') {
+    if (a.type === 'overlay_image') {
+      ['text_color', 'text', 'font_size', 'bg_color', 'outline_color'].forEach(k => delete out[k]);
+      if (a.image) out.image = String(a.image).trim();
+    }
+    if (out.operation === 'clear') {
+      ['text', 'image', 'duration', 'position', 'text_color', 'pos_x', 'pos_y',
+       'font_size', 'bg_color', 'outline_color'].forEach(k => delete out[k]);
+    } else {
+      delete out.operation;
+      if (out.font_size !== undefined) {
+        const fs = parseInt(out.font_size);
+        if (fs > 0) out.font_size = fs; else delete out.font_size;
+      }
+      if (!(parseInt(a.duration) > 0)) out.while_active = a.while_active === true;
+      if (out.position === 'custom') {
+        ['pos_x', 'pos_y'].forEach(k => {
+          const v = parseFloat(a[k]);
+          out[k] = Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : -0.99;
+        });
+      }
+    }
+    const name = String(a.overlay || '').trim();
+    if (name) out.overlay = name;
+  }
+  if (a.type === 'io_output') {
+    const states = ioOutputStates(a);
+    out.ports = Object.keys(states).map(Number).sort((x, y) => x - y).map(p => ({ port: p, state: states[p] }));
+    delete out.port;
+    delete out.state;
+  }
+  if (a.type === 'io_output' && !(parseInt(a.duration) > 0))
+    out.while_active = a.while_active === true;
+  if (a.type === 'io_flash') {
+    const src = a.ports_str !== undefined ? a.ports_str : a.ports;
+    const list = Array.isArray(src) ? src : String(src || '').split(/[\s,;]+/);
+    out.ports = [...new Set(list.map(p => parseInt(p, 10)).filter(p => p >= 1 && p <= 32))].slice(0, 8);
+    delete out.ports_str;
+    out.mode = a.mode === 'together' ? 'together' : 'sequence';
+    out.on_ms = parseInt(a.on_ms) || 500;
+    if (a.off_ms !== '' && a.off_ms !== undefined && a.off_ms !== null) out.off_ms = parseInt(a.off_ms) || 0;
+    else delete out.off_ms;
+    out.stop = ['count', 'time', 'disabled'].includes(a.stop) ? a.stop : 'count';
+    delete out.count; delete out.duration;
+    if (out.stop === 'count') out.count = parseInt(a.count) || 10;
+    if (out.stop === 'time')  out.duration = parseInt(a.duration) || 60;
+    out.while_active = a.while_active === true;
+  }
+  if (a.type === 'privacy_mask')
+    out.enabled = a.enabled === 'true' || a.enabled === true;
+  if (a.type === 'set_rule_enabled')
+    out.enabled = a.enabled !== 'false' && a.enabled !== false;
+  if (a.type === 'light_control') {
+    const lcOp = a.operation || 'on';
+    if ((lcOp === 'on' || lcOp === 'flash') && a.intensity !== '' && a.intensity !== undefined)
+      out.intensity = parseInt(a.intensity);
+    if (lcOp === 'flash') {
+      out.duration_ms = (a.duration_ms !== '' && a.duration_ms !== undefined) ? parseInt(a.duration_ms) : 300;
+      out.count = (a.count !== '' && a.count !== undefined) ? parseInt(a.count) : 1;
+      if (a.gap_ms !== '' && a.gap_ms !== undefined) out.gap_ms = parseInt(a.gap_ms);
+      else delete out.gap_ms;
+    } else {
+      delete out.duration_ms;
+      delete out.count;
+      delete out.gap_ms;
+    }
+  }
+  if (a.type === 'snapshot_upload' || a.type === 'guard_tour' || a.type === 'ir_cut_filter' || a.type === 'privacy_mask')
+    if (out.channel !== undefined) out.channel = parseInt(out.channel) || 1;
+  if (a.type === 'wiper')
+    if (out.id !== undefined) out.id = parseInt(out.id) || 1;
+  if (a.type === 'aoa_get_counts') {
+    out.scenario_id = parseInt(a.scenario_id) || 1;
+    out.reset_after = a.reset_after === true;
+  }
+  if (a.type === 'speaker_display') {
+    out.operation = a.operation || 'show';
+    if (out.operation === 'show') {
+      if (a.textColor)       out.textColor       = a.textColor;
+      if (a.backgroundColor) out.backgroundColor = a.backgroundColor;
+      if (a.textSize)        out.textSize        = a.textSize;
+      if (a.scrollDirection) out.scrollDirection = a.scrollDirection;
+      out.scrollSpeed = parseInt(a.scrollSpeed) || 0;
+      if (a.duration_type) {
+        out.duration_type  = a.duration_type;
+        const dv = parseInt(a.duration_value) || 1;
+        /* UI shows seconds for time types; API expects milliseconds */
+        out.duration_value = (a.duration_type === 'repetitions') ? dv : dv * 1000;
+      } else {
+        out.while_active = a.while_active === true;
+      }
+    }
+  }
+  if (a.type === 'influxdb_write') {
+    out.version = a.version || 'v2';
+  }
+  if (['snapshot_upload', 'influxdb_write', 'ftp_upload'].includes(a.type) && a.allow_insecure === true)
+    out.allow_insecure = true;
+  if (a.type === 'ftp_upload' && a.use_tls === true) out.use_tls = true;
+  if (a.type === 'email') {
+    /* use_tls is controlled by global SMTP config, not per-action */
+    out.attach_snapshot = a.attach_snapshot === true;
+  }
+  if (a.type === 'slack_webhook' || a.type === 'teams_webhook' || a.type === 'telegram') {
+    out.attach_snapshot = a.attach_snapshot === true;
+  }
+  if (a.type === 'telegram') {
+    out.disable_preview = a.disable_preview === true;
+  }
+  if (a.type === 'digest') {
+    out.interval = parseInt(a.interval) || 300;
+    out.deliver_via = a.deliver_via || 'slack';
+  }
+  if (a.type === 'http_request') {
+    out.attach_snapshot = a.attach_snapshot === true;
+    if (a.attach_alpv_image === true) out.attach_alpv_image = true;
+    if (a.allow_insecure === true) out.allow_insecure = true;
+    const fbType = a.on_failure_type || '';
+    if (fbType === 'send_syslog') {
+      out.on_failure = [{ type: 'send_syslog', message: a.on_failure_message || 'HTTP request failed' }];
+    } else if (fbType === 'mqtt_publish') {
+      out.on_failure = [{ type: 'mqtt_publish', topic: a.on_failure_topic || '', payload: a.on_failure_payload || 'http_request_failed', qos: 0, retain: false }];
+    } else if (fbType === 'http_request') {
+      out.on_failure = [{ type: 'http_request', url: a.on_failure_url || '', method: 'GET' }];
+    }
+  }
+  return out;
+}
+
+async function saveRule() {
+  triggerRows   = collectRows(triggerRows,   'trow').map(normalizeTrigger);
+  conditionRows = collectRows(conditionRows, 'crow').map(normalizeCondition);
+  actionRows    = collectRows(actionRows,    'arow').map(normalizeAction);
+
+  const name = document.getElementById('f-name').value.trim();
+  if (!name) { toast('Rule name is required', 'error'); return; }
+  if (!triggerRows.length) { toast('At least one trigger is required', 'error'); return; }
+  if (!actionRows.length) { toast('At least one action is required', 'error'); return; }
+
+  for (let i = 0; i < triggerRows.length; i++) {
+    const t = triggerRows[i];
+    if (t.type === 'vapix_event' && !t.topic0) {
+      toast(`Trigger ${i + 1}: Please select a device event from the dropdown`, 'error');
+      return;
+    }
+    const mbErr = t.type === 'modbus_read' ? modbusRowError(t) : '';
+    if (mbErr) { toast(`Trigger ${i + 1} (Modbus Read): ${mbErr}`, 'error'); return; }
+  }
+
+  for (let i = 0; i < actionRows.length; i++) {
+    const a = actionRows[i];
+    const label = `Action ${i + 1} (${ruleTypeLabel('action', a.type)})`;
+    if (a.type === 'http_request'    && !a.url)         { toast(`${label}: URL is required`, 'error'); return; }
+    if (a.type === 'mqtt_publish'    && !a.topic)       { toast(`${label}: Topic is required`, 'error'); return; }
+    if (a.type === 'sparkplug_publish' && !(a.metrics || []).length) {
+      toast(`${label}: add at least one MetricName=value line`, 'error'); return;
+    }
+    if (a.type === 'email'           && !a.to)          { toast(`${label}: "To" address is required`, 'error'); return; }
+    if (a.type === 'slack_webhook'   && !a.webhook_url) { toast(`${label}: Webhook URL is required`, 'error'); return; }
+    if (a.type === 'teams_webhook'   && !a.webhook_url) { toast(`${label}: Webhook URL is required`, 'error'); return; }
+    if (a.type === 'telegram'        && !a.bot_token)   { toast(`${label}: Bot Token is required`, 'error'); return; }
+    if (a.type === 'telegram'        && !a.chat_id)     { toast(`${label}: Chat ID is required`, 'error'); return; }
+    if (a.type === 'ftp_upload'      && !a.url)         { toast(`${label}: FTP URL is required`, 'error'); return; }
+    if (a.type === 'snapshot_upload' && !a.url)         { toast(`${label}: URL is required`, 'error'); return; }
+    if (a.type === 'set_variable'    && !a.name)        { toast(`${label}: Variable name is required`, 'error'); return; }
+    if (a.type === 'increment_counter' && !a.name)      { toast(`${label}: Counter name is required`, 'error'); return; }
+    if (a.type === 'influxdb_write'  && !a.url)         { toast(`${label}: InfluxDB URL is required`, 'error'); return; }
+    if (a.type === 'influxdb_write'  && !a.measurement) { toast(`${label}: Measurement is required`, 'error'); return; }
+    if (a.type === 'modbus_write' && modbusRowError(a)) { toast(`${label}: ${modbusRowError(a)}`, 'error'); return; }
+  }
+
+  const rule = {
+    name,
+    tag:             document.getElementById('f-tag').value.trim(),
+    enabled:         document.getElementById('f-enabled').checked,
+    triggers:        triggerRows,
+    trigger_logic:   triggerLogic,
+    conditions:      conditionRows,
+    condition_logic: conditionLogic,
+    actions:         actionRows,
+    cooldown:         parseInt(document.getElementById('f-cooldown').value) || 0,
+    max_executions:   parseInt(document.getElementById('f-maxex').value)    || 0,
+    max_exec_period:  document.getElementById('f-maxex-period').value       || '',
+    trigger_window:   triggerLogic === 'AND' ? (parseInt(document.getElementById('f-trigger-window').value) || 0) : 0,
+  };
+
+  try {
+    if (editingRule && editingRule.id) {
+      await API.updateRule(editingRule.id, rule);
+      setRuleTag(editingRule.id, rule.tag);
+      toast('Rule updated', 'success');
+    } else {
+      const resp = await API.addRule(rule);
+      /* Try to extract the new rule ID from the response to tag it */
+      try {
+        const body = await resp.json();
+        if (body && body.id) setRuleTag(body.id, rule.tag);
+      } catch(_) {}
+      toast('Rule created', 'success');
+    }
+    _ruleEditorDirty = false;
+    closeModal();
+    loadRules();
+  } catch(e) {
+    toast('Failed to save rule: ' + e.message, 'error');
+  }
+}
+
+/* ===================================================
+ * ACAP Event helpers — called from fire_vapix_event action rows
+ * =================================================== */
+
+function _acapEventRowIndex(btn) {
+  const row = btn.closest('.tca-row');
+  if (!row) return -1;
+  return parseInt(row.id.replace('arow-', ''));
+}
+
+function _acapEventSyncRow(i) {
+  const el = document.getElementById('arow-' + i);
+  if (!el) return;
+  const d = { type: actionRows[i].type };
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    d[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
+  });
+  actionRows[i] = d;
+}
+
+function acapEventStartAdd(btn) {
+  const i = _acapEventRowIndex(btn);
+  if (i < 0) return;
+  _acapEventSyncRow(i);
+  actionRows[i]._adding = 'true';
+  renderActionList();
+}
+
+function acapEventCancelAdd(btn) {
+  const i = _acapEventRowIndex(btn);
+  if (i < 0) return;
+  _acapEventSyncRow(i);
+  const a = actionRows[i];
+  delete a._adding;
+  delete a._new_id;
+  delete a._new_name;
+  delete a._new_stateful;
+  delete a._new_fields;
+  renderActionList();
+}
+
+async function acapEventSaveNew(btn) {
+  const i = _acapEventRowIndex(btn);
+  if (i < 0) return;
+  _acapEventSyncRow(i);
+  const a = actionRows[i];
+  /* Syncing rebuilds the row from its inputs; keep the form open so a
+   * validation error does not throw away what was typed. */
+  a._adding = 'true';
+
+  const id   = (a._new_id   || '').trim();
+  const name = (a._new_name || '').trim();
+
+  if (!id) { toast('Event ID is required', 'error'); return; }
+  if (!/^[A-Za-z0-9_]+$/.test(id)) {
+    toast('Event ID must contain only letters, digits, and underscores', 'error');
+    return;
+  }
+
+  const data = [];
+  for (const part of (a._new_fields || '').split(',').map(p => p.trim()).filter(Boolean)) {
+    const [fname, ftype] = part.split(':').map(p => (p || '').trim());
+    const type = (ftype || '').toLowerCase();
+    if (!/^[A-Za-z0-9_]+$/.test(fname || '') || fname === 'state' || fname === 'value' ||
+        !['string', 'int', 'double', 'bool'].includes(type)) {
+      toast(`Invalid data field "${part}": use name:type with type string, int, double or bool`, 'error');
+      return;
+    }
+    if (data.some(f => f.name === fname)) { toast(`Data field "${fname}" is listed twice`, 'error'); return; }
+    data.push({ name: fname, type });
+  }
+
+  try {
+    const created = await API.addAcapEvent({
+      id,
+      name: name || id,
+      state: a._new_stateful === 'true',
+      data,
+    });
+    await loadAcapEvents();
+    delete a._adding;
+    delete a._new_id;
+    delete a._new_name;
+    delete a._new_stateful;
+    delete a._new_fields;
+    a.event_id = created.id;
+    renderActionList();
+    toast(`Event "${created.id}" created`, 'success');
+  } catch(e) {
+    toast('Failed to create event: ' + e.message, 'error');
+  }
+}
+
+async function acapEventDelete(id) {
+  if (!confirm(`Remove custom event "${id}"? Rules that fire this event will need to be updated.`)) return;
+  try {
+    await API.deleteAcapEvent(id);
+    await loadAcapEvents();
+    toast(`Event "${id}" removed`, 'success');
+    renderActionList();
+  } catch(e) {
+    toast('Failed to remove event: ' + e.message, 'error');
+  }
+}

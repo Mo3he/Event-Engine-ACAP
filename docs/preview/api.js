@@ -1,0 +1,56 @@
+'use strict';
+
+const BASE = '/local/acap_event_engine';
+
+async function apiFetch(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { const t = await r.text(); if (t) msg += `: ${t.slice(0, 200)}`; } catch(_) {}
+    throw new Error(msg);
+  }
+  return r;
+}
+
+const API = {
+  get:  path => apiFetch(`${BASE}/${path}`).then(r => r.json()),
+  post: (path, body) => apiFetch(`${BASE}/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }),
+  put: (path, body) => apiFetch(`${BASE}/${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }),
+  delete: path => apiFetch(`${BASE}/${path}`, { method: 'DELETE' }),
+
+  getRules:      ()      => API.get('rules'),
+  getRule:       id      => API.get(`rules?id=${encodeURIComponent(id)}`),
+  exportRules:   secrets => API.get('rules?action=export' + (secrets ? '&include_secrets=1' : '')),
+  importRules:   rules   => API.post('rules?action=import', rules).then(r => r.json()),
+  addRule:       rule    => API.post('rules', rule),
+  updateRule:    (id, r) => API.post(`rules?id=${encodeURIComponent(id)}`, r),
+  deleteRule:    id      => API.delete(`rules?id=${encodeURIComponent(id)}`),
+  setEnabled:    (id, v) => API.post(`rules?id=${encodeURIComponent(id)}`, { enabled: v }),
+  fireRule:      id      => API.post('fire', { id }),
+  testAction:    (type, config) => API.post('actions', { type, config }),
+
+  getEvents:     (limit, rule, system) => API.get(`events?limit=${limit || 100}${rule ? '&rule=' + encodeURIComponent(rule) : ''}${system ? '&system=' + system : ''}`),
+  clearEvents:   ()      => API.delete('events'),
+  getStatus:     ()      => API.get('engine'),
+  getVariables:  ()      => API.get('variables'),
+  getVariablesDetail: () => API.get('variables?detail=1'),
+  setVariableOptions: (name, opts) => API.post('variables', { name, ...opts }),
+  setVariable:   (name, value, is_counter) => API.post('variables', { name, value, is_counter: !!is_counter }),
+  deleteVariable: name   => API.delete(`variables?name=${encodeURIComponent(name)}`),
+
+  getAcapEvents:   ()   => API.get('acapevents'),
+  addAcapEvent:    ev   => API.post('acapevents', ev).then(r => r.json()),
+  deleteAcapEvent: id   => API.delete(`acapevents?id=${encodeURIComponent(id)}`),
+
+  getCerts:        ()   => API.get('certs'),
+  saveCert:        p    => API.post('certs', p).then(r => r.json()),
+  deleteCert:      name => API.delete(`certs?name=${encodeURIComponent(name)}`),
+};

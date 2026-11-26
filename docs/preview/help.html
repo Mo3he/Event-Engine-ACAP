@@ -1,0 +1,1728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Engine — User Manual</title>
+  <style>
+    /* ── Theme tokens (mirrors style.css) ────────────────────── */
+    :root {
+      --bg:#f3f5f7; --surface:#fff; --surface2:#f7f9fb;
+      --border:#d4dbe2; --accent:#006eb8; --accent-hover:#005f9d;
+      --accent-danger:#c43c3c; --accent-success:#1f7a3f;
+      --text:#1f2a35; --text-muted:#536273; --text-dim:#7b8998;
+      --radius:6px;
+    }
+    [data-theme="dark"] {
+      --bg:#11171d; --surface:#18212b; --surface2:#1f2a36;
+      --border:#2c3b4c; --accent:#3da5e6; --accent-hover:#5bb8ee;
+      --accent-danger:#e06a6a; --accent-success:#43b36b;
+      --text:#e6edf5; --text-muted:#b2c0cf; --text-dim:#8ea0b3;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI','Helvetica Neue',Arial,sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    .shell { display: flex; flex-direction: column; min-height: 100vh; }
+
+    .topbar {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      height: 52px;
+      position: sticky;
+      top: 0;
+      z-index: 200;
+    }
+    .topbar-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -.1px;
+    }
+    .topbar-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: 2px;
+    }
+    .topbar-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .back-link {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 5px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      transition: color .15s, background .15s;
+    }
+    .back-link:hover { color: var(--text); background: var(--surface2); }
+
+    .theme-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 5px 8px;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 14px;
+      transition: color .15s, background .15s;
+    }
+    .theme-btn:hover { color: var(--text); background: var(--surface2); }
+
+    .body-wrap { display: flex; flex: 1; }
+
+    /* ── Sidebar ─────────────────────────────────────────────── */
+    .sidebar {
+      width: 230px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: 52px;
+      height: calc(100vh - 52px);
+      overflow-y: auto;
+      padding: 16px 0 32px;
+    }
+    .sidebar-group-label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 10px 16px 4px;
+    }
+    .sidebar a {
+      display: block;
+      padding: 5px 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: color .12s, border-color .12s, background .12s;
+    }
+    .sidebar a:hover     { color: var(--text); background: var(--surface2); }
+    .sidebar a.active    { color: var(--accent); border-left-color: var(--accent); background: var(--surface2); }
+    .sidebar a.sub       { padding-left: 28px; font-size: 12px; }
+
+    /* ── Content ─────────────────────────────────────────────── */
+    .content {
+      flex: 1;
+      min-width: 0;
+      padding: 32px 40px 80px;
+      max-width: 860px;
+    }
+
+    /* Headings */
+    .content h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .content h2 {
+      font-size: 17px; font-weight: 700; margin-top: 44px; margin-bottom: 10px;
+      padding-bottom: 6px; border-bottom: 1px solid var(--border);
+      scroll-margin-top: 70px;
+    }
+    .content h3 { font-size: 14px; font-weight: 700; margin: 20px 0 6px; scroll-margin-top: 70px; }
+    .content h4 { font-size: 13px; font-weight: 600; margin: 14px 0 4px; color: var(--text-muted); }
+
+    /* Paragraphs & lists */
+    .content p   { margin-bottom: 10px; }
+    .content ul, .content ol { padding-left: 20px; margin-bottom: 10px; }
+    .content li  { margin-bottom: 3px; }
+    .content strong { font-weight: 600; }
+    .content em     { font-style: italic; color: var(--text-muted); }
+    .content a      { color: var(--accent); text-decoration: none; }
+    .content a:hover { text-decoration: underline; }
+
+    /* Code */
+    .content code {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'SFMono-Regular','Consolas','Liberation Mono',Menlo,monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .content pre {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      overflow-x: auto;
+      margin-bottom: 12px;
+    }
+    .content pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    /* Tables */
+    .content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 14px;
+      font-size: 13px;
+    }
+    .content th {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      padding: 7px 10px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .content td {
+      border: 1px solid var(--border);
+      padding: 7px 10px;
+      vertical-align: top;
+    }
+    .content tr:nth-child(even) td { background: var(--surface2); }
+
+    /* Callout boxes */
+    .callout {
+      border-radius: var(--radius);
+      padding: 11px 14px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .callout-icon { flex-shrink: 0; font-size: 16px; margin-top: 1px; }
+    .callout.tip  { background: #e8f5ff; border-left: 3px solid var(--accent); }
+    .callout.warn { background: #fff8e8; border-left: 3px solid #d9a24b; }
+    .callout.danger { background: #fff0f0; border-left: 3px solid var(--accent-danger); }
+    [data-theme="dark"] .callout.tip  { background: #0e2233; }
+    [data-theme="dark"] .callout.warn { background: #211a0a; }
+    [data-theme="dark"] .callout.danger { background: #210a0a; }
+
+    /* Pill badge */
+    .badge {
+      display: inline-block;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      color: var(--text-muted);
+    }
+
+    /* Variable chip */
+    .var {
+      display: inline-block;
+      background: #e6f4ff;
+      border: 1px solid #b6d8f5;
+      border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'SFMono-Regular','Consolas',monospace;
+      font-size: 11.5px;
+      color: #005a99;
+    }
+    [data-theme="dark"] .var {
+      background: #0b2136;
+      border-color: #1a4a6b;
+      color: #6cc5f5;
+    }
+
+    /* Section divider */
+    hr.section-rule {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 36px 0;
+    }
+
+    /* Search */
+    .search-box {
+      display: flex;
+      align-items: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0 8px;
+      gap: 6px;
+      transition: border-color .15s;
+    }
+    .search-box:focus-within { border-color: var(--accent); }
+    .search-box svg { flex-shrink: 0; color: var(--text-dim); }
+    .search-box input {
+      border: none;
+      background: none;
+      color: var(--text);
+      font-size: 13px;
+      padding: 5px 0;
+      width: 100%;
+      outline: none;
+    }
+    .search-box input::placeholder { color: var(--text-dim); }
+    .search-clear {
+      background: none; border: none; cursor: pointer; color: var(--text-dim);
+      font-size: 16px; padding: 0 2px; display: none; line-height: 1;
+    }
+    .search-clear:hover { color: var(--text); }
+    .search-box.has-query .search-clear { display: block; }
+    mark.search-hl {
+      background: rgba(0,110,184,.2);
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+    .search-no-results {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+      font-size: 14px;
+      display: none;
+    }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .sidebar { display: none; }
+      .content { padding: 20px 16px 60px; }
+      .search-box { display: none; }
+    }
+  </style>
+</head>
+<body>
+<script>
+  (function() {
+    var t = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
+
+<div class="shell">
+
+  <div class="topbar">
+    <span class="topbar-title">Event Engine</span>
+    <span class="topbar-sub">User Manual</span>
+    <div class="topbar-actions">
+      <button class="theme-btn" id="theme-btn" title="Toggle theme">☀</button>
+      <a class="back-link" href="index.html">← Back to App</a>
+    </div>
+  </div>
+
+  <div class="body-wrap">
+
+    <nav class="sidebar" id="sidebar">
+      <div class="search-box" id="search-box" style="margin:12px 12px 8px;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="search-input" placeholder="Search docs…" autocomplete="off">
+        <button class="search-clear" id="search-clear" title="Clear">×</button>
+      </div>
+      <div class="sidebar-group-label">Getting Started</div>
+      <a href="#overview">Overview</a>
+      <a href="#accessing-ui">Accessing the UI</a>
+
+      <div class="sidebar-group-label">Rules</div>
+      <a href="#rules">How Rules Work</a>
+      <a href="#creating-rules">Creating a Rule</a>
+      <a href="#rule-settings">Rule Settings</a>
+      <a href="#rule-management">Managing Rules</a>
+
+      <div class="sidebar-group-label">Triggers</div>
+      <a href="#triggers">All Triggers</a>
+      <a href="#trig-vapix" class="sub">Device Event</a>
+      <a href="#trig-schedule" class="sub">Schedule</a>
+      <a href="#trig-mqtt" class="sub">MQTT Message</a>
+      <a href="#trig-webhook" class="sub">HTTP Webhook</a>
+      <a href="#trig-io" class="sub">I/O Input</a>
+      <a href="#trig-counter" class="sub">Counter Threshold</a>
+      <a href="#trig-chain" class="sub">Rule Chain</a>
+      <a href="#trig-aoa" class="sub">AOA Scenario</a>
+      <a href="#trig-modbus-read" class="sub">Modbus Read</a>
+      <a href="#trig-modbus-error" class="sub">Modbus Error</a>
+      <a href="#trig-sparkplug" class="sub">Sparkplug Command</a>
+      <a href="#trig-gps" class="sub">GPS / NMEA</a>
+
+      <div class="sidebar-group-label">Conditions</div>
+      <a href="#conditions">All Conditions</a>
+      <a href="#cond-time" class="sub">Time Window</a>
+      <a href="#cond-io" class="sub">I/O State</a>
+      <a href="#cond-counter" class="sub">Counter Compare</a>
+      <a href="#cond-var" class="sub">Variable Compare</a>
+      <a href="#cond-trigger" class="sub">Trigger Data</a>
+      <a href="#cond-http" class="sub">HTTP Check</a>
+      <a href="#cond-aoa" class="sub">AOA Occupancy</a>
+      <a href="#cond-daynight" class="sub">Day / Night</a>
+      <a href="#cond-vapix-state" class="sub">Device Event State</a>
+      <a href="#remote-device-conditions" class="sub">Remote Device Conditions</a>
+
+      <div class="sidebar-group-label">Actions</div>
+      <a href="#actions">All Actions</a>
+      <a href="#act-http" class="sub">HTTP Request</a>
+      <a href="#act-mqtt-pub" class="sub">MQTT Publish</a>
+      <a href="#act-sparkplug-pub" class="sub">Sparkplug B Publish</a>
+      <a href="#act-slack" class="sub">Slack</a>
+      <a href="#act-teams" class="sub">Teams</a>
+      <a href="#act-telegram" class="sub">Telegram</a>
+      <a href="#act-email" class="sub">Email (SMTP)</a>
+      <a href="#act-snapshot" class="sub">Snapshot Upload</a>
+      <a href="#act-ftp" class="sub">FTP Upload</a>
+      <a href="#act-syslog" class="sub">Send Syslog</a>
+      <a href="#act-recording" class="sub">Recording</a>
+      <a href="#act-overlay" class="sub">Overlay Text</a>
+      <a href="#act-overlay-image" class="sub">Overlay Image</a>
+      <a href="#act-ptz" class="sub">PTZ Preset</a>
+      <a href="#act-guard-tour" class="sub">Guard Tour</a>
+      <a href="#act-ir" class="sub">IR Cut Filter</a>
+      <a href="#act-privacy" class="sub">Privacy Mask</a>
+      <a href="#act-wiper" class="sub">Wiper</a>
+      <a href="#act-light" class="sub">Light Control</a>
+      <a href="#act-audio" class="sub">Audio Clip</a>
+      <a href="#act-siren" class="sub">Siren / Light</a>
+      <a href="#act-speaker-display" class="sub">Speaker Display</a>
+      <a href="#act-io-output" class="sub">I/O Output</a>
+      <a href="#act-io-flash" class="sub">I/O Flash</a>
+      <a href="#act-digest" class="sub">Notification Digest</a>
+      <a href="#act-delay" class="sub">Delay</a>
+      <a href="#act-set-var" class="sub">Set Variable</a>
+      <a href="#act-counter" class="sub">Increment Counter</a>
+      <a href="#act-run-rule" class="sub">Run Rule</a>
+      <a href="#act-fire-event" class="sub">Fire ACAP Event</a>
+      <a href="#act-vapix-query" class="sub">Device Event Query</a>
+      <a href="#act-param" class="sub">Set Device Parameter</a>
+      <a href="#act-acap" class="sub">ACAP Control</a>
+      <a href="#act-influx" class="sub">InfluxDB Write</a>
+      <a href="#act-aoa-counts" class="sub">AOA Get Counts</a>
+      <a href="#act-modbus-write" class="sub">Modbus Write</a>
+
+      <div class="sidebar-group-label">Advanced</div>
+      <a href="#remote-device">Remote Device Actions</a>
+      <a href="#remote-device-conditions">Remote Device Conditions</a>
+      <a href="#variables">Dynamic Variables</a>
+      <a href="#while-active">While-Active Actions</a>
+      <a href="#templates">Rule Templates</a>
+      <a href="#arm-disarm">Arm / Disarm</a>
+      <a href="#mqtt-setup">MQTT Setup</a>
+      <a href="#sparkplug-setup">Sparkplug B Setup</a>
+      <a href="#tls-certs">TLS Certificates</a>
+      <a href="#settings">Application Settings</a>
+      <a href="#device-capabilities">Device Capabilities</a>
+      <a href="#event-log">Event Log</a>
+      <a href="#variables-tab">Variables Tab</a>
+      <a href="#backup-restore">Backup &amp; Restore</a>
+      <a href="#api">REST API</a>
+      <a href="#alert-stream" class="sub">Alert Stream</a>
+    </nav>
+
+    <main class="content">
+
+      <!-- ═══════════════════════════════════════════ OVERVIEW -->
+      <h1>Event Engine User Manual</h1>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:24px;">Comprehensive reference for all triggers, conditions, actions, and settings.</p>
+
+      <h2 id="overview">Overview</h2>
+      <p>Event Engine is an <strong>If-This-Then-That style automation engine</strong> that runs directly on your Axis camera as an ACAP application. It replaces and extends the built-in Axis event system with a flexible rule engine that reacts to camera events, schedules, MQTT messages, and webhooks, then responds with notifications, camera commands, logic operations, and more.</p>
+      <p>Each <strong>Rule</strong> is composed of three parts:</p>
+      <ul>
+        <li><strong>Triggers</strong> — what starts the rule (one or more, evaluated as OR or AND)</li>
+        <li><strong>Conditions</strong> — optional checks that must pass before actions run</li>
+        <li><strong>Actions</strong> — what happens when the rule fires (run in sequence)</li>
+      </ul>
+      <p>Rules take effect immediately when saved — no restart required.</p>
+
+      <!-- ═══════════════════════════════════════════ ACCESS UI -->
+      <h2 id="accessing-ui">Accessing the UI</h2>
+      <p>Open a browser and navigate to:</p>
+      <pre><code>http://&lt;camera-ip&gt;/local/acap_event_engine/index.html</code></pre>
+      <p>You will be prompted for camera credentials (admin-level account required). The UI has five sections accessible via the top tab bar:</p>
+      <ul>
+        <li><strong>Rules</strong> — create, manage, and monitor your automation rules</li>
+        <li><strong>Event Log</strong> — per-rule firing history</li>
+        <li><strong>Variables</strong> — named variables and counters</li>
+        <li><strong>Settings</strong> — MQTT broker, SMTP, location, proxy, and backup</li>
+        <li><strong>API Docs</strong> — interactive OpenAPI documentation</li>
+      </ul>
+
+      <!-- ═══════════════════════════════════════════ RULES -->
+      <h2 id="rules">How Rules Work</h2>
+      <p>A rule fires when <em>any</em> of its triggers activate (OR logic by default, switchable to AND). Before actions run, conditions are checked — by default all must evaluate to <code>true</code> (AND logic), but condition logic can be switched to OR so that any passing condition allows execution. Actions then execute in sequence from top to bottom.</p>
+
+      <h2 id="creating-rules">Creating a Rule</h2>
+      <ol>
+        <li>Click <strong>+ New Rule</strong> on the Rules tab (or choose a starter from <strong>Templates</strong>).</li>
+        <li>Enter a descriptive <strong>rule name</strong>.</li>
+        <li>Click <strong>+ Add Trigger</strong> and choose a trigger type from the dropdown.</li>
+        <li>Optionally click <strong>+ Add Condition</strong> to add guards that must pass.</li>
+        <li>Click <strong>+ Add Action</strong> and configure what should happen.</li>
+        <li>Click <strong>Save Rule</strong>. The rule is active immediately.</li>
+      </ol>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>Use the <strong>Insert variable</strong> button in any text field to pick from available <code>{{variable}}</code> placeholders. Available variables change based on the trigger type selected.</div>
+      </div>
+
+      <h2 id="rule-settings">Rule Settings</h2>
+      <table>
+        <tr><th>Setting</th><th>Description</th></tr>
+        <tr><td><strong>Enabled</strong></td><td>Toggle to enable or disable a rule without deleting it.</td></tr>
+        <tr><td><strong>Trigger logic</strong></td><td><strong>OR</strong> (default) — fires when any trigger activates. <strong>AND</strong> has two modes: <strong>All active simultaneously</strong> (default) — fires only when all triggers are in their active state at the same time; <strong>Correlation window</strong> — all triggers must fire within a configurable time window (seconds), set to 0 for no time limit.</td></tr>
+        <tr><td><strong>Condition logic</strong></td><td><strong>AND</strong> (default) — all conditions must pass. <strong>OR</strong> — any single passing condition allows execution.</td></tr>
+        <tr><td><strong>Cooldown</strong></td><td>Minimum seconds between firings. Prevents alert floods when a trigger fires repeatedly.</td></tr>
+        <tr><td><strong>Max Executions</strong></td><td>Limit how many times the rule can fire within a period: per minute, per hour, per day, or lifetime total. The period counter auto-resets; the lifetime counter resets when the rule is saved.</td></tr>
+      </table>
+
+      <h2 id="rule-management">Managing Rules</h2>
+      <p>Each rule card shows the rule name, trigger and action badges, and a last-fired timestamp. Actions available from the rule card:</p>
+      <ul>
+        <li><strong>Edit</strong> — open the rule in the editor</li>
+        <li><strong>Duplicate</strong> — clone the rule as a starting point</li>
+        <li><strong>Enable / Disable</strong> — toggle without deleting</li>
+        <li><strong>Fire Now</strong> — manually trigger the rule once for testing</li>
+        <li><strong>Delete</strong> — permanently remove the rule</li>
+      </ul>
+      <p>Use the <strong>search bar</strong> at the top of the Rules tab to filter rules by name. Use <strong>Export</strong> / <strong>Import</strong> to download or upload rules as JSON. Individual rules can also be exported from their action menu.</p>
+
+      <!-- ═══════════════════════════════════════════ TRIGGERS -->
+      <h2 id="triggers">Triggers</h2>
+      <p>A trigger defines what event starts a rule. You can add multiple triggers to a single rule; all triggers of the same type stack as OR conditions by default.</p>
+
+      <h3 id="trig-vapix">Device Event</h3>
+      <p>Fires when any device event occurs — motion detection, thermometry, tampering, I/O state changes, analytics, air quality, and more. Events are loaded live from the device and presented in a searchable dropdown.</p>
+      <h4>Options</h4>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Event</strong></td><td>Select from the live event catalog. Use the search box to filter by name or topic.</td></tr>
+        <tr><td><strong>Value condition</strong></td><td>Optionally filter on an event data field: boolean match (true/false), string value (substring contains), or numeric threshold (<em>is above</em>, <em>is below</em>, <em>equals</em>, <em>is between</em>).</td></tr>
+        <tr><td><strong>Hold duration</strong></td><td>Require the value condition to persist for N seconds before the rule fires. The timer resets if the condition breaks before N seconds elapse.</td></tr>
+      </table>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>Use the <strong>Device Event Query</strong> action after this trigger to fetch additional sensor data from the device and inject it as <code>{{trigger.*}}</code> variables for downstream actions.</div>
+      </div>
+
+      <h3 id="trig-schedule">Schedule</h3>
+      <p>Fires on a time-based schedule. Four schedule modes are available:</p>
+      <table>
+        <tr><th>Mode</th><th>Description</th></tr>
+        <tr><td><strong>Cron</strong></td><td>Standard 5-field cron expression (<code>minute hour day month weekday</code>). Use <code>*</code> for "every". Example: <code>0 8 * * 1-5</code> = every weekday at 08:00.</td></tr>
+        <tr><td><strong>Interval</strong></td><td>Fire repeatedly every N seconds. Minimum: 10 seconds.</td></tr>
+        <tr><td><strong>Daily time</strong></td><td>Fire at a specific time of day. Select the days of the week to apply.</td></tr>
+        <tr><td><strong>Sunrise / Sunset</strong></td><td>Fire at astronomical events: sunrise, sunset, solar noon, civil dawn, or civil dusk. Optional offset in minutes (positive = after, negative = before). Uses latitude/longitude from the Location settings (or a per-trigger override).</td></tr>
+      </table>
+
+      <h3 id="trig-mqtt">MQTT Message</h3>
+      <p>Fires when an incoming MQTT message arrives on a matching topic. Requires the MQTT broker to be configured in <strong>Settings</strong>.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Topic</strong></td><td>MQTT topic to subscribe to. Wildcards <code>+</code> (single level) and <code>#</code> (multi-level) are supported.</td></tr>
+        <tr><td><strong>Payload filter</strong></td><td>Optional. Only fire if the payload contains this string.</td></tr>
+      </table>
+      <p>Available variables injected by this trigger: <span class="var">{{trigger.topic}}</span>, <span class="var">{{trigger.payload}}</span>. When the payload is a JSON object, its top-level fields are available too, e.g. <span class="var">{{trigger.temperature}}</span> for <code>{"temperature": 21.5}</code>.</p>
+
+      <h3 id="trig-webhook">HTTP Webhook</h3>
+      <p>Fires when an external system sends an HTTP POST request to the camera with a matching token. Each webhook trigger has its own unique secret token (up to 120 characters).</p>
+      <pre><code>POST http://&lt;camera-ip&gt;/local/acap_event_engine/fire
+Content-Type: application/json
+
+{
+  "token": "my-secret-token",
+  "payload": { "source": "doorbell", "floor": 2 }
+}</code></pre>
+      <p>Values from <code>payload</code> are injected as <span class="var">{{trigger.KEY}}</span> variables (e.g. <span class="var">{{trigger.source}}</span>, <span class="var">{{trigger.floor}}</span>).</p>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Webhook requests require <strong>admin-level camera credentials</strong> (HTTP Basic Auth). Use HTTPS where available to protect the token and credentials in transit.</div>
+      </div>
+
+      <h3 id="trig-io">I/O Input</h3>
+      <p>Fires on a digital input port state change.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Port</strong></td><td>The I/O port number to monitor.</td></tr>
+        <tr><td><strong>Edge</strong></td><td><em>Rising</em> (low→high), <em>Falling</em> (high→low), or <em>Both</em>.</td></tr>
+        <tr><td><strong>Hold duration</strong></td><td>Require the state to persist for N seconds before firing.</td></tr>
+      </table>
+
+      <h3 id="trig-counter">Counter Threshold</h3>
+      <p>Fires when a named counter value crosses a configured threshold. Useful for "fire after 10 motion events" type logic in combination with the <strong>Increment Counter</strong> action.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Counter name</strong></td><td>The name of the counter to watch.</td></tr>
+        <tr><td><strong>Operator</strong></td><td>Comparison: <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, or <code>=</code>.</td></tr>
+        <tr><td><strong>Value</strong></td><td>The numeric threshold value.</td></tr>
+      </table>
+
+      <h3 id="trig-chain">Rule Chain</h3>
+      <p>Fires when another named rule executes. Use this to build multi-step workflows where one rule triggers another.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Rule name</strong></td><td>The name of the rule whose execution triggers this one.</td></tr>
+      </table>
+
+      <h3 id="trig-aoa">AOA Scenario</h3>
+      <p>Fires when an <strong>Axis Object Analytics</strong> scenario generates an event. Requires the AOA application to be installed and configured on the camera.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Scenario</strong></td><td>Select from the list of configured AOA scenarios.</td></tr>
+        <tr><td><strong>Object class filter</strong></td><td>Optionally limit to a specific class: Human, Car, Truck, Bus, Bike, Other Vehicle, or Any.</td></tr>
+      </table>
+      <p>Variables injected: <span class="var">{{trigger.scenario_id}}</span>, <span class="var">{{trigger.active}}</span>, <span class="var">{{trigger.reason}}</span> (detected object class, e.g. <code>Human</code>).</p>
+
+      <h3 id="trig-modbus-read">Modbus Read</h3>
+      <p>Poll a Modbus device over TCP, a serial gateway, or direct RTU/RS-485. Select holding registers, input registers, coils, or discrete inputs. A read can decode one value or a register map; map values are updated as variables and are available to later actions.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Connection</strong></td><td>TCP connects to the device host and port. Serial Gateway uses the camera's configured PortManager service. RTU direct selects a serial device, baud rate and parity.</td></tr>
+        <tr><td><strong>Read</strong></td><td><em>One value</em> reads a single value; <em>Block of values</em> reads a register map. One request covers up to 125 registers (the Modbus limit) or 2000 bits; a larger map is read in several requests, up to 2000 registers from the first to the last address.</td></tr>
+        <tr><td><strong>Data type</strong></td><td>Registers support unsigned/signed 16-, 32- and 64-bit integers, 32- and 64-bit floats, and strings (two bytes per register, up to 125 registers; the text ends at the first NUL). String length is counted in registers, not characters; UTF-8 characters may use multiple bytes. Bit reads return 0 or 1.</td></tr>
+        <tr><td><strong>Word / byte order</strong></td><td><code>ABCD</code>, <code>CDAB</code>, <code>BADC</code>, or <code>DCBA</code> for 32- and 64-bit values. For 16-bit values and strings, choose <em>AB (normal)</em> or <em>BA (byte swap)</em>: the two bytes of each register.</td></tr>
+        <tr><td><strong>Encoding</strong></td><td>For strings: UTF-8 (default), ASCII, ISO-8859-1, ISO-8859-2, Windows-1250 or Windows-1252. Text is converted to UTF-8 for variables; bytes that are not valid in the encoding read as <code>?</code>.</td></tr>
+        <tr><td><strong>Scale / offset</strong></td><td>Numeric values are reported as <code>raw × scale + offset</code>, e.g. a register of 231 with scale <code>0.1</code> reads as 23.1. Both accept decimals with a point or a comma (<code>-0,5</code>). Optional decimal rounding is applied after scaling.</td></tr>
+        <tr><td><strong>Store in variable</strong></td><td>Optional for a single value. Every map row has its own variable; variables are volatile unless made persistent separately.</td></tr>
+        <tr><td><strong>Compare / threshold</strong></td><td>For a map, select which variable to compare. Threshold operators are <code>gt</code>, <code>gte</code>, <code>lt</code>, <code>lte</code>, <code>eq</code>, and <code>between</code>. Thresholds fire on a false-to-true edge. Without a threshold, the rule fires on the first successful read and whenever any value changes.</td></tr>
+      </table>
+      <p>Values are available as <span class="var">{{trigger.value}}</span> and <span class="var">{{trigger.NAME}}</span> for each mapped variable; the complete map is under <span class="var">{{trigger.values}}</span>. Built-in fields include <span class="var">{{trigger.register}}</span>, <span class="var">{{trigger.register_type}}</span>, <span class="var">{{trigger.slave_id}}</span>, and <span class="var">{{trigger.data_type}}</span> for register values.</p>
+
+      <h3 id="trig-modbus-error">Modbus Error</h3>
+      <p>Monitor failed Modbus reads and writes. By default the trigger fires when a device starts failing and again when it recovers. Choose <em>Every failed request</em> to fire for each failure. Optionally filter by part of the device address/name and by slave ID.</p>
+      <p>Trigger data includes <span class="var">{{trigger.state}}</span> (<code>failing</code> or <code>recovered</code>), <span class="var">{{trigger.device}}</span>, <span class="var">{{trigger.slave_id}}</span>, <span class="var">{{trigger.operation}}</span>, <span class="var">{{trigger.error}}</span>, <span class="var">{{trigger.message}}</span>, and <span class="var">{{trigger.fail_count}}</span>. Modbus exception details are available as <span class="var">{{trigger.exception_code}}</span> and <span class="var">{{trigger.exception_name}}</span>.</p>
+
+      <h3 id="trig-sparkplug">Sparkplug Command</h3>
+      <p>Fires when a <strong>Sparkplug B</strong> host writes a metric to this device via <code>NCMD</code> or <code>DCMD</code>. This is how a SCADA system commands the device rather than just reading from it. Requires Sparkplug B to be enabled in Settings.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Metric name</strong></td><td>Optional. The metric the host writes, e.g. <code>Speaker/Play</code>. Leave empty to fire on any metric write.</td></tr>
+        <tr><td><strong>Value filter</strong></td><td>Optional. Fire only on an exact value match. Booleans arrive as <code>true</code> or <code>false</code>.</td></tr>
+      </table>
+      <p>Variables injected: <span class="var">{{trigger.metric}}</span>, <span class="var">{{trigger.value}}</span>.</p>
+      <p>Command metrics do not have to be declared in Settings — only metrics the device <em>publishes</em> need to appear in the birth certificate.</p>
+
+      <h3 id="trig-gps">GPS / NMEA</h3>
+      <p>GPS triggers use the NMEA 0183 input configured in <strong>Settings → GPS</strong>. The reader accepts valid RMC and GGA sentences; a fix must remain fresh according to the configured stale timeout.</p>
+      <table>
+        <tr><th>Trigger</th><th>Behavior</th></tr>
+        <tr><td><strong>GPS Update</strong></td><td>Fires on a valid fix, at most once per configured interval.</td></tr>
+        <tr><td><strong>GPS Speed</strong></td><td>Fires when speed enters the selected threshold. Supports above, below, and between comparisons, units (km/h, mph, knots, m/s), and optional hysteresis.</td></tr>
+        <tr><td><strong>GPS Geofence</strong></td><td>Fires when position enters, exits, or does either for a circle or polygon. Circle coordinates are decimal degrees; polygon points are latitude/longitude pairs. Only boundary crossings fire: the first valid fix (at startup or after the fix is lost) sets the baseline.</td></tr>
+        <tr><td><strong>GPS Fix</strong></td><td>Fires when a fix is acquired, lost, or becomes stale.</td></tr>
+      </table>
+      <p>Use GPS template values in actions to place location, speed, or heading directly in an <strong>Overlay Text</strong> action. For example: <code>Speed {{gps.speed_kmh}} km/h - {{gps.latitude}}, {{gps.longitude}}</code>. Values other than age show <code>--</code> when GPS is disabled or no fresh fix is available. The admin-only <code>GET /local/acap_event_engine/gps</code> endpoint reports reader status, counters, fix freshness, and recent raw sentences.</p>
+
+      <!-- ═══════════════════════════════════════════ CONDITIONS -->
+      <h2 id="conditions">Conditions</h2>
+      <p>Conditions act as guards. By default (AND logic), <em>all</em> conditions must evaluate to <code>true</code> before actions run. With OR logic (configurable in <a href="#rule-settings">Rule Settings</a>), any single passing condition is sufficient. If no conditions pass, the rule silently does nothing for that firing.</p>
+
+      <h3 id="cond-time">Time Window</h3>
+      <p>Only allow the rule to fire between two times of day.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Start time</strong></td><td>The earliest time (HH:MM) in the allowed window.</td></tr>
+        <tr><td><strong>End time</strong></td><td>The latest time (HH:MM) in the allowed window. If end &lt; start, the window wraps midnight.</td></tr>
+        <tr><td><strong>Days</strong></td><td>Optional. Select which days of the week the window applies. If left empty, applies every day.</td></tr>
+      </table>
+
+      <h3 id="cond-io">I/O State</h3>
+      <p>Check the current state of a digital I/O port before proceeding.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Port</strong></td><td>The I/O port number to check.</td></tr>
+        <tr><td><strong>Expected state</strong></td><td><em>Active (high)</em> or <em>Inactive (low)</em>.</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
+      </table>
+
+      <h3 id="cond-counter">Counter Compare</h3>
+      <p>Compare a named counter value against a threshold.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Counter name</strong></td><td>Name of the counter to read.</td></tr>
+        <tr><td><strong>Operator</strong></td><td><code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, or <code>=</code></td></tr>
+        <tr><td><strong>Threshold</strong></td><td>Numeric value to compare against.</td></tr>
+      </table>
+
+      <h3 id="cond-var">Variable Compare</h3>
+      <p>Compare a named variable against a string value.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Variable name</strong></td><td>Name of the variable to check. Use <code>system.armed</code> for the arm/disarm pattern (see <a href="#arm-disarm">Arm / Disarm</a>).</td></tr>
+        <tr><td><strong>Operator</strong></td><td><em>equals</em> or <em>not equals</em>.</td></tr>
+        <tr><td><strong>Value</strong></td><td>String to compare against.</td></tr>
+      </table>
+
+      <h3 id="cond-trigger">Trigger Data</h3>
+      <p>Compare a field of the event that fired the rule, using the same field names as <code>{{trigger.KEY}}</code>. Use it to filter on a second field when the trigger's Value Condition already filters on one, for example an ALPV plate read where <code>listName</code> contains <code>block</code>.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Field</strong></td><td>Name of the field in the trigger data, e.g. <code>carState</code>.</td></tr>
+        <tr><td><strong>Operator</strong></td><td><code>=</code>, <code>≠</code>, <em>contains</em>, <em>does not contain</em>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, or <code>&lt;=</code>. <em>contains</em> ignores case; the comparisons use numbers when both sides are numeric.</td></tr>
+        <tr><td><strong>Value</strong></td><td>Value to compare against. Booleans are <code>true</code> / <code>false</code>. Can contain variables such as <code>{{var.NAME}}</code>.</td></tr>
+      </table>
+      <p>The condition fails when the field is missing, for example when the rule is fired manually. To act once per object, compare an ID with a variable the rule sets itself: condition <code>carID</code> ≠ <code>{{var.last_car}}</code>, and a first action <strong>Set Variable</strong> <code>last_car</code> = <code>{{trigger.carID}}</code>.</p>
+
+      <h3 id="cond-http">HTTP Check</h3>
+      <p>Make an HTTP request and pass the condition only if the response matches expectations.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>URL</strong></td><td>The endpoint to check. Supports <code>{{variable}}</code> substitution.</td></tr>
+        <tr><td><strong>Expected HTTP Status</strong></td><td>The status code the response must return (e.g. <code>200</code>).</td></tr>
+        <tr><td><strong>Expected Body Contains</strong></td><td>Optional substring that must appear in the response body.</td></tr>
+        <tr><td><strong>JSON Path</strong></td><td>Optional dot-notation path into a JSON response to extract a value (e.g. <code>data.temperature</code>).</td></tr>
+        <tr><td><strong>JSON Expected Value</strong></td><td>The value the extracted JSON field must equal for the condition to pass.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
+      </table>
+
+      <h3 id="cond-aoa">AOA Occupancy</h3>
+      <p>Poll Axis Object Analytics occupancy for a scenario and pass only if the count satisfies a configured threshold.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Scenario</strong></td><td>The AOA scenario to poll. When a remote device is configured, click <strong>Load</strong> to fetch available scenarios from that device.</td></tr>
+        <tr><td><strong>Object class</strong></td><td>Which class to count: Human, Car, Truck, Bus, Bike, Other Vehicle, or All (total).</td></tr>
+        <tr><td><strong>Operator</strong></td><td><code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, or <code>=</code></td></tr>
+        <tr><td><strong>Count</strong></td><td>Numeric occupancy threshold.</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
+      </table>
+
+      <h3 id="cond-daynight">Day / Night</h3>
+      <p>Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with the latitude/longitude configured in Location settings.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Period</strong></td><td><em>Day</em> or <em>Night</em>.</td></tr>
+        <tr><td><strong>Sunrise / Sunset offset</strong></td><td>Optional minutes to shift each boundary (positive = later, up to ±720). For example, a sunrise offset of <code>60</code> keeps it night until one hour after sunrise, and a sunset offset of <code>-30</code> starts night 30 minutes before sunset.</td></tr>
+        <tr><td><strong>Lat/Lon override</strong></td><td>Optional per-condition coordinates, overriding the global Location setting. Leave empty (or 0/0) to use the Location setting.</td></tr>
+      </table>
+      <p>The rule editor shows when day and night start today, including any offsets, and updates as you type coordinates or offsets. Day can run past midnight, for example when a positive sunset offset moves sunset after 00:00. On days with no sunrise or sunset, midnight sun counts as day and polar night as night.</p>
+
+      <h3 id="cond-vapix-state">Device Event State</h3>
+      <p>Check the current state of any device event by polling the device’s event instances.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Topic / Event</strong></td><td>Select from the live event catalog or type a topic substring. When a remote device is configured, click <strong>Load</strong> to fetch the full event catalog from that device — no manual entry needed.</td></tr>
+        <tr><td><strong>Data key</strong></td><td>The event data key to inspect (e.g. <code>active</code>).</td></tr>
+        <tr><td><strong>Expected value</strong></td><td>The value the data key must equal (e.g. <code>true</code> or <code>1</code>).</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
+      </table>
+
+      <!-- ═══════════════════════════ REMOTE DEVICE CONDITIONS -->
+      <hr class="section-rule">
+      <h2 id="remote-device-conditions">Remote Device Conditions</h2>
+      <p>Three condition types — <strong>I/O State</strong>, <strong>AOA Occupancy</strong>, and <strong>Device Event State</strong> — can evaluate a <strong>remote Axis device</strong> instead of the camera running Event Engine. This enables cross-device logic: for example, "only activate the speaker display if a door sensor on a different camera is currently active".</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Target Device</strong></td><td>Select <em>Local (this camera)</em> (default) or <em>Remote device</em>.</td></tr>
+        <tr><td><strong>IP / Hostname</strong></td><td>IP address or hostname of the remote Axis device, e.g. <code>192.168.1.100</code>.</td></tr>
+        <tr><td><strong>Username</strong></td><td>Login name on the remote device (default: <code>root</code>).</td></tr>
+        <tr><td><strong>Password</strong></td><td>Password for the remote device user.</td></tr>
+      </table>
+      <h4>Loading Remote Scenarios and Events</h4>
+      <p>For <strong>AOA Occupancy</strong> and <strong>Device Event State</strong> conditions, a <strong>Load</strong> button appears once a remote host is configured. Click it to fetch available AOA scenarios or the full event catalog directly from the remote device — no manual entry of scenario IDs or topic paths required.</p>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>Combine with <a href="#remote-device">Remote Device Actions</a> to build fully cross-device automation: detect an event on one camera, validate a condition on a second, and act on a third.</div>
+      </div>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Remote condition checks add a short network round-trip (typically 100–500 ms on a LAN). Avoid using them in rules with very tight timing requirements.</div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════ ACTIONS -->
+      <h2 id="actions">Actions</h2>
+      <p>Actions run <strong>in sequence</strong> from top to bottom when a rule fires and all conditions pass. You can drag action rows to reorder them. All text fields support <code>{{variable}}</code> substitution — see <a href="#variables">Dynamic Variables</a>.</p>
+
+      <h3 id="act-http">HTTP Request</h3>
+      <p>Send an HTTP request to any URL.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Method</strong></td><td>GET, POST, PUT, or DELETE.</td></tr>
+        <tr><td><strong>URL</strong></td><td>Target URL. Supports <code>{{variable}}</code> substitution.</td></tr>
+        <tr><td><strong>Username / Password</strong></td><td>Optional HTTP Basic Auth credentials.</td></tr>
+        <tr><td><strong>Headers</strong></td><td>Optional key/value pairs (e.g. <code>Authorization: Bearer token</code>).</td></tr>
+        <tr><td><strong>Body</strong></td><td>Request body (POST/PUT). Template substitution supported.</td></tr>
+        <tr><td><strong>Attach snapshot</strong></td><td>Fetch a JPEG from the camera and make it available as <span class="var">{{trigger.snapshot_base64}}</span> in subsequent actions and in this action's body.</td></tr>
+        <tr><td><strong>Attach ALPV image</strong></td><td>For AXIS License Plate Verifier events: fetch the image ALPV saved for the car (vehicle crop, plate crop or frame, per ALPV's <em>Save full frame</em> setting) as <span class="var">{{trigger.alpv_image_base64}}</span>. ALPV saves it a few seconds after it first sees the car, so the request waits up to 15 s (other rules keep running), then sends without it.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
+        <tr><td><strong>Fallback action</strong></td><td>Execute an alternate action when the request fails (non-2xx or network error): log a syslog message, publish to MQTT, or send a secondary HTTP GET request.</td></tr>
+      </table>
+
+      <h3 id="act-mqtt-pub">MQTT Publish</h3>
+      <p>Publish a message to an MQTT topic. Requires the MQTT broker to be configured in Settings.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Topic</strong></td><td>MQTT topic to publish to. Template substitution supported.</td></tr>
+        <tr><td><strong>Payload</strong></td><td>Message payload. Template substitution supported.</td></tr>
+        <tr><td><strong>QoS</strong></td><td>Quality of service: 0 (at most once) or 1 (at least once).</td></tr>
+        <tr><td><strong>Retain</strong></td><td>Set the MQTT retain flag so the broker keeps the last message for new subscribers.</td></tr>
+      </table>
+
+      <h3 id="act-sparkplug-pub">Sparkplug B Publish</h3>
+      <p>Publish declared metrics as a Sparkplug B <code>NDATA</code> (or <code>DDATA</code> when a device id is configured). Requires Sparkplug B to be enabled in <strong>Settings → Sparkplug B Edge Node</strong>.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Metrics</strong></td><td>One <code>MetricName=value</code> per line. Values support template substitution, e.g. <code>Camera/Temperature={{trigger.MaxTemp}}</code>.</td></tr>
+      </table>
+      <p><strong>Metric names must already be declared in Settings.</strong> Sparkplug requires every metric to appear in the birth certificate, so an undeclared name is rejected and logged rather than published.</p>
+      <p>Values are converted to the datatype declared for that metric, so <code>23.7</code> becomes a Double, <code>true</code> becomes a Boolean, and so on.</p>
+
+      <h3 id="act-slack">Slack</h3>
+      <p>Send a message to a Slack channel via an incoming webhook.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Webhook URL</strong></td><td>The Slack incoming webhook URL.</td></tr>
+        <tr><td><strong>Message</strong></td><td>Message text. Template substitution supported. Slack markdown is allowed.</td></tr>
+        <tr><td><strong>Channel override</strong></td><td>Optional. Override the default channel configured in the webhook.</td></tr>
+        <tr><td><strong>Username override</strong></td><td>Optional. Override the display name.</td></tr>
+        <tr><td><strong>Attach snapshot</strong></td><td>Capture and include a camera snapshot in the Slack message.</td></tr>
+      </table>
+
+      <h3 id="act-teams">Teams</h3>
+      <p>Send an Adaptive Card to Microsoft Teams via a Power Automate / Workflows webhook.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Webhook URL</strong></td><td>The Teams channel incoming webhook URL.</td></tr>
+        <tr><td><strong>Title</strong></td><td>Optional card title. Template substitution supported.</td></tr>
+        <tr><td><strong>Message</strong></td><td>Card body text. Template substitution supported.</td></tr>
+        <tr><td><strong>Theme colour</strong></td><td>Optional hex colour for the card accent bar (e.g. <code>#FF0000</code>).</td></tr>
+        <tr><td><strong>Attach snapshot</strong></td><td>Capture and include a camera snapshot in the Teams card.</td></tr>
+      </table>
+
+      <h3 id="act-telegram">Telegram</h3>
+      <p>Send a message via the Telegram Bot API.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Bot token</strong></td><td>Your Telegram bot's API token (from @BotFather).</td></tr>
+        <tr><td><strong>Chat ID</strong></td><td>The target chat, group, or channel ID.</td></tr>
+        <tr><td><strong>Message</strong></td><td>Message text. Template substitution supported. Use MarkdownV2 or HTML parse mode.</td></tr>
+        <tr><td><strong>Parse mode</strong></td><td>Markdown, HTML, or plain text.</td></tr>
+        <tr><td><strong>Disable link preview</strong></td><td>Suppress Telegram's URL preview cards.</td></tr>
+        <tr><td><strong>Attach snapshot</strong></td><td>Capture a camera snapshot and send it as a photo in the Telegram message.</td></tr>
+      </table>
+
+      <h3 id="act-email">Email (SMTP)</h3>
+      <p>Send an email. The SMTP server, credentials, and from address are configured once in <strong>Settings → Email (SMTP)</strong>; each action only needs the recipient, subject, and body.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>To</strong></td><td>Recipient email address (comma-separated for multiple recipients).</td></tr>
+        <tr><td><strong>Subject</strong></td><td>Email subject. Template substitution supported.</td></tr>
+        <tr><td><strong>Body</strong></td><td>Email body. Template substitution supported.</td></tr>
+        <tr><td><strong>Attach snapshot</strong></td><td>Capture and attach a camera snapshot JPEG to the email.</td></tr>
+      </table>
+
+      <h3 id="act-snapshot">Snapshot Upload</h3>
+      <p>Capture a JPEG from the camera and upload it to a URL.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>URL</strong></td><td>Target URL. Template substitution supported.</td></tr>
+        <tr><td><strong>Method</strong></td><td>POST or PUT.</td></tr>
+        <tr><td><strong>Channel</strong></td><td>Video channel to capture from.</td></tr>
+        <tr><td><strong>Username / Password</strong></td><td>Optional Basic Auth credentials for the target server.</td></tr>
+        <tr><td><strong>Extra headers</strong></td><td>Optional custom HTTP headers for the upload request.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
+      </table>
+      <p>A response other than 2xx counts as a failure and is shown on the rule in the Event Log. To upload at a fixed interval, use a <a href="#trig-schedule">Schedule</a> trigger with an interval.</p>
+
+      <h3 id="act-ftp">FTP Upload</h3>
+      <p>Capture a JPEG and upload it to an FTP, FTPS or SFTP server.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>URL</strong></td><td>Full FTP URL including path. Template-aware (e.g. <code>ftp://server/{{camera.serial}}/{{date}}_{{time}}.jpg</code>). Directories are created automatically.</td></tr>
+        <tr><td><strong>Username / Password</strong></td><td>FTP credentials.</td></tr>
+        <tr><td><strong>Use TLS (FTPS)</strong></td><td>Encrypt an <code>ftp://</code> connection (explicit FTPS, AUTH TLS); fails if the server doesn't support it. <code>ftps://</code> URLs (implicit FTPS) are always encrypted; <code>sftp://</code> uses SSH, so the TLS options don't apply.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
+      </table>
+
+      <h3 id="act-syslog">Send Syslog</h3>
+      <p>Write a message to the camera's system log (visible in the camera's system log view).</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Message</strong></td><td>Syslog message text. Template substitution supported.</td></tr>
+        <tr><td><strong>Level</strong></td><td>Log severity: info, warning, or error.</td></tr>
+      </table>
+
+      <h3 id="act-recording">Recording</h3>
+      <p>Start or stop a recording on the camera.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Start</em> or <em>Stop</em>.</td></tr>
+        <tr><td><strong>Stream profile</strong></td><td>Recording profile to use (configured in the camera's recording settings).</td></tr>
+        <tr><td><strong>Max duration</strong></td><td>Maximum recording length in seconds. Recording stops automatically after this limit.</td></tr>
+        <tr><td><strong>While active</strong></td><td>Automatically stop the recording when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+
+      <h3 id="act-overlay">Overlay Text</h3>
+      <p>Write text on the live video stream.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Show / update</em> writes the text; <em>Clear</em> removes the overlay.</td></tr>
+        <tr><td><strong>Channel</strong></td><td>Video channel number.</td></tr>
+        <tr><td><strong>Overlay name</strong></td><td>Optional. Actions with the same name and channel control the same overlay, also across rules, so one rule can show an alert and another can clear it. Leave empty to use the channel's shared overlay.</td></tr>
+        <tr><td><strong>Text</strong></td><td>Overlay text. Template substitution supported.</td></tr>
+        <tr><td><strong>Position</strong></td><td>Where to place the text: top-left, top-right, bottom-left, bottom-right, top, bottom, <em>Custom (X,Y)</em> (from -1 to 1, left/top to right/bottom), or <em>Keep current</em>.</td></tr>
+        <tr><td><strong>Text colour</strong></td><td>Overlay colour: white, black, red, transparent, or semi-transparent.</td></tr>
+        <tr><td><strong>Font size</strong></td><td>Optional. Text height in pixels; the camera's range is usually 16–200. Empty = the camera's default.</td></tr>
+        <tr><td><strong>Background</strong> / <strong>Outline</strong></td><td>Optional. Colour behind the text and around the letters, from the same list as the text colour. <em>Default</em> leaves the camera's own style. Unset fields are not sent, so an update without them keeps the overlay's current style.</td></tr>
+        <tr><td><strong>Duration</strong></td><td>Seconds before the overlay is cleared automatically; firing again restarts the countdown. Set to 0 and enable <em>While active</em> to clear when the triggering condition ends.</td></tr>
+        <tr><td><strong>While active</strong></td><td>Automatically clear the overlay when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+      <p>Event Engine only changes or removes overlays it created. Overlays added in the camera's own settings or by other apps are left alone, and Event Engine's overlays are removed when it stops.</p>
+
+      <h3 id="act-overlay-image">Overlay Image</h3>
+      <p>Show an image on the live video stream, for example a transparent alert frame, together with an Overlay Text action for the details.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Show / update</em> shows the image (or swaps it); <em>Clear</em> removes it.</td></tr>
+        <tr><td><strong>Channel</strong></td><td>Video channel number.</td></tr>
+        <tr><td><strong>Overlay name</strong></td><td>Optional. Actions with the same name and channel control the same image overlay, also across rules. Image and text overlays are named separately, so an alert frame and its text can share a name.</td></tr>
+        <tr><td><strong>Image</strong></td><td>An image uploaded to the camera, chosen from the list. For a remote device, enter its file name as shown in that device's overlay list.</td></tr>
+        <tr><td><strong>Position</strong></td><td>As for Overlay Text. The position is the image's top-left corner.</td></tr>
+        <tr><td><strong>Duration</strong> / <strong>While active</strong></td><td>As for Overlay Text.</td></tr>
+      </table>
+      <p><strong>Preparing the image:</strong> upload it once in the camera's settings under <strong>Video &gt; Overlays</strong>. A PNG with a transparent background keeps the video visible through it. Make it the size of the camera's full resolution (for example 3840×2160 on a 4K camera) and upload it with scaling to the stream resolution turned on, so it covers the same part of the picture at every stream resolution; a smaller image covers only part of a full-resolution stream.</p>
+      <p>An image overlay counts as Event Engine's while it shows the image at the position Event Engine set, so another overlay showing the same image elsewhere (for example a logo added in the camera's settings) is left alone. Choose a position rather than <em>Keep current</em> for the most reliable result.</p>
+
+      <h3 id="act-ptz">PTZ Preset</h3>
+      <p>Move the camera to a named preset position. Available presets are loaded from the camera.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Channel</strong></td><td>PTZ channel number.</td></tr>
+        <tr><td><strong>Preset</strong></td><td>Preset name (selected from a dropdown populated by the camera).</td></tr>
+      </table>
+
+      <h3 id="act-guard-tour">Guard Tour</h3>
+      <p>Start or stop a configured PTZ guard tour. Available tours are loaded from the camera and shown in a dropdown.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Start</em> or <em>Stop</em>.</td></tr>
+        <tr><td><strong>Tour</strong></td><td>Guard tour to control (selected from a dropdown).</td></tr>
+      </table>
+
+      <h3 id="act-ir">IR Cut Filter</h3>
+      <p>Force the IR cut filter state.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Mode</strong></td><td><em>Day</em> (IR cut on), <em>Night</em> (IR cut off), or <em>Auto</em> (restore automatic switching).</td></tr>
+        <tr><td><strong>Channel</strong></td><td>Video channel to apply the filter change to.</td></tr>
+      </table>
+
+      <h3 id="act-privacy">Privacy Mask</h3>
+      <p>Enable or disable a named privacy mask.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Mask name</strong></td><td>Name of the privacy mask to control (loaded from the camera).</td></tr>
+        <tr><td><strong>Action</strong></td><td><em>Enable</em> or <em>Disable</em>.</td></tr>
+        <tr><td><strong>Channel</strong></td><td>Video channel to apply the mask change to.</td></tr>
+      </table>
+
+      <h3 id="act-wiper">Wiper</h3>
+      <p>Trigger the windshield wiper on cameras that support it (e.g. outdoor housings).</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Start</em> or <em>Stop</em>.</td></tr>
+        <tr><td><strong>Device ID</strong></td><td>Which wiper device to control (for multi-sensor cameras).</td></tr>
+        <tr><td><strong>Duration</strong></td><td>Optional. Seconds to run the wiper (for cameras with variable-duration wipers).</td></tr>
+      </table>
+
+      <h3 id="act-light">Light Control</h3>
+      <p>Control an Axis illuminator (white light or IR LED).</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>On</em>, <em>Off</em>, <em>Auto</em> (restore automatic control), or <em>Flash</em> (strobe the light on/off one or more times).</td></tr>
+        <tr><td><strong>Light ID</strong></td><td>Which illuminator to control (loaded from the camera).</td></tr>
+        <tr><td><strong>Intensity</strong></td><td>Optional brightness percentage (0–100) when turning on or flashing.</td></tr>
+        <tr><td><strong>Flash duration (ms)</strong></td><td>For <em>Flash</em> only: on-time per pulse, in milliseconds (50–5000, default 300). Drives the LED directly, bypassing the firmware light-schedule 1&nbsp;second minimum.</td></tr>
+        <tr><td><strong>Flash count</strong></td><td>For <em>Flash</em> only: number of pulses (1–20, default 1).</td></tr>
+        <tr><td><strong>Gap (ms)</strong></td><td>For <em>Flash</em> only: off-time between pulses, in milliseconds (50–5000). Defaults to the flash duration. Only used when count is greater than 1.</td></tr>
+      </table>
+
+      <h3 id="act-audio">Audio Clip</h3>
+      <p>Play a named media clip on the camera. Available clips are loaded from the camera.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Clip</strong></td><td>Select from audio clips installed on the camera.</td></tr>
+      </table>
+
+      <h3 id="act-siren">Siren / Light</h3>
+      <p>Start or stop a named siren/LED profile on devices that support it (e.g. Axis D6310).</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Start</em> or <em>Stop</em>.</td></tr>
+        <tr><td><strong>Profile</strong></td><td>Siren/light profile name (from a dropdown populated by the camera).</td></tr>
+        <tr><td><strong>While active</strong></td><td>Automatically stop the siren/light when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+
+      <h3 id="act-speaker-display">Speaker Display</h3>
+      <p>Send a text notification to the built-in display on Axis speaker-display devices (e.g. Axis D3110). Requires AXIS OS 11.11 or later.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Show</em> sends a new notification; <em>Stop</em> cancels the current one immediately.</td></tr>
+        <tr><td><strong>Message</strong></td><td>Text to display (max 1000 characters). Template variables such as <code>{{camera.name}}</code> and <code>{{timestamp}}</code> are supported.</td></tr>
+        <tr><td><strong>Text Size</strong></td><td><em>Small</em>, <em>Medium</em> (default), or <em>Large</em>.</td></tr>
+        <tr><td><strong>Text Color</strong></td><td>Hex color for the message text, e.g. <code>#FFFFFF</code>.</td></tr>
+        <tr><td><strong>Background Color</strong></td><td>Optional hex background color, e.g. <code>#000000</code>.</td></tr>
+        <tr><td><strong>Scroll Direction</strong></td><td><em>Right→Left</em> (horizontal) or <em>Bottom→Top</em> (vertical). Leave as <em>None</em> for static text.</td></tr>
+        <tr><td><strong>Scroll Speed</strong></td><td>0–10. 0 = static text, 1 = slowest scroll, 10 = fastest.</td></tr>
+        <tr><td><strong>Duration Type</strong></td><td><em>Indefinite</em> (stays until another request or Stop), <em>Repetitions</em> (scroll N times), <em>Time</em> (display for N seconds), or <em>Time + complete msg</em> (at least N seconds, rounded up to a full scroll).</td></tr>
+        <tr><td><strong>Duration Value</strong></td><td>The repetition count or time in <strong>seconds</strong> for the chosen duration type. Leave Duration Type as <em>Indefinite</em> to control the display manually or via <em>While active</em>.</td></tr>
+        <tr><td><strong>While active</strong></td><td>Only shown when Duration is <em>Indefinite</em>. Automatically sends a Stop command when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+
+      <h3 id="act-io-output">I/O Output</h3>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Ports</strong></td><td>One setting per output port: <em>On (active)</em>, <em>Off (inactive)</em> or <em>Leave as is</em>. The camera's outputs are listed by name. All selected ports are switched in one request, those turning off first, so e.g. changing a stack light from green to purple (ports 1 and 3 on, 2 off) never shows another colour on the way.</td></tr>
+        <tr><td><strong>Duration</strong></td><td>Optional. After N seconds, return every selected port to the state it had before the action. Firing the rule again meanwhile restarts the time but still returns to the original states.</td></tr>
+        <tr><td><strong>While active</strong></td><td>Return the ports to the states they had before the action when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+
+      <h3 id="act-io-flash">I/O Flash</h3>
+      <p>Flash one or more output ports, for example a red and a blue lamp alternating. Timing is in milliseconds and every port is left off when flashing stops.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Output ports</strong></td><td>Port numbers in flash order, e.g. <code>1, 3</code>, up to 8. Ports configured as outputs on the camera are listed by name under the field; click one to add it.</td></tr>
+        <tr><td><strong>Pattern</strong></td><td><em>One after another</em> lights each port in turn (1, 3, 1, 3, …). Colours never mix: the camera switches ports about 20&nbsp;ms apart, so at each change the previous port goes off just before the next comes on, leaving a barely visible dark moment even with no gap. <em>All together</em> switches every port on and off at the same time.</td></tr>
+        <tr><td><strong>On time</strong></td><td>How long each flash stays on, 100–60000 ms. Each switch takes the camera about 80&nbsp;ms, so this is the practical minimum.</td></tr>
+        <tr><td><strong>Gap</strong></td><td>Off time between flashes, 0–60000 ms. Blank means no gap for <em>One after another</em> and the same as the on time for <em>All together</em>.</td></tr>
+        <tr><td><strong>Stop after</strong></td><td><em>Number of flashes</em> (one flash = every listed port once), <em>Time</em> in seconds, or <em>Until rule is disabled</em>.</td></tr>
+        <tr><td><strong>Stop early</strong></td><td>Also stop when the triggering condition clears. See <a href="#while-active">While-Active Actions</a>.</td></tr>
+      </table>
+      <p>Flashing also stops when the rule is disabled, edited or deleted, and when an <a href="#act-io-output">I/O Output</a> action sets one of its ports, so buttons such as <em>Red</em> or <em>All off</em> built from I/O Output take over straight away. Firing the rule again while it flashes restarts the count or time limit without breaking the rhythm. A <strong>Test</strong> run that would never stop is cut off after 10 seconds.</p>
+
+      <h3 id="act-digest">Notification Digest</h3>
+      <p>Buffer events and send a batched summary on a configurable interval. Useful for sending hourly summaries instead of individual alerts.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Buffer name</strong></td><td>Unique identifier for this digest queue. Multiple rules can contribute to the same digest.</td></tr>
+        <tr><td><strong>Flush interval</strong></td><td>Seconds between sends. Minimum: 30 seconds.</td></tr>
+        <tr><td><strong>Entry template</strong></td><td>Template for each buffered event line. Template substitution supported.</td></tr>
+        <tr><td><strong>Delivery</strong></td><td>Where to send the batched summary: Slack, Teams, Telegram, Email, or MQTT.</td></tr>
+      </table>
+
+      <h3 id="act-delay">Delay</h3>
+      <p>Pause the action sequence for N seconds before continuing to the next action. Use this to create timed sequences within a rule.</p>
+
+      <h3 id="act-set-var">Set Variable</h3>
+      <p>Create or update a named persistent variable stored on the camera. Variables survive restarts.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Variable name</strong></td><td>Name of the variable to set. Use any alphanumeric name. Use <code>system.armed</code> for arm/disarm.</td></tr>
+        <tr><td><strong>Value</strong></td><td>New value. Template substitution supported.</td></tr>
+      </table>
+
+      <h3 id="act-counter">Increment Counter</h3>
+      <p>Modify a named persistent counter.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Counter name</strong></td><td>Name of the counter to modify. Auto-created on first use.</td></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Increment</em> (add), <em>Decrement</em> (subtract), <em>Reset</em> (zero the counter), or <em>Set</em> (assign an exact value).</td></tr>
+        <tr><td><strong>Delta / Value</strong></td><td>Amount to add/subtract (for increment/decrement), or the exact value (for set). Default: 1.</td></tr>
+      </table>
+
+      <h3 id="act-run-rule">Run Rule</h3>
+      <p>Immediately trigger another named rule. Useful for shared action sequences or conditional branching via variable state.</p>
+
+      <h3 id="act-fire-event">Fire ACAP Event</h3>
+      <p>Fire an ACAP event that is visible to other Axis applications and to the camera's built-in Action Rules system. Events you create here appear as trigger conditions in the camera's native event handler, letting you chain Event Engine rules into built-in camera automations.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Event</strong></td><td>Select from all declared events. System events (<em>RuleFired</em>, <em>RuleError</em>, <em>EngineReady</em>) are always available. Custom events you create appear here too.</td></tr>
+        <tr><td><strong>＋ New</strong></td><td>Opens the inline event creator. Fill in an ID, display name, and type, then click <em>Create</em> to register the event immediately and select it.</td></tr>
+        <tr><td><strong>Event ID</strong></td><td>(New event) Unique identifier — letters, digits, and underscores only (e.g. <code>DoorOpenAlert</code>).</td></tr>
+        <tr><td><strong>Display Name</strong></td><td>(New event) Human-readable label shown in the Axis event system.</td></tr>
+        <tr><td><strong>Data fields</strong></td><td>(New event, optional) Values the event carries, as <code>name:type</code> pairs separated by commas, e.g. <code>plate:string, count:int</code>. Types: <code>string</code>, <code>int</code>, <code>double</code>, <code>bool</code>. A VMS or another app subscribing to the event receives them with these types.</td></tr>
+        <tr><td><strong>Type</strong></td><td>(New event) <em>Stateless</em> fires a one-shot pulse. <em>Stateful</em> maintains a High/Low state that other apps and built-in rules can subscribe to.</td></tr>
+        <tr><td><strong>State</strong></td><td>(Stateful events only) Set the event <em>High</em> (active) or <em>Low</em> (inactive).</td></tr>
+        <tr><td><strong>Field values</strong></td><td>(Events with data fields) One input per field. Plain text or templates such as <span class="var">{{trigger.KEY}}</span>, <span class="var">{{trigger.payload}}</span> or <span class="var">{{var.NAME}}</span>, so values from an MQTT message, a webhook or a variable can be passed on as an Axis event. The result is converted to the field's type; a value that is not a valid number or boolean fails the action with an error in the event log. Empty sends <code>""</code>, <code>0</code> or <code>false</code>.</td></tr>
+        <tr><td><strong>Remove Event</strong></td><td>Permanently removes a custom event. System events cannot be removed. Rules that fire the deleted event must be updated manually.</td></tr>
+      </table>
+      <div class="callout info">
+        <span class="callout-icon">ℹ️</span>
+        <div>Custom events are registered at startup from <code>settings/events.json</code>. They persist across reboots and appear immediately in the Axis camera's built-in Action Rules under <b>CameraApplicationPlatform / Event Engine</b>.</div>
+      </div>
+
+      <h3 id="act-vapix-query">Device Event Query</h3>
+      <p>Fetch the latest data from any device event and inject it as <span class="var">{{trigger.FIELD}}</span> variables for subsequent actions. When targeting the local camera, reads from the passive subscription cache. When targeting a remote Axis device, queries the remote device's event API on demand.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Device Event to Query</strong></td><td>Select an event from the dropdown. For remote devices, click <strong>Load Events</strong> to fetch the available events from the target camera.</td></tr>
+        <tr><td><strong>Target Device</strong></td><td>Choose <em>Local</em> (this camera) or <em>Remote device</em>. When remote, provide the IP/hostname, username, and password.</td></tr>
+      </table>
+
+      <h3 id="act-param">Set Device Parameter</h3>
+      <p>Update any camera parameter via <code>param.cgi</code>.</p>
+      <div class="callout danger">
+        <span class="callout-icon">⛔</span>
+        <div><strong>Expert users only.</strong> Incorrect parameter values can disrupt camera operation. Tab out of the parameter field to look up the current value, allowed values, type, and range directly from the camera before applying.</div>
+      </div>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Parameter</strong></td><td>Full parameter name (e.g. <code>root.ImageSource.I0.Sensor.Brightness</code>). Tab out of the field to look up the live value.</td></tr>
+        <tr><td><strong>Value</strong></td><td>New value.</td></tr>
+      </table>
+
+      <h3 id="act-acap">ACAP Control</h3>
+      <p>Start, stop, or restart another installed ACAP application on the camera.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Application</strong></td><td>Select from installed ACAP apps (loaded from the camera).</td></tr>
+        <tr><td><strong>Operation</strong></td><td><em>Start</em>, <em>Stop</em>, or <em>Restart</em>.</td></tr>
+      </table>
+
+      <h3 id="act-influx">InfluxDB Write</h3>
+      <p>Write a data point to InfluxDB using line protocol.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Version</strong></td><td>InfluxDB v1 or v2.</td></tr>
+        <tr><td><strong>URL</strong></td><td>InfluxDB server URL.</td></tr>
+        <tr><td><strong>Database / Bucket</strong></td><td>v1: database name. v2: bucket name.</td></tr>
+        <tr><td><strong>Auth</strong></td><td>v1: username/password. v2: API token.</td></tr>
+        <tr><td><strong>Measurement</strong></td><td>Line protocol measurement name. Template substitution supported.</td></tr>
+        <tr><td><strong>Tags</strong></td><td>Optional tag key=value pairs. Template substitution supported.</td></tr>
+        <tr><td><strong>Fields</strong></td><td>At least one field key=value pair. Template substitution supported.</td></tr>
+        <tr><td><strong>Allow insecure</strong></td><td>Skip TLS certificate verification for self-signed certificates.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a>: trust a private CA and/or present a client certificate to servers that require one (mutual TLS).</td></tr>
+      </table>
+
+      <h3 id="act-aoa-counts">AOA Get Counts</h3>
+      <p>Fetch accumulated crossline counts from an Axis Object Analytics scenario and inject them as template variables for use in subsequent actions.</p>
+      <table>
+        <tr><th>Variable</th><th>Description</th></tr>
+        <tr><td><span class="var">{{aoa_total}}</span></td><td>Total crossings</td></tr>
+        <tr><td><span class="var">{{aoa_human}}</span></td><td>Human crossings</td></tr>
+        <tr><td><span class="var">{{aoa_car}}</span></td><td>Car crossings</td></tr>
+        <tr><td><span class="var">{{aoa_truck}}</span></td><td>Truck crossings</td></tr>
+        <tr><td><span class="var">{{aoa_bus}}</span></td><td>Bus crossings</td></tr>
+        <tr><td><span class="var">{{aoa_bike}}</span></td><td>Bike crossings</td></tr>
+        <tr><td><span class="var">{{aoa_otherVehicle}}</span></td><td>Other vehicle crossings</td></tr>
+        <tr><td><span class="var">{{aoa_timestamp}}</span></td><td>Timestamp of latest count</td></tr>
+      </table>
+      <p>Enable <strong>Reset after fetch</strong> to zero the counters after reading them.</p>
+
+      <h3 id="act-modbus-write">Modbus Write</h3>
+      <p>Write one typed value or several values to holding registers or coils over TCP, serial gateway, or direct RTU/RS-485. The automatic function uses FC06/FC05 for one value and FC16/FC15 for several. Adjacent entries are batched; gaps start another request. Coils accept <code>0</code>, <code>1</code>, <code>true</code>, <code>false</code>, <code>on</code>, or <code>off</code>.</p>
+      <p>Register types include signed/unsigned 16-, 32- and 64-bit integers, 32-/64-bit floats, and strings (two bytes per register, up to 125 registers). String length is counted in registers, not characters; UTF-8 characters may use multiple bytes. Set the word order for 32/64-bit values, or the byte order for 16-bit values and strings. Scale and offset convert the requested value to raw form using <code>(value - offset) / scale</code>. Values can contain templates such as <code>{{trigger.temperature}}</code>. Numbers and coils need a value; an empty string clears a text register.</p>
+      <p>Strings are converted to the selected encoding (UTF-8, ASCII, ISO-8859-1, ISO-8859-2, Windows-1250 or Windows-1252) and padded to the configured length. <strong>Fill</strong> chooses the padding: NUL (0x00, the default) after the text, or spaces with the text left, right or centered (an odd space goes after the text). Choose spaces if the device shows 0x00 as a character. A typed-in character the encoding can't represent is rejected when the rule is saved; text from a template is sent with <code>?</code> in its place. One request carries at most 123 registers or 1968 coils (the Modbus limit); longer runs and long strings are split into several requests automatically.</p>
+      <p><strong>Test</strong> sends the write and waits for the device's answer, so it reports timeouts, refused connections and Modbus exceptions. A pooled TCP connection that the device closed while idle is reopened automatically.</p>
+
+      <!-- ═══════════════════════════════════════════ REMOTE DEVICE -->
+      <hr class="section-rule">
+      <h2 id="remote-device">Remote Device Actions</h2>
+      <p>Many camera actions (Recording, PTZ Preset, Siren / Light, Speaker Display, I/O Output, I/O Flash, Audio Clip, Guard Tour, IR Cut Filter, Privacy Mask, Wiper, Light Control, ACAP Control, Overlay Text, Overlay Image, Set Device Param) can target a <strong>remote Axis device</strong> instead of the camera running Event Engine.</p>
+      <p>This enables cross-device automation — for example, triggering a Speaker Display on an Axis C1710 when motion is detected by a Q3538 running Area Object Analytics.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Target Device</strong></td><td>Select <em>Local (this camera)</em> (default) or <em>Remote device</em>. Only shown for action types that support remote execution.</td></tr>
+        <tr><td><strong>IP / Hostname</strong></td><td>IP address or hostname of the remote Axis device, e.g. <code>192.168.1.100</code>. Must be reachable from the camera running Event Engine.</td></tr>
+        <tr><td><strong>Username</strong></td><td>Login name on the remote device. Default: <code>root</code>.</td></tr>
+        <tr><td><strong>Password</strong></td><td>Password for the remote device user.</td></tr>
+      </table>
+      <h4>Loading Remote Capabilities</h4>
+      <p>For actions with dropdown options (PTZ presets, audio clips, siren profiles, guard tours, privacy masks, ACAP applications), a <strong>Load</strong> button appears next to the input field when a remote device is configured. Click it to fetch the available options directly from the remote device and populate the dropdown.</p>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>Credentials are stored as part of the rule configuration. For production deployments, consider using a dedicated account with only the necessary privileges on the remote device.</div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════ WHILE-ACTIVE -->
+      <hr class="section-rule">
+      <h2 id="while-active">While-Active Actions</h2>
+      <p>Several actions support a <strong>While active</strong> mode: Recording, Overlay Text, Overlay Image, Siren / Light, I/O Output, I/O Flash, and Speaker Display. When enabled, the action automatically <em>reverses</em> itself (stops recording, clears overlay, stops siren, resets output, stops flashing, stops the display) when the triggering condition clears. While-active works correctly even when the action targets a <strong>remote device</strong>.</p>
+      <p>This is useful for scenarios like "record while motion is detected" or "activate siren while I/O port 1 is high". The rule must use a stateful trigger (e.g. a Device Event that has active/inactive states) for while-active to function correctly.</p>
+      <div class="callout tip">
+        <span class="callout-icon">💡</span>
+        <div>While-active works best with a single stateful trigger. Combine with the <strong>AND</strong> trigger logic when using multiple triggers.</div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════ TEMPLATES -->
+      <h2 id="templates">Rule Templates</h2>
+      <p>Click the <strong>Templates</strong> button on the Rules tab to browse a library of pre-built starter rules. Templates provide a ready-made configuration that you can customise after applying. Available templates include:</p>
+      <ul>
+        <li>Device Event → HTTP Webhook</li>
+        <li>Device Event → Email Alert</li>
+        <li>Device Event → Slack / Teams / Telegram</li>
+        <li>Daily Schedule → Syslog</li>
+        <li>MQTT Message → Set Variable</li>
+        <li>I/O Input → I/O Output</li>
+        <li>I/O Input → Siren + MQTT</li>
+        <li>Hourly Snapshot → FTP Upload</li>
+        <li>Manual → PTZ + Overlay</li>
+        <li>Motion → Recording (Business Hours)</li>
+        <li>Arm / Disarm System via MQTT (3 rules)</li>
+        <li>AOA Object Detection → MQTT</li>
+        <li>Schedule → InfluxDB Sensor Write</li>
+        <li>Device Event → Notification Digest</li>
+        <li>Sunrise / Sunset → IR Cut Filter</li>
+        <li>Counter Threshold → Slack Alert</li>
+        <li>Cross-Device: I/O Input → Remote I/O State Condition → Speaker Display</li>
+        <li>Cross-Device: AOA Detection → Remote AOA Occupancy Condition → Alert</li>
+      </ul>
+      <p>Applying a template opens the rule editor pre-filled with the template's triggers, conditions, and actions. Modify any field before saving.</p>
+
+      <!-- ═══════════════════════════════════════════ VARIABLES -->
+      <hr class="section-rule">
+      <h2 id="variables">Dynamic Variables</h2>
+      <p>Most text fields in actions support <code>{{variable}}</code> substitution. Click <strong>Insert variable</strong> in the rule editor to browse available values for the current trigger type.</p>
+
+      <h4>Global variables (always available)</h4>
+      <table>
+        <tr><th>Variable</th><th>Value</th></tr>
+        <tr><td><span class="var">{{timestamp}}</span></td><td>RFC 3339 timestamp in device local time at the moment of firing (e.g. 2026-04-30T13:00:00+02:00)</td></tr>
+        <tr><td><span class="var">{{date}}</span></td><td>YYYY-MM-DD</td></tr>
+        <tr><td><span class="var">{{time}}</span></td><td>HH:MM:SS (24-hour)</td></tr>
+        <tr><td><span class="var">{{camera.serial}}</span></td><td>Camera serial number</td></tr>
+        <tr><td><span class="var">{{camera.model}}</span></td><td>Camera model name</td></tr>
+        <tr><td><span class="var">{{camera.ip}}</span></td><td>Camera IP address</td></tr>
+        <tr><td><span class="var">{{trigger_json}}</span></td><td>Full trigger event data as a compact JSON string</td></tr>
+      </table>
+
+      <h4>GPS variables</h4>
+      <p>These values can be used in any action when GPS is enabled and a fresh fix is available. Values other than age resolve to <code>--</code> if the fix is unavailable or stale.</p>
+      <table>
+        <tr><th>Variable</th><th>Value</th></tr>
+        <tr><td><span class="var">{{gps.latitude}}</span>, <span class="var">{{gps.longitude}}</span></td><td>Coordinates in decimal degrees with 6 decimals (aliases: <code>gps.lat</code> and <code>gps.lon</code>)</td></tr>
+        <tr><td><span class="var">{{gps.speed_kmh}}</span>, <span class="var">{{gps.speed_mph}}</span>, <span class="var">{{gps.speed_knots}}</span>, <span class="var">{{gps.speed_mps}}</span></td><td>Speed in km/h, mph, knots, or m/s with 1 decimal; append <code>|0</code> for whole numbers</td></tr>
+        <tr><td><span class="var">{{gps.heading}}</span>, <span class="var">{{gps.heading_cardinal}}</span></td><td>Heading in whole degrees and compass direction</td></tr>
+        <tr><td><span class="var">{{gps.altitude_m}}</span></td><td>Altitude in metres</td></tr>
+        <tr><td><span class="var">{{gps.satellites}}</span>, <span class="var">{{gps.fix_quality}}</span>, <span class="var">{{gps.fix}}</span></td><td>Satellite count, NMEA fix quality, and fix label</td></tr>
+        <tr><td><span class="var">{{gps.utc}}</span>, <span class="var">{{gps.date}}</span></td><td>UTC time and date from the NMEA sentence</td></tr>
+        <tr><td><span class="var">{{gps.age}}</span></td><td>Seconds since the latest valid fix; <code>--</code> if none has been received</td></tr>
+      </table>
+
+      <h4>Trigger variables (set by the fired trigger)</h4>
+      <table>
+        <tr><th>Variable</th><th>Source</th></tr>
+        <tr><td><span class="var">{{trigger.KEY}}</span></td><td>Individual field from the trigger event (e.g. <span class="var">{{trigger.CO2}}</span> from an air quality event)</td></tr>
+        <tr><td><span class="var">{{trigger.topic}}</span></td><td>MQTT topic (MQTT Message trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.payload}}</span></td><td>MQTT payload (MQTT Message trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.scenario_id}}</span></td><td>AOA scenario ID (AOA Scenario trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.reason}}</span></td><td>Detected object class, e.g. <code>Human</code> (AOA Scenario trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.fired_rule_id}}</span></td><td>ID of the rule that fired (Rule Chain trigger)</td></tr>
+        <tr><td><span class="var">{{trigger.snapshot_base64}}</span></td><td>Base64-encoded JPEG (when <em>Attach snapshot</em> is enabled on HTTP Request)</td></tr>
+        <tr><td><span class="var">{{trigger.alpv_image_base64}}</span></td><td>Base64-encoded JPEG saved by ALPV for the car (when <em>Attach ALPV image</em> is enabled on HTTP Request)</td></tr>
+      </table>
+
+      <h4>Decimal formatting</h4>
+      <p>Append <code>|N</code> to any numeric variable to round it to N decimal places:</p>
+      <table>
+        <tr><th>Example</th><th>Result</th></tr>
+        <tr><td><span class="var">{{trigger.Temperature|2}}</span></td><td><code>20.35</code> (from <code>20.3456789</code>)</td></tr>
+        <tr><td><span class="var">{{trigger.CO2|0}}</span></td><td><code>412</code> (no decimals)</td></tr>
+        <tr><td><span class="var">{{var.avg_temp|1}}</span></td><td><code>22.5</code> (one decimal)</td></tr>
+      </table>
+
+      <h4>XML escaping</h4>
+      <p>Append <code>|xml</code> to any variable to escape <code>&amp;</code> <code>&lt;</code> <code>&gt;</code> <code>"</code> <code>'</code> when building an XML body, e.g. <span class="var">{{trigger.vehicleMake|xml}}</span>.</p>
+      <p>Non-numeric values pass through unchanged.</p>
+
+      <h4>Named variables and counters</h4>
+      <table>
+        <tr><th>Variable</th><th>Value</th></tr>
+        <tr><td><span class="var">{{var.NAME}}</span></td><td>Value of a named variable (set with <em>Set Variable</em> action)</td></tr>
+        <tr><td><span class="var">{{counter.NAME}}</span></td><td>Current value of a named counter</td></tr>
+      </table>
+
+      <p><strong>Example — MQTT payload with sensor data:</strong></p>
+      <pre><code>Camera {{camera.serial}} at {{timestamp}}: {{trigger_json}}</code></pre>
+
+      <!-- ═══════════════════════════════════════════ ARM/DISARM -->
+      <h2 id="arm-disarm">Arm / Disarm Pattern</h2>
+      <p>Use the <strong>Variable Compare</strong> condition with a variable named <code>system.armed</code> (value <code>"true"</code> or <code>"false"</code>) to make rules only fire when the system is armed.</p>
+      <p>Example rules to implement this (available in the Templates picker):</p>
+      <ol>
+        <li><strong>Arm System via MQTT</strong> — subscribe to <code>cameras/&lt;serial&gt;/arm</code>, set <code>system.armed = "true"</code></li>
+        <li><strong>Disarm System via MQTT</strong> — same topic, set <code>system.armed = "false"</code></li>
+        <li><strong>Motion Alert When Armed</strong> — motion trigger + Variable Compare condition: <code>system.armed = "true"</code></li>
+      </ol>
+      <p>You can also arm/disarm via an HTTP webhook, a schedule, an I/O input, or any other trigger.</p>
+
+      <!-- ═══════════════════════════════════════════ MQTT -->
+      <h2 id="mqtt-setup">MQTT Setup</h2>
+      <p>Configure the MQTT broker in <strong>Settings → MQTT</strong>. The built-in client supports MQTT 3.1.1.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Broker Host</strong></td><td>Hostname or IP of the MQTT broker (e.g. <code>192.168.1.100</code> or <code>broker.hivemq.com</code>).</td></tr>
+        <tr><td><strong>Port</strong></td><td>Default 1883; use 8883 for TLS.</td></tr>
+        <tr><td><strong>Client ID</strong></td><td>Unique identifier sent to the broker. Default: <code>acap_event_engine</code>.</td></tr>
+        <tr><td><strong>Username / Password</strong></td><td>Optional broker credentials. Password is stored separately and never returned via GET.</td></tr>
+        <tr><td><strong>Keepalive</strong></td><td>MQTT keepalive interval in seconds. Default: 60.</td></tr>
+        <tr><td><strong>Backup Brokers</strong></td><td>Optional. One <code>host</code> or <code>host:port</code> per line, up to seven. Tried in order, one second apart, whenever the broker above cannot be reached. Saving settings always restarts from the primary.</td></tr>
+        <tr><td><strong>Use TLS</strong></td><td>Enable TLS/SSL encryption for secure broker connections.</td></tr>
+        <tr><td><strong>Skip certificate verification</strong></td><td>Only with TLS. Accept self-signed or otherwise untrusted broker certificates and skip hostname checks. Traffic stays encrypted, but the broker identity is not verified, so use it only on trusted networks.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Only with TLS. Optional <a href="#tls-certs">TLS profile</a> for a broker with its own CA or one that requires a client certificate. Saving the profile reconnects with the new certificates.</td></tr>
+        <tr><td><strong>Enabled</strong></td><td>Toggle MQTT on or off without clearing settings.</td></tr>
+      </table>
+      <p>Features:</p>
+      <ul>
+        <li>QoS 0 and QoS 1 publish</li>
+        <li>Wildcard topic subscriptions (<code>+</code> and <code>#</code>)</li>
+        <li>Automatic reconnect with exponential backoff</li>
+        <li>Failover across a list of brokers</li>
+        <li>TLS/SSL encryption</li>
+      </ul>
+      <p>The Settings tab shows a live connection status indicator next to "MQTT BROKER".</p>
+
+      <!-- ═══════════════════════════════════════════ SPARKPLUG -->
+      <h2 id="sparkplug-setup">Sparkplug B Setup</h2>
+      <p>Event Engine can act as a <strong>Sparkplug B edge node</strong>, so an industrial or building-automation host (Ignition, Honeywell EBI, Cirrus Link and other Tahu-compatible systems) can consume device data and send commands back. Normally this requires an industrial gateway between the Axis device and the Sparkplug network; here the device is the edge node itself.</p>
+      <p>Sparkplug uses the broker configured above, so <strong>enable MQTT first</strong>.</p>
+
+      <h3>Identity</h3>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Group ID</strong></td><td>Required. The Sparkplug group namespace, e.g. <code>Building1</code>.</td></tr>
+        <tr><td><strong>Edge Node ID</strong></td><td>Defaults to the device serial number so two devices never collide.</td></tr>
+        <tr><td><strong>Device ID</strong></td><td>Optional. Set it to expose the metrics as a child device (<code>DBIRTH</code>/<code>DDATA</code>) instead of at node level.</td></tr>
+        <tr><td><strong>Primary Host ID</strong></td><td>Optional. The device republishes its birth certificate when this host announces itself online, and holds back data while the host reports itself offline.</td></tr>
+        <tr><td><strong>Specification</strong></td><td>Sparkplug 3.0 (Eclipse standard) or Sparkplug B 2.2. Only the host <code>STATE</code> topic and payload differ.</td></tr>
+      </table>
+      <p>Ids must not contain <code>/</code>, <code>+</code> or <code>#</code>.</p>
+
+      <h3>Metrics</h3>
+      <p>Every metric is declared once here so the birth certificate stays stable and aliases are consistent for the life of a session. Each metric has a name, a datatype, and one of two sources:</p>
+      <ul>
+        <li><strong>Bound to a device event</strong> — published automatically whenever the value changes (report by exception). Choose the event and the field to read.</li>
+        <li><strong>Unbound</strong> — driven by a <strong>Sparkplug B Publish</strong> rule action, so you can add conditions, schedules and templates.</li>
+      </ul>
+      <p>Changing the metric list or the node identity publishes a fresh birth certificate. <code>bdSeq</code> and <code>Node Control/Rebirth</code> are reserved and added automatically.</p>
+      <p>Topics follow the standard namespace:</p>
+      <pre>spBv1.0/{group_id}/NBIRTH|NDATA|NDEATH|NCMD/{edge_node_id}
+spBv1.0/{group_id}/DBIRTH|DDATA|DDEATH|DCMD/{edge_node_id}/{device_id}</pre>
+
+      <h3>Status</h3>
+      <p>The Settings tab shows a live indicator next to "SPARKPLUG B EDGE NODE" with the session <code>bdSeq</code>, the current sequence number, the metric count and how many samples are buffered. Below the metric editor a table lists every declared metric with its alias and last known value. The same data is available from <code>GET /local/acap_event_engine/sparkplug</code>.</p>
+
+      <h3>Behaviour worth knowing</h3>
+      <ul>
+        <li>No data message is ever sent before its birth certificate.</li>
+        <li><code>bdSeq</code> is persisted across app restarts, so a late death certificate from a previous session cannot be mistaken for the current one.</li>
+        <li>The death certificate is registered as the MQTT will <em>and</em> published explicitly on a graceful shutdown, because a clean MQTT disconnect suppresses the will.</li>
+        <li>Metrics collected while the broker is unreachable are buffered in memory and replayed on reconnect, flagged as historical.</li>
+        <li>The same buffering applies while a configured Primary Host reports itself offline, so telemetry is not published into an empty room. A node with no Primary Host ID, or one whose host has never published a <code>STATE</code> message, always publishes.</li>
+        <li>A command that arrives twice because a rule subscribes to a topic filter overlapping the node's own command topic is acted on once.</li>
+        <li>Both <code>Node Control/Rebirth</code> and <code>Device Control/Rebirth</code> are honoured.</li>
+        <li>QoS 1 publishes are resent with the DUP flag until the broker acknowledges them or the retry budget runs out. Sessions are always clean, as Sparkplug requires, so anything still unacknowledged when a connection drops is discarded and the reconnect publishes a fresh birth certificate instead.</li>
+      </ul>
+
+      <!-- ═══════════════════════════════════════════ TLS CERTIFICATES -->
+      <h2 id="tls-certs">TLS Certificates</h2>
+      <p>Some servers only accept a camera that proves who it is with a client certificate (mutual TLS, like <code>curl --cert --key --cacert</code>), or use certificates from their own CA rather than a public one. Store those certificates once in <strong>Settings → TLS Certificates</strong> as a named <em>profile</em>, then choose the profile in <a href="#act-http">HTTP Request</a>, <a href="#act-snapshot">Snapshot Upload</a>, <a href="#act-influx">InfluxDB Write</a>, <a href="#act-ftp">FTP Upload</a>, the <a href="#cond-http">HTTP Check</a> condition, or the <a href="#mqtt-setup">MQTT broker</a> and <a href="#settings">Email (SMTP)</a> settings.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>Name</strong></td><td>Shown in the rule editor. Letters, digits, spaces, <code>-</code>, <code>_</code> and <code>.</code>.</td></tr>
+        <tr><td><strong>Server CA certificate</strong></td><td>Optional. The CA that signed the server's certificate. When set, only this CA (or bundle) is trusted for the server, instead of the public CAs.</td></tr>
+        <tr><td><strong>Client certificate</strong></td><td>Optional. Presented to servers that ask for one. PEM; may be followed by its chain, and may also contain the private key.</td></tr>
+        <tr><td><strong>Private key</strong></td><td>Required with a client certificate and must match it. Encrypted keys need their <strong>passphrase</strong>; the key is decrypted when saved, stored on the camera only readable by the app, and never shown or exported again.</td></tr>
+        <tr><td><strong>Don't verify server certificate</strong></td><td>The connection is still encrypted and the client certificate is still sent, but the server's identity isn't checked. For testing or servers with self-signed certificates.</td></tr>
+      </table>
+      <p>Choose a file (PEM, or a binary <code>.cer</code>/<code>.der</code> certificate) or paste the PEM text. When editing a profile, leave a field empty to keep what is stored, or tick <strong>Remove</strong>; to renew a client certificate, choose only the new certificate if it uses the same key. PKCS#12 files (<code>.p12</code>/<code>.pfx</code>) must first be converted, for example <code>openssl pkcs12 -in camera.p12 -out camera.pem -nodes</code>.</p>
+      <p>The list shows each profile's client certificate, what the server is checked against, when the earliest certificate expires, and which rules use it. A profile in use can't be deleted until those rules (or the MQTT settings) use another one. Certificates that expire within 30 days, or have expired, are reported in the <a href="#event-log">Event Log</a> at startup and every 12 hours. Server addresses can be host names or IP addresses; an IP address must be in the server certificate's subject alternative names (or its CN, when it has none).</p>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Profiles are not part of <strong>Export Settings</strong>, so private keys never leave the camera. After moving to another camera, add the profiles there again; rules refer to them by name.</div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════ SETTINGS -->
+      <h2 id="settings">Application Settings</h2>
+      <p>Click a section heading to show or hide its settings; this does not change whether a feature is enabled. The page remembers open sections in this browser. MQTT, Sparkplug B, GPS, Alert Stream and RS-485 have separate on/off switches that keep their configuration when turned off. Email, Location, TLS Certificates and Proxy show a summary of their configuration instead of a switch.</p>
+      <p>Configure and save MQTT or Sparkplug B before enabling it. For an existing RS-485 setup, its switch only enables or disables the TCP listener; use <strong>Configure RS-485</strong> when you intend to change the serial port settings.</p>
+
+      <h3>Location</h3>
+      <p>Set the camera's latitude and longitude (decimal degrees). This is required for Sunrise/Sunset triggers and the Day/Night condition to work correctly.</p>
+      <ul>
+        <li>North latitude is positive (e.g. <code>59.3293</code> for Stockholm)</li>
+        <li>South latitude is negative (e.g. <code>-33.8688</code> for Sydney)</li>
+        <li>East longitude is positive (e.g. <code>18.0686</code>)</li>
+        <li>West longitude is negative (e.g. <code>-73.9442</code> for New York)</li>
+      </ul>
+
+      <h3>GPS / NMEA</h3>
+      <p>Enable GPS input and choose the source that matches the connected receiver. Supported sources are the camera's serial port, a UDP listener, a TCP listener, or a TCP client. Serial device <code>auto</code> resolves the camera's configured serial port; baud rate <code>0</code> leaves its existing rate unchanged. Network inputs use the configured port; TCP client mode also uses the configured remote host. The stale timeout controls how long a fix remains usable without a new valid sentence.</p>
+      <p>The live status card in Settings shows connection state, received bytes, parser counters, fix age, and recent NMEA lines. The same status is available from the admin-only <code>GET /local/acap_event_engine/gps</code> endpoint. GPS and Modbus should not be configured to use the same physical serial port at the same time.</p>
+
+      <h3>Email (SMTP)</h3>
+      <p>Configure once and reuse across all email actions.</p>
+      <table>
+        <tr><th>Option</th><th>Description</th></tr>
+        <tr><td><strong>SMTP Server</strong></td><td>Use <code>host:port</code> format (e.g. <code>smtp.gmail.com:587</code>).</td></tr>
+        <tr><td><strong>Use TLS</strong></td><td>Enable STARTTLS. Recommended for port 587.</td></tr>
+        <tr><td><strong>Skip certificate verification</strong></td><td>Accept a self-signed or otherwise untrusted mail server certificate. Traffic stays encrypted, but the server identity is not checked.</td></tr>
+        <tr><td><strong>TLS certificates</strong></td><td>Optional <a href="#tls-certs">TLS profile</a> for a mail server with its own CA or one that requires a client certificate.</td></tr>
+        <tr><td><strong>Username / Password</strong></td><td>SMTP credentials.</td></tr>
+        <tr><td><strong>From Address</strong></td><td>Sender address used in all outbound emails.</td></tr>
+      </table>
+
+      <h3>SOCKS5 Proxy</h3>
+      <p>Route all outbound connections (HTTP actions, HTTP conditions, and MQTT) through a SOCKS5 proxy. Leave blank to connect directly.</p>
+      <p>Set to <code>localhost:1055</code> to tunnel all traffic over <a href="https://github.com/Mo3he/Axis_Cam_Tailscale" target="_blank" rel="noopener">Axis Tailscale ACAP</a>.</p>
+
+      <!-- ═══════════════════════════════════════════ DEVICE CAPABILITIES -->
+      <h2 id="device-capabilities">Device Capabilities</h2>
+      <p>The <strong>Settings</strong> tab automatically detects and displays your camera's capabilities:</p>
+      <ul>
+        <li><strong>Status cards</strong> — total rules, enabled rules, events today</li>
+        <li><strong>Device info</strong> — model, serial number, IP address, firmware version, engine version</li>
+        <li><strong>PTZ</strong> — number of presets per channel</li>
+        <li><strong>Audio clips</strong> — available media clips</li>
+        <li><strong>Siren / Light</strong> — available profiles</li>
+        <li><strong>Privacy masks</strong> — configured masks</li>
+        <li><strong>Guard tours</strong> — configured tours</li>
+        <li><strong>Object Analytics (AOA)</strong> — installed scenarios</li>
+        <li><strong>Installed ACAPs</strong> — other ACAP applications on the camera</li>
+      </ul>
+      <p>These capabilities are used to populate dropdowns in the rule editor (PTZ presets, audio clips, siren profiles, guard tours, AOA scenarios, ACAP apps, privacy masks). If a capability is not available on your camera, the corresponding action types will show an empty dropdown.</p>
+
+      <!-- ═══════════════════════════════════════════ EVENT LOG -->
+      <h2 id="event-log">Event Log</h2>
+      <p>The <strong>Event Log</strong> tab shows the most recent rule firings and Event Engine's own system messages. Each entry includes:</p>
+      <ul>
+        <li><strong>Time</strong> — local time with milliseconds</li>
+        <li><strong>Rule / Source</strong> — which rule fired, or for a system message where it came from (e.g. <em>MQTT</em>, <em>Engine</em>, <em>Variables</em>, <em>Device API</em>)</li>
+        <li><strong>Result</strong> — fired or why it was blocked; for system messages <em>Info</em>, <em>Warning</em> or <em>Error</em></li>
+        <li><strong>Details</strong> — trigger data and action errors, or the system message</li>
+      </ul>
+      <p><strong>System messages</strong> include:</p>
+      <ul>
+        <li>Event Engine's own MQTT connection: <em>Connected to broker:8883 with TLS</em>, and disconnects with the reason (e.g. <em>connection closed by broker</em>). This is Event Engine's client, separate from the device's built-in MQTT client.</li>
+        <li>Startup: the Event Engine version, and the variables loaded from file (and those reset because they are volatile).</li>
+        <li>Warnings and errors that previously only appeared in the app log, such as TLS errors (<em>SSL_connect failed: ... certificate verify failed</em>) or a device API that failed (<em>/local/objectanalytics/control.cgi returned HTTP 500</em>).</li>
+      </ul>
+      <p>A message that repeats within 10 minutes is shown once, at the time of its latest repeat, with a count (×N since the first one). At most 20 new system messages are added per minute, so a failing connection cannot push everything else out of the log. The app log (<em>System → Logs</em> on the device) still has every line, including rejected API requests, which are not shown here.</p>
+      <p>Use the filter dropdown to show <em>Everything</em>, <em>Rules only</em>, <em>System messages</em> or a single rule. Click <strong>Refresh</strong> to reload. Click <strong>Clear</strong> to empty the log.</p>
+
+      <!-- ═══════════════════════════════════════════ VARIABLES TAB -->
+      <h2 id="variables-tab">Variables Tab</h2>
+      <p>The <strong>Variables</strong> tab shows all named variables and counters currently stored on the camera. You can:</p>
+      <ul>
+        <li>View the current value of any variable or counter</li>
+        <li>Choose what happens on restart: <strong>Keep value</strong> (the default) or <strong>Reset to</strong> a value you enter</li>
+        <li>Delete a variable or counter</li>
+      </ul>
+      <p>By default variables are persistent: they keep their value across restarts and in-place updates. A variable set to <strong>Reset to</strong> is volatile: every time Event Engine starts it begins at that value (empty, or 0 for a counter, if left blank), which suits states such as "door open" that should not survive a restart. The Event Log lists the values loaded at startup.</p>
+
+      <!-- ═══════════════════════════════════════════ BACKUP -->
+      <h2 id="backup-restore">Backup &amp; Restore</h2>
+      <p>Use the Backup &amp; Restore controls in the <strong>Settings → Device</strong> section to export your configuration before performing updates or camera replacements.</p>
+      <ul>
+        <li><strong>Export Rules</strong> — download all rules as a JSON file</li>
+        <li><strong>Import Rules</strong> — upload a previously exported rules JSON</li>
+        <li><strong>Export Settings</strong> — download MQTT, SMTP, location, and proxy settings</li>
+        <li><strong>Import Settings</strong> — restore a settings file</li>
+      </ul>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Export your rules and settings before <strong>uninstalling</strong>. A full uninstall clears all stored data. In-place updates (reinstall over existing) preserve data.</div>
+      </div>
+      <p>Rules can also be exported individually using <strong>Export</strong> from the rule card's action menu, producing a portable single-rule JSON file that can be shared and imported on any camera.</p>
+      <h3>Passwords and tokens in exports</h3>
+      <p>Every export asks whether to include secrets. <strong>Export without secrets</strong> is the default and is the right choice for files you share or store outside the camera.</p>
+      <ul>
+        <li><strong>Rules:</strong> passwords, API and bot tokens, webhook trigger tokens, Slack and Teams webhook URLs, and the values of credential headers such as <code>Authorization</code> or <code>X-API-Key</code> are replaced with <code>__REDACTED__</code>. Importing such a file leaves those fields empty, and the import message lists the rules that need them entered again. A webhook trigger gets a new random token, so update the systems that call it.</li>
+        <li><strong>Settings:</strong> the MQTT and SMTP passwords are left empty. Importing the file keeps the passwords already saved on the camera.</li>
+      </ul>
+      <div class="callout warn">
+        <span class="callout-icon">⚠</span>
+        <div>Choose <strong>Include secrets</strong> only for a full backup you can restore without retyping credentials. Anyone with that file can use those accounts and devices, so store it like a password.</div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════ API -->
+      <h2 id="api">REST API</h2>
+      <p>All endpoints are under <code>/local/acap_event_engine/</code> and require HTTP Basic Auth with admin credentials.</p>
+      <table>
+        <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+        <tr><td>GET / POST / DELETE</td><td><code>/rules</code></td><td>Rule CRUD. POST without <code>id</code> creates; POST with <code>?id=</code> updates. GET with <code>?id=&lt;id&gt;&amp;action=export</code> downloads a rule as JSON. Exports replace secrets with <code>__REDACTED__</code> unless <code>&amp;include_secrets=1</code> is added; saving a rule with <code>__REDACTED__</code> keeps the stored value.</td></tr>
+        <tr><td>POST</td><td><code>/fire</code></td><td>Fire a rule manually or via webhook token.</td></tr>
+        <tr><td>GET</td><td><code>/triggers</code></td><td>Available trigger types and their schemas.</td></tr>
+        <tr><td>GET</td><td><code>/actions</code></td><td>Available action types and their schemas.</td></tr>
+        <tr><td>GET / POST / DELETE</td><td><code>/variables</code></td><td>Named variables and counters.</td></tr>
+        <tr><td>GET</td><td><code>/events</code></td><td>Event log (most recent rule firings).</td></tr>
+        <tr><td>GET</td><td><code>/engine</code></td><td>Engine status, MQTT status, device info.</td></tr>
+        <tr><td>GET</td><td><code>/aoa</code></td><td>List configured AOA scenarios (id, name, type).</td></tr>
+        <tr><td>GET / POST</td><td><code>/settings</code></td><td>Engine, MQTT, SMTP, and device configuration.</td></tr>
+        <tr><td>GET / POST / DELETE</td><td><code>/certs</code></td><td><a href="#tls-certs">TLS profiles</a>. GET lists certificate details and <code>used_by</code> (never keys). POST <code>{name, ca, cert, key, passphrase, insecure}</code> creates or updates; omitted parts are kept, <code>""</code> removes one. DELETE <code>?name=</code> answers 409 while the profile is in use. Actions and the HTTP Check condition take <code>tls_profile</code>, as do <code>mqtt.tls_profile</code> and <code>smtp.tls_profile</code>.</td></tr>
+        <tr><td>GET</td><td><code>/alertStream</code></td><td>Real-time multipart event stream. See below.</td></tr>
+      </table>
+      <p>For interactive documentation, open <a href="swagger.html" target="_blank">API Docs</a>.</p>
+
+      <h3 id="alert-stream">Alert Stream</h3>
+      <p>A long-lived HTTP endpoint that streams rule-fire events in real-time as <code>multipart/mixed</code> JSON chunks. External software connects with Digest Auth and receives a new chunk every time a rule fires — with no polling required.</p>
+      <pre><code>GET http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream</code></pre>
+      <p>The connection stays open until the client disconnects or Alert Stream is turned off in Settings. The first chunk is sent immediately on connect:</p>
+      <pre><code>--AxisEventBoundary
+Content-Type: application/json
+Content-Length: 18
+
+{"connected":true}</code></pre>
+      <p>Each subsequent chunk is a JSON object with the following fields:</p>
+      <table>
+        <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+        <tr><td><code>ipAddress</code></td><td>string</td><td>Camera IP address</td></tr>
+        <tr><td><code>macAddress</code></td><td>string</td><td>Camera serial number</td></tr>
+        <tr><td><code>dateTime</code></td><td>string</td><td>ISO 8601 UTC timestamp</td></tr>
+        <tr><td><code>eventType</code></td><td>string</td><td>Always <code>RuleFired</code></td></tr>
+        <tr><td><code>eventState</code></td><td>string</td><td>Always <code>active</code></td></tr>
+        <tr><td><code>eventDescription</code></td><td>string</td><td>Rule name</td></tr>
+        <tr><td><code>rule_id</code></td><td>string</td><td>Rule UUID</td></tr>
+        <tr><td><code>rule_name</code></td><td>string</td><td>Rule display name</td></tr>
+        <tr><td><code>trigger_data</code></td><td>object</td><td>Raw trigger event data (fields vary by trigger type)</td></tr>
+      </table>
+      <p>Up to 8 clients may be connected simultaneously. Connect with:</p>
+      <pre><code>curl --digest -u admin:pass -N \
+  "http://&lt;camera-ip&gt;/local/acap_event_engine/alertStream"</code></pre>
+
+      <p style="margin-top:40px;font-size:12px;color:var(--text-dim);">Event Engine — MIT License</p>
+
+    </main>
+  </div><!-- .body-wrap -->
+</div><!-- .shell -->
+
+<script>
+'use strict';
+
+/* ── Theme toggle ── */
+var themeBtn = document.getElementById('theme-btn');
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  themeBtn.textContent = t === 'dark' ? '☀' : '🌙';
+}
+applyTheme(localStorage.getItem('theme') || 'light');
+themeBtn.addEventListener('click', function() {
+  var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('theme', next);
+  applyTheme(next);
+});
+
+/* ── Active sidebar link on scroll ── */
+var headings = Array.from(document.querySelectorAll('.content h2[id], .content h3[id]'));
+var sidebarLinks = Array.from(document.querySelectorAll('.sidebar a[href^="#"]'));
+
+function updateActive() {
+  var scrollY = window.scrollY + 80;
+  var current = headings[0] ? headings[0].id : '';
+  for (var i = 0; i < headings.length; i++) {
+    if (headings[i].offsetTop <= scrollY) {
+      current = headings[i].id;
+    }
+  }
+  sidebarLinks.forEach(function(a) {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+}
+
+window.addEventListener('scroll', updateActive, { passive: true });
+updateActive();
+
+/* ── Search ── */
+(function() {
+  var input = document.getElementById('search-input');
+  var clearBtn = document.getElementById('search-clear');
+  var searchBox = document.getElementById('search-box');
+  var content = document.querySelector('.content');
+  var sidebar = document.getElementById('sidebar');
+  var noResults = document.createElement('div');
+  noResults.className = 'search-no-results';
+  noResults.textContent = 'No results found.';
+  content.appendChild(noResults);
+
+  /* Build section map once: each h2[id] owns all siblings until the next h2[id] */
+  var sectionData = [];
+  (function() {
+    var allH2 = Array.from(content.querySelectorAll('h2[id]'));
+    allH2.forEach(function(h2, i) {
+      var els = [h2];
+      var sib = h2.nextElementSibling;
+      while (sib && !(sib.tagName === 'H2' && sib.id)) {
+        els.push(sib);
+        sib = sib.nextElementSibling;
+      }
+      sectionData.push({ id: h2.id, elements: els });
+    });
+  })();
+
+  /* Elements before the first h2 (h1, subtitle, etc.) */
+  var preamble = [];
+  (function() {
+    var first = content.querySelector('h2[id]');
+    if (!first) return;
+    var el = content.firstElementChild;
+    while (el && el !== first) {
+      preamble.push(el);
+      el = el.nextElementSibling;
+    }
+  })();
+
+  function clearHighlights() {
+    content.querySelectorAll('mark.search-hl').forEach(function(m) {
+      var parent = m.parentNode;
+      parent.replaceChild(document.createTextNode(m.textContent), m);
+      parent.normalize();
+    });
+  }
+
+  function highlightIn(root, regex) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+    var nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach(function(tn) {
+      var parts = tn.textContent.split(regex);
+      if (parts.length <= 1) return;
+      var frag = document.createDocumentFragment();
+      var matches = tn.textContent.match(regex);
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i]) frag.appendChild(document.createTextNode(parts[i]));
+        if (matches && i < matches.length) {
+          var mark = document.createElement('mark');
+          mark.className = 'search-hl';
+          mark.textContent = matches[i];
+          frag.appendChild(mark);
+        }
+      }
+      tn.parentNode.replaceChild(frag, tn);
+    });
+  }
+
+  var debounce;
+  input.addEventListener('input', function() {
+    clearTimeout(debounce);
+    debounce = setTimeout(doSearch, 150);
+  });
+  clearBtn.addEventListener('click', function() {
+    input.value = '';
+    doSearch();
+    input.focus();
+  });
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { input.value = ''; doSearch(); }
+  });
+
+  function doSearch() {
+    var q = input.value.trim();
+    searchBox.classList.toggle('has-query', q.length > 0);
+    clearHighlights();
+
+    if (!q) {
+      preamble.forEach(function(el) { el.style.display = ''; });
+      sectionData.forEach(function(s) {
+        s.elements.forEach(function(el) { el.style.display = ''; });
+      });
+      sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) { a.style.display = ''; });
+      sidebar.querySelectorAll('.sidebar-group-label').forEach(function(g) { g.style.display = ''; });
+      noResults.style.display = 'none';
+      return;
+    }
+
+    preamble.forEach(function(el) { el.style.display = 'none'; });
+
+    var escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var regex = new RegExp(escaped, 'gi');
+    var visibleIds = new Set();
+
+    sectionData.forEach(function(s) {
+      var text = s.elements.map(function(el) { return el.textContent; }).join(' ');
+      var sectionMatch = regex.test(text);
+      regex.lastIndex = 0;
+      if (!sectionMatch) {
+        s.elements.forEach(function(el) { el.style.display = 'none'; });
+        return;
+      }
+      visibleIds.add(s.id);
+
+      /* Within a matching h2 section, filter at h3 granularity */
+      var h3groups = [];
+      var currentGroup = { heading: null, els: [] };
+      s.elements.forEach(function(el) {
+        if (el.tagName === 'H3' && el.id) {
+          if (currentGroup.els.length) h3groups.push(currentGroup);
+          currentGroup = { heading: el, els: [el] };
+        } else {
+          currentGroup.els.push(el);
+        }
+      });
+      if (currentGroup.els.length) h3groups.push(currentGroup);
+
+      if (h3groups.length > 1 || (h3groups.length === 1 && h3groups[0].heading)) {
+        h3groups.forEach(function(g) {
+          var gText = g.els.map(function(el) { return el.textContent; }).join(' ');
+          var gMatch = regex.test(gText);
+          regex.lastIndex = 0;
+          /* Always show the h2 heading itself (first group without a h3 heading) */
+          if (!g.heading) {
+            g.els.forEach(function(el) { el.style.display = ''; });
+          } else {
+            g.els.forEach(function(el) { el.style.display = gMatch ? '' : 'none'; });
+          }
+          if (gMatch) {
+            g.els.forEach(function(el) { highlightIn(el, new RegExp(escaped, 'gi')); });
+          }
+        });
+      } else {
+        s.elements.forEach(function(el) { el.style.display = ''; });
+        s.elements.forEach(function(el) { highlightIn(el, new RegExp(escaped, 'gi')); });
+      }
+    });
+
+    /* Filter sidebar: show links whose target section is visible */
+    sidebar.querySelectorAll('a[href^="#"]').forEach(function(a) {
+      var href = a.getAttribute('href').slice(1);
+      a.style.display = visibleIds.has(href) ? '' : 'none';
+    });
+    /* For sub-links (h3 targets), only show if the h3's own content matches the query */
+    sidebar.querySelectorAll('a.sub[href^="#"]').forEach(function(a) {
+      if (a.style.display !== 'none') return; /* already visible as h2 match */
+      var href = a.getAttribute('href').slice(1);
+      var h3 = document.getElementById(href);
+      if (!h3) return;
+      var text = h3.textContent;
+      var sib = h3.nextElementSibling;
+      while (sib && sib.tagName !== 'H3' && sib.tagName !== 'H2') {
+        text += ' ' + sib.textContent;
+        sib = sib.nextElementSibling;
+      }
+      if (regex.test(text)) {
+        a.style.display = '';
+        regex.lastIndex = 0;
+      }
+    });
+    /* Also show the parent h2 link if any of its sub-links are visible */
+    sidebar.querySelectorAll('a[href^="#"]:not(.sub)').forEach(function(a) {
+      if (a.style.display !== 'none') return;
+      var next = a.nextElementSibling;
+      while (next && next.classList.contains('sub')) {
+        if (next.style.display !== 'none') { a.style.display = ''; return; }
+        next = next.nextElementSibling;
+      }
+    });
+    /* Show sidebar group labels if any link below them is visible */
+    sidebar.querySelectorAll('.sidebar-group-label').forEach(function(g) {
+      var next = g.nextElementSibling;
+      var anyVisible = false;
+      while (next && !next.classList.contains('sidebar-group-label')) {
+        if (next.tagName === 'A' && next.style.display !== 'none') anyVisible = true;
+        next = next.nextElementSibling;
+      }
+      g.style.display = anyVisible ? '' : 'none';
+    });
+
+    noResults.style.display = visibleIds.size === 0 ? 'block' : 'none';
+  }
+
+  /* Ctrl/Cmd+K shortcut */
+  document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      input.focus();
+      input.select();
+    }
+  });
+})();
+</script>
+
+<script src="mock.js"></script>
+</body>
+</html>
