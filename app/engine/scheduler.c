@@ -151,14 +151,18 @@ static int days_array_to_mask(cJSON* days) {
 
 /*-----------------------------------------------------
  * Solar calculation (NOAA simplified algorithm)
- * Returns seconds-of-day in local time, or -1 if the event doesn't
- * occur today (polar day/night).
+ * solar_event_local_sec() gives the event in local seconds from midnight,
+ * not wrapped to one day (a sunset after midnight is above 86400). It returns
+ * 0, or 1 if the sun stays above the event's angle all day (midnight sun) and
+ * -1 if it stays below (polar night).
+ * compute_solar_event() wraps that to 0..86399, or returns -1 if the event
+ * doesn't occur today.
  *-----------------------------------------------------*/
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-static int compute_solar_event(double lat, double lon, int event, time_t now) {
+static int solar_event_local_sec(double lat, double lon, int event, time_t now, double* out) {
     struct tm* gm = gmtime(&now);
     int doy = gm->tm_yday + 1; /* 1-366 */
 
@@ -191,7 +195,8 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
         /* Hour angle */
         double cos_ha = (sin(elev_r) - sin(lat_r) * sin(decl)) /
                         (cos(lat_r) * cos(decl));
-        if (cos_ha < -1.0 || cos_ha > 1.0) return -1; /* polar day/night */
+        if (cos_ha < -1.0) return 1;
+        if (cos_ha > 1.0) return -1;
         double ha_deg = acos(cos_ha) * 180.0 / M_PI;
 
         if (event == ASTRO_SUNRISE || event == ASTRO_DAWN)
@@ -205,20 +210,40 @@ static int compute_solar_event(double lat, double lon, int event, time_t now) {
     /* tm_gmtoff is POSIX extension (available on Linux) */
     long tz_offset_sec = local_tm->tm_gmtoff;
 
-    double event_local_sec = event_utc_min * 60.0 + (double)tz_offset_sec;
-    while (event_local_sec < 0)      event_local_sec += 86400.0;
-    while (event_local_sec >= 86400) event_local_sec -= 86400.0;
-
-    return (int)event_local_sec;
+    *out = event_utc_min * 60.0 + (double)tz_offset_sec;
+    return 0;
 }
 
-int Scheduler_Is_Daytime(double lat, double lon) {
+static int compute_solar_event(double lat, double lon, int event, time_t now) {
+    double sec;
+    if (solar_event_local_sec(lat, lon, event, now, &sec) != 0) return -1;
+    while (sec < 0)      sec += 86400.0;
+    while (sec >= 86400) sec -= 86400.0;
+    return (int)sec;
+}
+
+int Scheduler_Is_Daytime(double lat, double lon, int sunrise_offset_sec, int sunset_offset_sec) {
     time_t now = time(NULL);
-    int sunrise = compute_solar_event(lat, lon, ASTRO_SUNRISE, now);
-    int sunset  = compute_solar_event(lat, lon, ASTRO_SUNSET, now);
-    if (sunrise < 0 || sunset < 0) return -1; /* polar */
-    int sod = ACAP_DEVICE_Seconds_Since_Midnight();
-    return (sod >= sunrise && sod < sunset) ? 1 : 0;
+    double sunrise, sunset;
+    int polar = solar_event_local_sec(lat, lon, ASTRO_SUNRISE, now, &sunrise);
+    if (polar == 0) polar = solar_event_local_sec(lat, lon, ASTRO_SUNSET, now, &sunset);
+    if (polar != 0) return polar > 0 ? 1 : 0;
+    sunrise = floor(sunrise) + sunrise_offset_sec;
+    sunset  = floor(sunset) + sunset_offset_sec;
+    if (sunset <= sunrise) return 0;
+    if (sunset - sunrise >= 86400.0) return 1;
+    /* Move the window so its middle falls today; it can then start before or
+     * end after midnight. Today's times stand in for the neighbouring days'
+     * (they differ by a few minutes at most). */
+    double shift = floor((sunrise + sunset) / 2.0 / 86400.0) * 86400.0;
+    sunrise -= shift;
+    sunset  -= shift;
+    double sod = ACAP_DEVICE_Seconds_Since_Midnight();
+    for (int day = -1; day <= 1; day++) {
+        double t = sod + day * 86400.0;
+        if (t >= sunrise && t < sunset) return 1;
+    }
+    return 0;
 }
 
 /*-----------------------------------------------------
@@ -285,7 +310,8 @@ int Scheduler_Register(const char* rule_id, int trigger_index, cJSON* config) {
         double lon_val = lon_j ? lon_j->valuedouble : 0.0;
         /* Fall back to engine settings lat/lon if trigger doesn't specify them */
         if (lat_val == 0.0 && lon_val == 0.0) {
-            cJSON* eng = ACAP_Get_Config("engine");
+            cJSON* sett = ACAP_Get_Config("settings");
+            cJSON* eng = sett ? cJSON_GetObjectItem(sett, "engine") : NULL;
             if (eng) {
                 cJSON* elat = cJSON_GetObjectItem(eng, "latitude");
                 cJSON* elon = cJSON_GetObjectItem(eng, "longitude");

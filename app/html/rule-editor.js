@@ -395,7 +395,7 @@ function triggerFields(t, rowIdx) {
       </div>
       <div class="form-group">
         <label>Days</label>
-        <input type="text" data-k="days_str" value="${escHtml([].concat(t.days || [1,2,3,4,5]).join(','))}" placeholder="0=Sun,1=Mon,...6=Sat">
+        <input type="text" data-k="days_str" value="${escHtml(t.days_str ?? [].concat(t.days || [1,2,3,4,5]).join(','))}" placeholder="0=Sun,1=Mon,...6=Sat">
         <div class="form-hint">Comma-separated day numbers (0=Sun)</div>
       </div>
     </div>` : ''}
@@ -643,7 +643,7 @@ function triggerFields(t, rowIdx) {
     <div class="form-row">
       <div class="form-group">
         <label>Polygon points <span style="font-weight:normal;opacity:.7">(optional JSON [[lat,lon],...], overrides circle)</span></label>
-        <input type="text" data-k="points_text" value="${escHtml(JSON.stringify(t.points || []))}" placeholder="[[59.9,10.7],[59.91,10.7],[59.9,10.71]]">
+        <input type="text" data-k="points_text" value="${escHtml(t.points_text ?? JSON.stringify(t.points || []))}" placeholder="[[59.9,10.7],[59.91,10.7],[59.9,10.71]]">
       </div>
     </div>
     <div class="form-hint">Fires on transitions after the first valid GPS position. A polygon needs at least 3 points.</div>`;
@@ -778,6 +778,11 @@ const MB_ENCODINGS = [
   ['iso-8859-1', 'ISO-8859-1 (Latin-1)'], ['iso-8859-2', 'ISO-8859-2 (Latin-2)'],
   ['windows-1250', 'Windows-1250 (Central European)'], ['windows-1252', 'Windows-1252 (Western)'],
 ];
+/* How a string write fills the bytes the text doesn't use: value, label, short label for the table. */
+const MB_FILLS = [
+  ['nul', 'NUL (0x00)', 'NUL'], ['space_left', 'Spaces, text left', 'Space, left'],
+  ['space_right', 'Spaces, text right', 'Space, right'], ['space_center', 'Spaces, centered', 'Space, center'],
+];
 const MB_MAX_STRING_REGS = 125;
 const MB_TYPE_REGS = { uint16: 1, int16: 1, uint32: 2, int32: 2, float32: 2, uint64: 4, int64: 4, float64: 4 };
 
@@ -861,6 +866,10 @@ function mbEncodingOptions(sel, short) {
   const cur = (sel || 'utf-8').toLowerCase();
   return MB_ENCODINGS.map(([v, l]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? l.split(' ')[0] : l}</option>`).join('');
 }
+function mbFillOptions(sel, short) {
+  const cur = sel || 'nul';
+  return MB_FILLS.map(([v, l, s]) => `<option value="${v}" ${cur===v?'selected':''}>${short ? s : l}</option>`).join('');
+}
 
 /* Data type, word/byte order, scaling, string length and encoding of a
  * single value. withDecimals: a read (scaling applies forwards). */
@@ -893,13 +902,18 @@ function mbTypeFields(o, typeKey, orderKey, rerender, withDecimals) {
       <div class="form-group">
         <label>Length (registers)</label>
         <input type="number" data-k="length" value="${escHtml(o.length!==undefined?o.length:8)}" min="1" max="${MB_MAX_STRING_REGS}" step="1">
-        <div class="form-hint">1-${MB_MAX_STRING_REGS}. ${withDecimals ? 'Text stops at the first NUL.' : 'Shorter text is padded with NUL (0x00).'}</div>
+        <div class="form-hint">1-${MB_MAX_STRING_REGS} registers (2 bytes each). This is not a character count; UTF-8 characters may use multiple bytes. ${withDecimals ? 'Text stops at the first NUL.' : 'Fill sets what goes in the bytes shorter text leaves free.'}</div>
       </div>
       <div class="form-group">
         <label>Encoding</label>
         <select data-k="encoding">${mbEncodingOptions(o.encoding)}</select>
         <div class="form-hint">Character set of the device. In UTF-8, letters such as ą or ż take 2 bytes.</div>
-      </div>` : `
+      </div>${withDecimals ? '' : `
+      <div class="form-group">
+        <label>Fill</label>
+        <select data-k="fill">${mbFillOptions(o.fill)}</select>
+        <div class="form-hint">What goes in the bytes the text doesn't use. Use spaces if the device shows 0x00 as a character.</div>
+      </div>`}` : `
       ${num('scale', 'Scale (multiplier)', '', '1', withDecimals ? 'value = raw × scale + offset' : 'raw = (value − offset) ÷ scale')}
       ${num('offset', 'Offset', '', '0', 'e.g. -0.5')}
       ${withDecimals ? num('decimals', 'Decimals', '', 'auto', 'Rounding') : ''}`}
@@ -918,20 +932,21 @@ const MB_COLS = {
   scale:    { label: 'Scale',    w: 64,  input: 'decimal', ph: '1', title: 'Scale (multiplier)' },
   offset:   { label: 'Offset',   w: 64,  input: 'decimal', ph: '0' },
   decimals: { label: 'Decimals', w: 72,  input: 'decimal', ph: 'auto', title: 'Decimals (rounding)' },
-  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8', title: 'Length in registers (text, 1-125)' },
+  length:   { label: 'Length',   w: 60,  input: 'number', ph: '8', title: 'String length in registers (2 bytes each; UTF-8 characters may use multiple bytes)' },
   encoding: { label: 'Encoding', w: 104, title: 'Character encoding (text)' },
+  fill:     { label: 'Fill',     w: 116, title: 'Bytes the text doesn\'t use: NUL (0x00) or spaces with the text left, right or centered' },
 };
 
 function mbTableCols(kind, bits) {
   if (kind === 'map') return bits ? ['register', 'var'] : ['register', 'var', 'type', 'order', 'scale', 'offset', 'decimals', 'length', 'encoding'];
-  return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length', 'encoding'];
+  return bits ? ['register', 'value'] : ['register', 'value', 'type', 'order', 'scale', 'offset', 'length', 'encoding', 'fill'];
 }
 
-/* Cells that don't apply to the row's type: length and encoding are for
+/* Cells that don't apply to the row's type: length, encoding and fill are for
  * strings only, and scaling is for numbers only. */
 function mbCellOff(c, type) {
   const str = (type || 'uint16') === 'string';
-  return c === 'length' || c === 'encoding' ? !str : (str && (c === 'scale' || c === 'offset' || c === 'decimals'));
+  return c === 'length' || c === 'encoding' || c === 'fill' ? !str : (str && (c === 'scale' || c === 'offset' || c === 'decimals'));
 }
 
 function mbTableRow(kind, r, bits) {
@@ -942,7 +957,8 @@ function mbTableRow(kind, r, bits) {
     let ctl;
     if (c === 'type') ctl = `<select data-mk="type" onchange="mbTableSync(this)">${mbTypeOptions(v)}</select>`;
     else if (c === 'order') ctl = `<select data-mk="order" onchange="mbTableSync(this)" title="${mbHasWords(r.type || 'uint16') ? 'Word order' : 'Byte order'}">${mbOrderOptions(v, r.type, true)}</select>`;
-    else if (c === 'encoding') ctl = `<select data-mk="encoding" onchange="mbTableSync(this)" ${off ? 'disabled' : ''}>${mbEncodingOptions(v, true)}</select>`;
+    else if (c === 'encoding') ctl = `<select data-mk="encoding" onchange="mbTableSync(this)" ${off ? 'hidden disabled' : ''}>${mbEncodingOptions(v, true)}</select>`;
+    else if (c === 'fill') ctl = `<select data-mk="fill" onchange="mbTableSync(this)" ${off ? 'hidden disabled' : ''}>${mbFillOptions(v, true)}</select>`;
     else if (def.input === 'decimal') ctl = `<input type="text" inputmode="decimal" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}"
                  ${off ? 'disabled' : ''} oninput="mbTableSync(this)">`;
     else ctl = `<input type="${def.input}" data-mk="${c}" value="${escHtml(v)}" placeholder="${off ? '' : escHtml(def.ph || '')}"
@@ -956,9 +972,10 @@ function mbTable(kind, rows, bits) {
   const cols = mbTableCols(kind, bits);
   const colgroup = cols.map(c => MB_COLS[c].w ? `<col style="width:${MB_COLS[c].w}px">` : '<col>').join('') + '<col style="width:26px">';
   const head = cols.map(c => `<th title="${escHtml(MB_COLS[c].title || MB_COLS[c].label)}">${MB_COLS[c].label}</th>`).join('');
-  const hint = kind === 'map'
+  const hint = (kind === 'map'
     ? `Read from the lowest to the highest address, ${bits ? 'up to 2000 bits in one request' : 'up to 125 registers per request; larger maps are read in several requests (at most 2000 registers)'}. Each value is stored in its variable and is <code>{{trigger.NAME}}</code> in actions.`
-    : `Adjacent ${bits ? 'coils are written in one request (FC15, up to 1968)' : 'registers are written in one request (FC16, up to 123 registers); longer runs are split'}, and a gap starts a new request. Values can use placeholders.`;
+    : `Adjacent ${bits ? 'coils are written in one request (FC15, up to 1968)' : 'registers are written in one request (FC16, up to 123 registers); longer runs are split'}, and a gap starts a new request. Values can use placeholders.`)
+    + (!bits ? ' For string rows, Length counts 2-byte registers, not characters; UTF-8 characters may use multiple bytes.' : '');
   return `
     <div class="form-group mb-wrap" data-kind="${kind}" data-bits="${bits ? 1 : 0}">
       <label>${kind === 'map' ? 'Register Map' : 'Values'}</label>
@@ -990,9 +1007,10 @@ function mbTableSync(el) {
       }
       o.order = ord.value;
     }
-    tr.querySelectorAll('input[data-mk], select[data-mk="encoding"]').forEach(i => {
+    tr.querySelectorAll('input[data-mk], select[data-mk="encoding"], select[data-mk="fill"]').forEach(i => {
       const c = i.dataset.mk;
       i.disabled = mbCellOff(c, o.type);
+      if (c === 'encoding' || c === 'fill') i.hidden = i.disabled;
       if (i.tagName === 'INPUT') i.placeholder = i.disabled ? '' : (MB_COLS[c].ph || '');
       if (i.disabled) delete o[c];
     });
@@ -1046,6 +1064,7 @@ function mbNormField(src, out, typeKey, orderKey, withDecimals) {
     out.length = parseInt(src.length) || 8;
     const enc = (src.encoding || 'utf-8').toLowerCase();
     if (enc !== 'utf-8') out.encoding = enc;
+    if (!withDecimals && src.fill && src.fill !== 'nul') out.fill = src.fill;
     return;
   }
   const scale = mbNumOrText(src.scale), offset = mbNumOrText(src.offset), decimals = mbNumOrText(src.decimals);
@@ -1202,15 +1221,7 @@ function renderTriggerList() {
   });
 }
 
-function flushTriggerRows() {
-  triggerRows = triggerRows.map((_, i) => {
-    const el = document.getElementById('trow-' + i);
-    if (!el) return _;
-    const data = { type: _.type };
-    el.querySelectorAll('[data-k]').forEach(inp => { data[inp.dataset.k] = inp.value; });
-    return data;
-  });
-}
+function flushTriggerRows() { triggerRows = collectRows(triggerRows, 'trow'); }
 function addTriggerRow() {
   flushTriggerRows();
   triggerRows.push({ type: 'vapix_event' });
@@ -1323,7 +1334,7 @@ function conditionFields(c, rowIdx) {
       </div>
       <div class="form-group">
         <label>Days (0=Sun,6=Sat)</label>
-        <input type="text" data-k="days_str" value="${escHtml([].concat(c.days || [1,2,3,4,5]).join(','))}" placeholder="1,2,3,4,5">
+        <input type="text" data-k="days_str" value="${escHtml(c.days_str ?? [].concat(c.days || [1,2,3,4,5]).join(','))}" placeholder="1,2,3,4,5">
       </div>
     </div>`;
   if (type === 'counter') return `
@@ -1512,13 +1523,7 @@ function conditionFields(c, rowIdx) {
     </div>`;
   }
   if (type === 'day_night') {
-    const lat = c.lat !== undefined && c.lat !== '' ? parseFloat(c.lat) : engineLat;
-    const lon = c.lon !== undefined && c.lon !== '' ? parseFloat(c.lon) : engineLon;
-    const rise = calcSolarEvent(lat, lon, 'sunrise', 0);
-    const set  = calcSolarEvent(lat, lon, 'sunset', 0);
-    const solarHint = rise && set
-      ? `Today: sunrise ${rise}, sunset ${set}`
-      : (lat === 0 && lon === 0 ? 'Set latitude/longitude in Location' : 'No sunrise/sunset today (polar)');
+    const solarHint = dayNightHint(c.lat, c.lon, c.sunrise_offset_minutes, c.sunset_offset_minutes);
     return `
     <div class="form-row">
       <div class="form-group">
@@ -1527,17 +1532,29 @@ function conditionFields(c, rowIdx) {
           <option value="day"   ${(c.state||'day')==='day'   ? 'selected' : ''}>Daytime (after sunrise)</option>
           <option value="night" ${c.state==='night' ? 'selected' : ''}>Nighttime (after sunset)</option>
         </select>
-        <div class="form-hint">${solarHint}</div>
+        <div class="form-hint" data-role="day-night-hint">${escHtml(solarHint)}</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Sunrise offset (minutes, + = later)</label>
+        <input type="number" data-k="sunrise_offset_minutes" min="-720" max="720" value="${escHtml(c.sunrise_offset_minutes || 0)}" placeholder="0" oninput="refreshDayNightHint(this)">
+        <div class="form-hint">E.g. 60 keeps it "night" until 1 hour after sunrise</div>
+      </div>
+      <div class="form-group">
+        <label>Sunset offset (minutes, + = later)</label>
+        <input type="number" data-k="sunset_offset_minutes" min="-720" max="720" value="${escHtml(c.sunset_offset_minutes || 0)}" placeholder="0" oninput="refreshDayNightHint(this)">
+        <div class="form-hint">E.g. -30 starts "night" 30 minutes before sunset</div>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label>Latitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
-        <input type="number" step="any" data-k="lat" value="${escHtml(c.lat !== undefined ? c.lat : '')}" placeholder="From settings (${escHtml(engineLat)})">
+        <input type="number" step="any" oninput="refreshDayNightHint(this)" data-k="lat" value="${escHtml(c.lat !== undefined ? c.lat : '')}" placeholder="From settings (${escHtml(engineLat)})">
       </div>
       <div class="form-group">
         <label>Longitude <span style="color:var(--text-muted);font-weight:400;">(optional override)</span></label>
-        <input type="number" step="any" data-k="lon" value="${escHtml(c.lon !== undefined ? c.lon : '')}" placeholder="From settings (${escHtml(engineLon)})">
+        <input type="number" step="any" oninput="refreshDayNightHint(this)" data-k="lon" value="${escHtml(c.lon !== undefined ? c.lon : '')}" placeholder="From settings (${escHtml(engineLon)})">
       </div>
     </div>`;
   }
@@ -1752,6 +1769,34 @@ function collectConditionRow(i) {
     else data[inp.dataset.k] = inp.value;
   });
   conditionRows[i] = data;
+}
+
+/* Mirrors cond_day_night: empty or 0/0 coordinates fall back to Location settings */
+function dayNightHint(latIn, lonIn, sunriseOffset, sunsetOffset) {
+  let lat = parseFloat(latIn), lon = parseFloat(lonIn);
+  if (isNaN(lat)) lat = 0;
+  if (isNaN(lon)) lon = 0;
+  if (lat === 0 && lon === 0) { lat = parseFloat(engineLat) || 0; lon = parseFloat(engineLon) || 0; }
+  const riseOff = parseFloat(sunriseOffset) || 0;
+  const setOff  = parseFloat(sunsetOffset) || 0;
+  const rise = calcSolarEvent(lat, lon, 'sunrise', riseOff);
+  const set  = calcSolarEvent(lat, lon, 'sunset', setOff);
+  if (!rise || !set) {
+    if (lat === 0 && lon === 0) return 'Set latitude/longitude in Location';
+    return isMidnightSun(lat) ? 'No sunset today (midnight sun): day all day'
+                              : 'No sunrise today (polar night): night all day';
+  }
+  const offNote = riseOff || setOff ? ' (with offsets)' : '';
+  return `Today: day starts ${rise}, night starts ${set}${offNote}`;
+}
+
+/* Live-update the day_night hint while coordinates/offsets are typed */
+function refreshDayNightHint(inp) {
+  const row = inp.closest('.tca-row');
+  if (!row) return;
+  const val = k => { const e = row.querySelector(`[data-k="${k}"]`); return e ? e.value : ''; };
+  const hint = row.querySelector('[data-role="day-night-hint"]');
+  if (hint) hint.textContent = dayNightHint(val('lat'), val('lon'), val('sunrise_offset_minutes'), val('sunset_offset_minutes'));
 }
 
 function rerenderCondition(sel) {
@@ -3866,6 +3911,8 @@ function collectRows(rows, prefix) {
     const el = document.getElementById(`${prefix}-${i}`);
     if (!el) return _;
     const data = { type: _.type };
+    /* Editor-only state (e.g. _adding, _dataTypes) has no input; keep it */
+    for (const k of Object.keys(_)) if (k.startsWith('_')) data[k] = _[k];
     el.querySelectorAll('[data-k]').forEach(inp => {
       data[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value;
     });
@@ -3999,6 +4046,10 @@ function normalizeCondition(c) {
     out.state = c.state || 'day';
     if (c.lat !== undefined && c.lat !== '') out.lat = parseFloat(c.lat);
     if (c.lon !== undefined && c.lon !== '') out.lon = parseFloat(c.lon);
+    const riseOff = parseFloat(c.sunrise_offset_minutes) || 0;
+    const setOff  = parseFloat(c.sunset_offset_minutes) || 0;
+    if (riseOff !== 0) out.sunrise_offset_minutes = riseOff;
+    if (setOff !== 0)  out.sunset_offset_minutes = setOff;
   } else if (c.type === 'vapix_event_state') {
     out.event_key = c.event_key || '';
     out.data_key  = c.data_key || '';

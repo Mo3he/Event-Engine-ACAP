@@ -3,6 +3,15 @@
 /* key = "host:::query", value = array */
 const remoteCapCache = {};
 
+/* Re-renders the open rule editor after a capability list loads, keeping
+ * edits made while it loaded. */
+function refreshOpenEditor(triggers, actions, conditions) {
+  if (document.getElementById('modal-overlay').classList.contains('hidden')) return;
+  if (triggers)   { flushTriggerRows();   renderTriggerList(); }
+  if (actions)    { flushActionRows();    renderActionList(); }
+  if (conditions) { flushConditionRows(); renderConditionList(); }
+}
+
 function rowHttps(row) {
   const el = row.querySelector('[data-k="remote_https"]');
   return !!(el && el.checked);
@@ -194,10 +203,7 @@ async function loadVapixEventCatalog() {
     vapixEventCatalog = [];
   }
   /* If the rule editor is open, re-render so catalog-based hints and dropdowns update */
-  if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
-    renderTriggerList();
-    renderActionList();
-  }
+  refreshOpenEditor(true, true, false);
 }
 
 async function loadPtzPresets() {
@@ -307,8 +313,7 @@ async function loadAcapApps() {
     acapApps = apps.sort((a, b) => a.niceName.localeCompare(b.niceName));
   } catch(e) { acapApps = []; }
   renderDeviceCapabilities();
-  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
-    renderActionList();
+  refreshOpenEditor(false, true, false);
 }
 
 async function loadPrivacyMasks() {
@@ -321,8 +326,7 @@ async function loadPrivacyMasks() {
     privacyMasks = list.map(m => ({ name: m.name }));
   } catch(e) { privacyMasks = []; }
   renderDeviceCapabilities();
-  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
-    renderActionList();
+  refreshOpenEditor(false, true, false);
 }
 
 async function loadDeviceParams() {
@@ -337,8 +341,7 @@ async function loadDeviceParams() {
     }
     deviceParams = params;
   } catch(e) { deviceParams = []; }
-  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
-    renderActionList();
+  refreshOpenEditor(false, true, false);
 }
 
 async function loadGuardTours() {
@@ -357,8 +360,7 @@ async function loadGuardTours() {
     guardTours = Object.values(byId).sort((a, b) => a.id - b.id);
   } catch(e) { guardTours = []; }
   renderDeviceCapabilities();
-  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
-    renderActionList();
+  refreshOpenEditor(false, true, false);
 }
 
 async function loadAoaScenarios() {
@@ -369,11 +371,7 @@ async function loadAoaScenarios() {
     aoaScenarios = Array.isArray(data) ? data : [];
   } catch(e) { aoaScenarios = []; }
   renderDeviceCapabilities();
-  if (!document.getElementById('modal-overlay').classList.contains('hidden')) {
-    renderTriggerList();
-    renderActionList();
-    renderConditionList();
-  }
+  refreshOpenEditor(true, true, true);
 }
 
 async function loadPagingConsoleData() {
@@ -415,8 +413,7 @@ async function loadPagingConsoleData() {
                        .sort((a, b) => a.name.localeCompare(b.name));
   } catch(e) { pagingPages = []; }
 
-  if (!document.getElementById('modal-overlay').classList.contains('hidden'))
-    renderActionList();
+  refreshOpenEditor(false, true, false);
 }
 
 /* Called onblur from the set_device_param parameter input. */

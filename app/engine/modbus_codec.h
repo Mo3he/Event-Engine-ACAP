@@ -58,11 +58,21 @@ typedef enum {
     MB_CS_CP1252     /* Windows-1252 */
 } mb_charset_t;
 
-/* NULL or "" give the default (uint16, ABCD, utf-8). Encodings are matched
+/* How a string write fills the registers the text doesn't use. */
+typedef enum {
+    MB_FILL_INVALID = -1,
+    MB_FILL_NUL = 0,         /* text first, then 0x00 */
+    MB_FILL_SPACE_LEFT,      /* text first, then spaces */
+    MB_FILL_SPACE_RIGHT,     /* spaces, then text */
+    MB_FILL_SPACE_CENTER     /* text centred in spaces; an odd one goes after */
+} mb_fill_t;
+
+/* NULL or "" give the default (uint16, ABCD, utf-8, nul). Encodings are matched
  * without case, and also as utf8, latin1, latin2, cp1250 and cp1252. */
 mb_type_t    mb_type_parse(const char* s);
 mb_order_t   mb_order_parse(const char* s);
 mb_charset_t mb_charset_parse(const char* s);
+mb_fill_t    mb_fill_parse(const char* s);
 const char*  mb_type_name(mb_type_t t);
 const char*  mb_charset_name(mb_charset_t cs);
 
@@ -91,11 +101,11 @@ size_t mb_text_encode(const char* s, mb_charset_t cs, uint8_t* out, size_t out_s
  * -1 if the value is NaN or out of range for the type. */
 int mb_encode_number(double v, mb_type_t t, mb_order_t o, uint16_t* regs);
 
-/* UTF-8 text to nregs registers in cs, padded with NUL to the end. Returns
- * -1 if the encoded text is longer than nregs * 2 bytes. *bad as for
- * mb_text_encode (may be NULL). */
+/* UTF-8 text to nregs registers in cs; the unused bytes are filled as fill
+ * says. Returns -1 if the encoded text is longer than nregs * 2 bytes. *bad as
+ * for mb_text_encode (may be NULL). */
 int mb_encode_string(const char* s, int nregs, mb_order_t o, mb_charset_t cs,
-                     uint16_t* regs, int* bad);
+                     mb_fill_t fill, uint16_t* regs, int* bad);
 
 /* value = raw * scale + offset, rounded to decimals (< 0: noise of the double
  * arithmetic only, 15 significant digits). */
@@ -120,6 +130,7 @@ typedef struct {
     int        decimals;  /* -1 = not set */
     int        length;    /* string length in registers */
     mb_charset_t charset; /* strings */
+    mb_fill_t  fill;      /* string writes */
 } mb_field_t;
 
 /* Field from a JSON object. type_key/order_key name the keys ("data_type"/

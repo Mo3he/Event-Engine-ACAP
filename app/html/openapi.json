@@ -1303,8 +1303,9 @@
               "word_order":     { "type": "string", "enum": ["ABCD", "CDAB", "BADC", "DCBA"], "default": "ABCD", "description": "Byte order. All four apply to 32/64-bit values; for 16-bit values and strings only ABCD (normal) and BADC (bytes swapped in each register) differ" },
               "scale":           { "type": "number", "default": 1, "description": "Numeric input is converted to raw form using (value - offset) / scale; cannot be zero" },
               "offset":          { "type": "number", "default": 0, "description": "Numeric value offset" },
-              "length":          { "type": "integer", "minimum": 1, "maximum": 125, "default": 8, "description": "String length in registers (2 bytes each); shorter text is padded with NUL" },
+              "length":          { "type": "integer", "minimum": 1, "maximum": 125, "default": 8, "description": "String length in registers (2 bytes each); shorter text is padded as fill says" },
               "encoding":        { "type": "string", "enum": ["utf-8", "ascii", "iso-8859-1", "iso-8859-2", "windows-1250", "windows-1252"], "default": "utf-8", "description": "Character encoding of a string; characters it can't represent are rejected in literal values and sent as ? from templates" },
+              "fill":            { "type": "string", "enum": ["nul", "space_left", "space_right", "space_center"], "default": "nul", "description": "String padding: nul puts the text first and fills with 0x00; space_* fill with spaces and put the text left, right or centered (an odd space goes after)" },
               "value": {
                 "oneOf": [
                   { "type": "number" },
@@ -1333,7 +1334,8 @@
                     "scale": { "type": "number", "default": 1 },
                     "offset": { "type": "number", "default": 0 },
                     "length": { "type": "integer", "minimum": 1, "maximum": 125, "default": 8 },
-                    "encoding": { "type": "string", "enum": ["utf-8", "ascii", "iso-8859-1", "iso-8859-2", "windows-1250", "windows-1252"], "default": "utf-8" }
+                    "encoding": { "type": "string", "enum": ["utf-8", "ascii", "iso-8859-1", "iso-8859-2", "windows-1250", "windows-1252"], "default": "utf-8" },
+                    "fill": { "type": "string", "enum": ["nul", "space_left", "space_right", "space_center"], "default": "nul" }
                   }
                 }
               }

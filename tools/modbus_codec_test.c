@@ -98,20 +98,20 @@ static void test_round_trip(void) {
 
 static void test_strings(void) {
     uint16_t regs[3];
-    CHECK(mb_encode_string("HELLO", 3, MB_O_ABCD, MB_CS_ASCII, regs, NULL) == 0, "encode HELLO");
+    CHECK(mb_encode_string("HELLO", 3, MB_O_ABCD, MB_CS_ASCII, MB_FILL_NUL, regs, NULL) == 0, "encode HELLO");
     uint16_t want[3] = { 0x4845, 0x4C4C, 0x4F00 };
     expect_regs("string ABCD", regs, want, 3);
     char out[16];
     mb_decode_string(regs, 3, MB_O_ABCD, MB_CS_ASCII, out, sizeof(out));
     CHECK(strcmp(out, "HELLO") == 0, "decode HELLO got '%s'", out);
 
-    CHECK(mb_encode_string("HELLO", 3, MB_O_BADC, MB_CS_ASCII, regs, NULL) == 0, "encode HELLO BADC");
+    CHECK(mb_encode_string("HELLO", 3, MB_O_BADC, MB_CS_ASCII, MB_FILL_NUL, regs, NULL) == 0, "encode HELLO BADC");
     uint16_t want_sw[3] = { 0x4548, 0x4C4C, 0x004F };
     expect_regs("string BADC", regs, want_sw, 3);
     mb_decode_string(regs, 3, MB_O_BADC, MB_CS_ASCII, out, sizeof(out));
     CHECK(strcmp(out, "HELLO") == 0, "decode HELLO BADC got '%s'", out);
 
-    CHECK(mb_encode_string("TOO LONG", 3, MB_O_ABCD, MB_CS_ASCII, regs, NULL) == -1, "string too long");
+    CHECK(mb_encode_string("TOO LONG", 3, MB_O_ABCD, MB_CS_ASCII, MB_FILL_NUL, regs, NULL) == -1, "string too long");
 
     uint16_t padded[3] = { 0x4F4B, 0x2020, 0x2020 };   /* "OK    " */
     mb_decode_string(padded, 3, MB_O_ABCD, MB_CS_ASCII, out, sizeof(out));
@@ -124,9 +124,49 @@ static void test_strings(void) {
 
     /* The rest of the registers is NUL, whatever was there before */
     uint16_t pad[4] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF };
-    CHECK(mb_encode_string("ABC", 4, MB_O_ABCD, MB_CS_ASCII, pad, NULL) == 0, "encode ABC");
+    CHECK(mb_encode_string("ABC", 4, MB_O_ABCD, MB_CS_ASCII, MB_FILL_NUL, pad, NULL) == 0, "encode ABC");
     uint16_t want_pad[4] = { 0x4142, 0x4300, 0x0000, 0x0000 };
     expect_regs("NUL padding", pad, want_pad, 4);
+}
+
+static void test_fill(void) {
+    CHECK(mb_fill_parse(NULL) == MB_FILL_NUL && mb_fill_parse("") == MB_FILL_NUL, "fill defaults to nul");
+    CHECK(mb_fill_parse("space_center") == MB_FILL_SPACE_CENTER, "fill space_center");
+    CHECK(mb_fill_parse("spaces") == MB_FILL_INVALID, "unknown fill");
+
+    struct { mb_fill_t fill; mb_order_t o; uint16_t want[3]; const char* name; } cases[] = {
+        { MB_FILL_SPACE_LEFT,   MB_O_ABCD, { 0x4142, 0x4320, 0x2020 }, "space_left"   },   /* "ABC   " */
+        { MB_FILL_SPACE_RIGHT,  MB_O_ABCD, { 0x2020, 0x2041, 0x4243 }, "space_right"  },   /* "   ABC" */
+        { MB_FILL_SPACE_CENTER, MB_O_ABCD, { 0x2041, 0x4243, 0x2020 }, "space_center" },   /* " ABC  " */
+        { MB_FILL_SPACE_RIGHT,  MB_O_BADC, { 0x2020, 0x4120, 0x4342 }, "space_right BADC" },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        uint16_t regs[3] = { 0xFFFF, 0xFFFF, 0xFFFF };
+        CHECK(mb_encode_string("ABC", 3, cases[i].o, MB_CS_ASCII, cases[i].fill, regs, NULL) == 0, "encode %s", cases[i].name);
+        expect_regs(cases[i].name, regs, cases[i].want, 3);
+    }
+    /* Centring an even gap splits it evenly; full-length text has no fill */
+    uint16_t regs[3];
+    CHECK(mb_encode_string("AB", 2, MB_O_ABCD, MB_CS_ASCII, MB_FILL_SPACE_CENTER, regs, NULL) == 0, "encode AB centred");
+    uint16_t want_even[2] = { 0x2041, 0x4220 };
+    expect_regs("space_center even", regs, want_even, 2);
+    CHECK(mb_encode_string("ABCDEF", 3, MB_O_ABCD, MB_CS_ASCII, MB_FILL_SPACE_RIGHT, regs, NULL) == 0, "encode full length");
+    uint16_t want_full[3] = { 0x4142, 0x4344, 0x4546 };
+    expect_regs("full length right", regs, want_full, 3);
+    CHECK(mb_encode_string("ABCDEFG", 3, MB_O_ABCD, MB_CS_ASCII, MB_FILL_SPACE_LEFT, regs, NULL) == -1, "too long with fill");
+    /* Bytes, not characters: "ż" is 2 bytes in UTF-8, so "żA" leaves 1 */
+    CHECK(mb_encode_string("\xC5\xBC" "A", 2, MB_O_ABCD, MB_CS_UTF8, MB_FILL_SPACE_RIGHT, regs, NULL) == 0, "encode UTF-8 right");
+    uint16_t want_utf8[2] = { 0x20C5, 0xBC41 };
+    expect_regs("UTF-8 right", regs, want_utf8, 2);
+    /* An empty text fills the registers */
+    CHECK(mb_encode_string("", 2, MB_O_ABCD, MB_CS_ASCII, MB_FILL_SPACE_CENTER, regs, NULL) == 0, "encode empty");
+    uint16_t want_empty[2] = { 0x2020, 0x2020 };
+    expect_regs("empty with spaces", regs, want_empty, 2);
+    /* Right-aligned text reads back with its leading spaces */
+    CHECK(mb_encode_string("ABC", 3, MB_O_ABCD, MB_CS_ASCII, MB_FILL_SPACE_RIGHT, regs, NULL) == 0, "encode for read back");
+    char out[16];
+    mb_decode_string(regs, 3, MB_O_ABCD, MB_CS_ASCII, out, sizeof(out));
+    CHECK(strcmp(out, "   ABC") == 0, "right-aligned reads back as '%s'", out);
 }
 
 static void test_encodings(void) {
@@ -143,7 +183,7 @@ static void test_encodings(void) {
         CHECK(n == (size_t)cases[i].n && bad == 0 && memcmp(buf, cases[i].bytes, n) == 0,
               "%s encodes to %d bytes, bad %d", mb_charset_name(cases[i].cs), (int)n, bad);
         uint16_t regs[8];
-        CHECK(mb_encode_string(pl, 8, MB_O_ABCD, cases[i].cs, regs, NULL) == 0, "encode %s", mb_charset_name(cases[i].cs));
+        CHECK(mb_encode_string(pl, 8, MB_O_ABCD, cases[i].cs, MB_FILL_NUL, regs, NULL) == 0, "encode %s", mb_charset_name(cases[i].cs));
         char out[64];
         mb_decode_string(regs, 8, MB_O_ABCD, cases[i].cs, out, sizeof(out));
         CHECK(strcmp(out, pl) == 0, "%s round trip got '%s'", mb_charset_name(cases[i].cs), out);
@@ -166,8 +206,8 @@ static void test_encodings(void) {
     CHECK(n == 3 && bad == 1 && first == 0xFFFD && memcmp(buf, "a?b", 3) == 0, "invalid UTF-8 input");
     /* The byte length counts against the registers: 6 characters, 10 bytes */
     uint16_t regs[5];
-    CHECK(mb_encode_string(pl, 4, MB_O_ABCD, MB_CS_UTF8, regs, NULL) == -1, "utf-8 too long for 4 registers");
-    CHECK(mb_encode_string(pl, 5, MB_O_ABCD, MB_CS_UTF8, regs, NULL) == 0, "utf-8 fits 5 registers");
+    CHECK(mb_encode_string(pl, 4, MB_O_ABCD, MB_CS_UTF8, MB_FILL_NUL, regs, NULL) == -1, "utf-8 too long for 4 registers");
+    CHECK(mb_encode_string(pl, 5, MB_O_ABCD, MB_CS_UTF8, MB_FILL_NUL, regs, NULL) == 0, "utf-8 fits 5 registers");
 
     char out[32];
     uint16_t raw[2] = { 0x41C5, 0x0000 };   /* 'A' then a lone UTF-8 lead byte */
@@ -322,12 +362,19 @@ static void test_validation(void) {
     valid(mb_validate_write, "{\"data_type\":\"string\",\"length\":8,\"encoding\":\"ascii\","
                              "\"value\":\"Za\xC5\xBC\"}", "can't be written in ascii");
     valid(mb_validate_write, "{\"register_type\":\"coil\",\"values\":[{\"register\":0,\"value\":1},{\"register\":1,\"value\":0}]}", NULL);
+
+    /* Fill */
+    valid(mb_validate_write, "{\"data_type\":\"string\",\"fill\":\"space_right\",\"value\":\"A\"}", NULL);
+    valid(mb_validate_write, "{\"values\":[{\"register\":0,\"type\":\"string\",\"fill\":\"space_center\",\"value\":\"A\"}]}", NULL);
+    valid(mb_validate_write, "{\"data_type\":\"string\",\"fill\":\"spaces\",\"value\":\"A\"}", "unknown fill");
+    valid(mb_validate_write, "{\"data_type\":\"string\",\"length\":2,\"fill\":\"space_left\",\"value\":\"HELLO\"}", "text is 5 bytes");
 }
 
 int main(void) {
     test_orders();
     test_round_trip();
     test_strings();
+    test_fill();
     test_encodings();
     test_plans();
     test_scaling();

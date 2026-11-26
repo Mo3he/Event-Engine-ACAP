@@ -137,7 +137,7 @@ The web UI is accessible at
 | Type | Description |
 |------|-------------|
 | **Time Window** | Only allow firing between two times of day on specified days. Supports wraparound (e.g. 22:00–06:00) |
-| **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Settings. The UI shows today's computed sunrise and sunset times. Optional per-condition lat/lon override |
+| **Day / Night** | Pass only during daytime (after sunrise) or nighttime (after sunset). Uses the sunrise/sunset engine with latitude/longitude from Settings. Optional sunrise/sunset offsets in minutes (e.g. +60 to stay "night" until an hour after sunrise). The UI shows today's resulting times as you type. Optional per-condition lat/lon override |
 | **I/O State** | Check the current state of an I/O port. Supports **remote device** target |
 | **Counter Compare** | Compare a counter value against a threshold |
 | **Variable Compare** | Compare a named variable against a value |
@@ -227,7 +227,7 @@ stop a siren when motion ends).
 
 | Type | Description |
 |------|-------------|
-| **Modbus Write** | Write typed values or blocks over Modbus TCP or RTU/RS-485. Supports FC05/FC15 coil writes and FC06/FC16 register writes, including adjacent-register batching (split at the 123-register limit), data types, word order, scaling and strings in several encodings |
+| **Modbus Write** | Write typed values or blocks over Modbus TCP or RTU/RS-485. Supports FC05/FC15 coil writes and FC06/FC16 register writes, including adjacent-register batching (split at the 123-register limit), data types, word order, scaling and strings in several encodings, padded with NUL or with spaces (text left, right or centered) |
 
 ### Industrial
 
