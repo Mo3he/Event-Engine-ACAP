@@ -4706,7 +4706,7 @@ static int mb_encode_value(cJSON* v, const mb_field_t* f, int bits, cJSON* trigg
         else if (mb_parse_number(text, &d) == 0) regs[0] = d != 0;
         else { snprintf(err, err_size, "'%.40s' is not on/off or a number", text); rc = -1; }
     } else if (f->type == MB_T_STRING) {
-        if (mb_encode_string(text, f->nregs, f->order, f->charset, regs, NULL) != 0) {
+        if (mb_encode_string(text, f->nregs, f->order, f->charset, f->fill, regs, NULL) != 0) {
             snprintf(err, err_size, "text is %d bytes in %s; %d registers hold %d",
                      (int)mb_text_encode(text, f->charset, NULL, 0, NULL, NULL),
                      mb_charset_name(f->charset), f->nregs, f->nregs * 2);

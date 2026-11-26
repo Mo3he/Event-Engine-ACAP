@@ -33,8 +33,11 @@ void Scheduler_Unregister_Rule(const char* rule_id);
 void Scheduler_Tick(void);
 
 /* Returns 1 if the current time is between sunrise and sunset for the given
- * latitude/longitude, 0 if it is nighttime, or -1 on error (polar day/night). */
-int Scheduler_Is_Daytime(double lat, double lon);
+ * latitude/longitude, else 0. The offsets (seconds, positive = later) shift
+ * sunrise and sunset; if they make the day window empty, it is night all day.
+ * The window may cross midnight. Midnight sun counts as day all day and polar
+ * night as night all day, whatever the offsets. */
+int Scheduler_Is_Daytime(double lat, double lon, int sunrise_offset_sec, int sunset_offset_sec);
 
 #ifdef __cplusplus
 }

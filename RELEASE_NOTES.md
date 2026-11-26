@@ -1,5 +1,63 @@
 # Release Notes
 
+## v1.10.4 - Day/Night offsets and Modbus text padding
+
+The Day / Night condition can shift sunrise and sunset by a number of minutes,
+and now works after midnight and in polar regions. Modbus Write can pad text
+with spaces for displays that show 0x00 as a character. The Rules page appears
+sooner, and the rule editor no longer loses edits while its lists load.
+
+### Upgrading to 1.10.4
+
+The `signed_*.eap` packages install normally on AXIS OS 12.10 and later, as an
+in-place upgrade. Rules, settings and variables are kept. Two changes can make
+existing rules behave differently:
+
+- Day / Night conditions without coordinates (or with 0, 0), such as those
+  created from the Night-Only Action template, now use the camera's Location
+  setting instead of 0°N, 0°E.
+- During polar night a Night condition now passes, and during midnight sun a
+  Day condition passes. Before, neither passed.
+
+### New in 1.10.4
+
+- **Day / Night offsets:** shift sunrise and sunset independently, in
+  minutes (up to ±720). For example, if sunrise is 06:44, a sunrise offset of
+  `60` keeps the condition at Night until 07:44. The editor shows today's
+  resulting times as you type coordinates or offsets.
+- **Modbus text padding:** a new **Fill** option on Modbus Write chooses what
+  goes in the bytes the text doesn't use: NUL (0x00, the default and the
+  previous behavior), or spaces with the text left, right or centered. In the
+  API it is `fill`: `nul`, `space_left`, `space_right` or `space_center`.
+- **Modbus editor:** Encoding is shown only for text values. The Length hint
+  explains that it counts 2-byte registers, not characters, and that a UTF-8
+  character can take several bytes.
+
+### Fixes in 1.10.4
+
+- **Location setting ignored:** Day / Night conditions and Sunrise/Sunset
+  schedule triggers without their own coordinates read the Location setting
+  from the wrong place, so they used 0°N, 0°E.
+- **Day / Night after midnight:** where local sunset falls after midnight
+  (for example Reykjavik in June), the condition reported Night all day. It
+  now stays Day until sunset, also when a sunset offset moves sunset past
+  midnight.
+- **Day / Night preview:** the sunrise and sunset times shown in the editor
+  didn't change when you edited the coordinates; they only updated after
+  saving and reopening the rule. They now update as you type.
+- **Day / Night in polar regions:** during polar night the condition passed
+  for neither Day nor Night, so a Night-Only rule never ran. Polar night now
+  counts as Night, and midnight sun as Day.
+- **Slow Rules page:** the rule list waited for every device capability
+  lookup. It now appears first; editor choices such as device parameters can
+  still take a few seconds to fill in.
+- **Rule editor lost edits:** when a device list finished loading while the
+  editor was open, unsaved changes were discarded. Adding or removing a
+  trigger or condition also reset schedule days to Monday to Friday and
+  cleared geofence polygons, and saving kept the reset values.
+- **Rule cards:** Modbus Write and the GPS triggers showed their internal
+  names instead of labels.
+
 ## v1.10.3 - No pause after saving; MQTT and Sparkplug B fixes
 
 Saving a rule or the Sparkplug B settings no longer pauses event handling, a

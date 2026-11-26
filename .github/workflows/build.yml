@@ -52,6 +52,17 @@ jobs:
              tools/modbus_codec_test.c app/engine/modbus_codec.c app/cJSON.c -lm
           /tmp/modbus_codec_test
 
+  scheduler:
+    name: Day/Night scheduler tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and run the sunrise/sunset window tests
+        run: |
+          cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+             -o /tmp/scheduler_test tools/scheduler_test.c app/cJSON.c -lm
+          /tmp/scheduler_test
+
   gps_nmea:
     name: GPS NMEA parser tests
     runs-on: ubuntu-latest

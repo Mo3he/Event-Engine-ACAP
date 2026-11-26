@@ -164,7 +164,8 @@ const RULE_TYPE_LABELS = {
     vapix_event: 'Device Event', schedule: 'Schedule', mqtt_message: 'MQTT',
     http_webhook: 'Webhook', io_input: 'I/O Input', counter_threshold: 'Counter',
     rule_fired: 'Rule Fired', aoa_scenario: 'AOA Scenario', manual: 'Manual',
-    modbus_read: 'Modbus Read', modbus_error: 'Modbus Error', sparkplug_command: 'Sparkplug Cmd'
+    modbus_read: 'Modbus Read', modbus_error: 'Modbus Error', sparkplug_command: 'Sparkplug Cmd',
+    gps_update: 'GPS Update', gps_speed: 'GPS Speed', gps_geofence: 'GPS Geofence', gps_fix: 'GPS Fix'
   },
   condition: {
     time_window: 'Time Window', io_state: 'I/O State', counter: 'Counter',
@@ -183,7 +184,7 @@ const RULE_TYPE_LABELS = {
     ftp_upload: 'FTP Upload', digest: 'Digest', snapshot_upload: 'Snapshot',
     guard_tour: 'Guard Tour', ir_cut_filter: 'IR Cut', light_control: 'Light',
     privacy_mask: 'Privacy Mask', wiper: 'Wiper', set_device_param: 'Device Param',
-    acap_control: 'ACAP Control',
+    acap_control: 'ACAP Control', modbus_write: 'Modbus Write',
     speaker_display: 'Speaker Display',
     paging_console_execute: 'Paging Execute',
     paging_console_button: 'Paging Button'
@@ -707,7 +708,7 @@ const RULE_TEMPLATES = [
       name: 'Night-Only Action',
       enabled: true, trigger_logic: 'OR', condition_logic: 'AND',
       triggers: [{ type: 'vapix_event', topic0: { tns1: 'RuleEngine' }, topic1: { tnsaxis: 'MotionDetection' }, filter_key: 'active', filter_value: true }],
-      conditions: [{ type: 'day_night', state: 'night', lat: 0, lon: 0 }],
+      conditions: [{ type: 'day_night', state: 'night' }],
       actions: [{ type: 'recording', operation: 'start', duration: 30 }],
       cooldown: 30,
     }
@@ -958,6 +959,9 @@ let _uiSaveTimer = null;
 async function loadUiSettings() {
   try {
     const s = await API.get('settings');
+    const eng = (s && s.engine) || {};
+    if (eng.latitude  !== undefined) engineLat = eng.latitude;
+    if (eng.longitude !== undefined) engineLon = eng.longitude;
     if (s && s.ui) {
       _uiSettings.rule_order = s.ui.rule_order || [];
       _uiSettings.rule_tags  = s.ui.rule_tags  || {};
@@ -1763,7 +1767,18 @@ window.addEventListener('DOMContentLoaded', () => {
     const appIcon = document.getElementById('app-icon');
     if (appIcon) appIcon.src = initTheme === 'light' ? 'event_engine_icon_dark.svg' : 'event_engine_icon_light.svg';
 
-    loadUiSettings().then(() => loadRules());
+    /* The camera slows down when many requests run at once, so show the
+     * rules first and only then fetch status and device capabilities. */
+    loadUiSettings().then(() => loadRules()).finally(() => loadSecondaryData());
+
+    window.__appBooted = true;
+  } catch (e) {
+    showFatalUiError(e && e.message ? e.message : String(e));
+  }
+});
+
+function loadSecondaryData() {
+  try {
     loadStatus();
     startPoll();
     loadVapixEventCatalog();
@@ -1787,20 +1802,11 @@ window.addEventListener('DOMContentLoaded', () => {
       loadPagingConsoleData()
     ]).then(() => renderDeviceCapabilities()).catch(() => {});
 
-    /* Load engine lat/lon early so astronomical trigger defaults are correct */
-    API.get('settings').then(s => {
-      const eng = (s && s.engine) || {};
-      if (eng.latitude  !== undefined) engineLat = eng.latitude;
-      if (eng.longitude !== undefined) engineLon = eng.longitude;
-    }).catch(() => {});
-
     API.getVariables().then(v => {
       knownVarNames     = Object.keys(v || {}).filter(k => !(v[k] && v[k].is_counter));
       knownCounterNames = Object.keys(v || {}).filter(k =>   v[k] && v[k].is_counter);
     }).catch(() => {});
-
-    window.__appBooted = true;
   } catch (e) {
     showFatalUiError(e && e.message ? e.message : String(e));
   }
-});
+}

@@ -563,15 +563,21 @@ Checks the current state of a VAPIX event instance on the local or a remote devi
   "type": "day_night",
   "state": "day",
   "lat": 59.3293,
-  "lon": 18.0686
+  "lon": 18.0686,
+  "sunrise_offset_minutes": 60,
+  "sunset_offset_minutes": -30
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `state` | `"day"` \| `"night"` | Required state |
-| `lat` | number | Latitude (optional, defaults to engine setting) |
+| `lat` | number | Latitude (optional, defaults to engine setting; 0/0 also uses the engine setting) |
 | `lon` | number | Longitude (optional, defaults to engine setting) |
+| `sunrise_offset_minutes` | number | Optional, default 0. Shifts sunrise (positive = later, clamped to ±720). `60` keeps it night until 1 h after sunrise |
+| `sunset_offset_minutes` | number | Optional, default 0. Shifts sunset (positive = later, clamped to ±720). `-30` starts night 30 min before sunset |
+
+Day is from sunrise + offset until sunset + offset, and may run past midnight. If the offsets make that window empty, it is night all day. On days with no sunrise or sunset, midnight sun counts as day and polar night as night, whatever the offsets.
 
 ### 8. `aoa_occupancy` — AOA Occupancy Check
 
@@ -1897,7 +1903,7 @@ For a map, put `register`, `var`, `type`, `order`, and optional scaling fields i
 | `scale` | number | `1` | Numeric values are reported as `raw × scale + offset`; must not be zero |
 | `offset` | number | `0` | Numeric value offset |
 | `decimals` | integer (0–10) | automatic | Optional rounding after scaling |
-| `length` | integer (1–125) | `8` | String length in registers (single value or map entry); the text ends at the first NUL |
+| `length` | integer (1–125) | `8` | String length in 2-byte registers (single value or map entry), not characters; UTF-8 characters may use multiple bytes. The text ends at the first NUL |
 | `encoding` | `"utf-8"` \| `"ascii"` \| `"iso-8859-1"` \| `"iso-8859-2"` \| `"windows-1250"` \| `"windows-1252"` | `"utf-8"` | String encoding (single value or map entry). Text is stored in variables as UTF-8; invalid bytes read as `?` |
 | `variable` | string | — | Optional variable updated by a single-value read |
 | `map` | array | — | Register-map entries; each requires `register` and a unique `var`, and may include `type`, `order`, `scale`, `offset`, `decimals`, `length`, or `encoding`. One request reads up to 125 registers or 2000 bits; a larger map is read in several requests, spanning at most 2000 registers |
@@ -1928,7 +1934,7 @@ The trigger data includes `state` (`"failing"` or `"recovered"`), `device`, `sla
 
 ## Action: `modbus_write`
 
-Writes one typed value or a block of values to Modbus. Automatic function selection uses FC06/FC05 for one register/coil and FC16/FC15 for multiple contiguous values. In block mode, adjacent values are batched into one request of up to 123 registers or 1968 coils; longer runs and strings longer than 123 registers are split, and gaps start a new request. Strings are padded with NUL to `length`. When tested from the editor (`POST /actions`), the write waits for the device and returns its error, if any.
+Writes one typed value or a block of values to Modbus. Automatic function selection uses FC06/FC05 for one register/coil and FC16/FC15 for multiple contiguous values. In block mode, adjacent values are batched into one request of up to 123 registers or 1968 coils; longer runs and strings longer than 123 registers are split, and gaps start a new request. Strings are padded to `length` with NUL, or with spaces as `fill` says. When tested from the editor (`POST /actions`), the write waits for the device and returns its error, if any.
 
 ```json
 {
@@ -1980,8 +1986,9 @@ For multiple values, use `values` instead of `register` and `value`. Each entry 
 | `word_order` | `"ABCD"` \| `"CDAB"` \| `"BADC"` \| `"DCBA"` | `"ABCD"` | Byte and word order for 32/64-bit values. For 16-bit values and strings only `"ABCD"` and `"BADC"` (bytes swapped) differ |
 | `scale` | number | `1` | Input value is converted to raw form using `(value - offset) / scale` |
 | `offset` | number | `0` | Numeric value offset |
-| `length` | integer (1–125) | `8` | String length in registers; shorter text is padded with NUL (0x00) |
+| `length` | integer (1–125) | `8` | String length in 2-byte registers, not characters; UTF-8 characters may use multiple bytes. Shorter text is padded as `fill` says |
 | `encoding` | `"utf-8"` \| `"ascii"` \| `"iso-8859-1"` \| `"iso-8859-2"` \| `"windows-1250"` \| `"windows-1252"` | `"utf-8"` | String encoding. Literal text with characters the encoding lacks is rejected; template text gets `?` instead. The length check counts encoded bytes (in UTF-8, `ż` is 2 bytes) |
+| `fill` | `"nul"` \| `"space_left"` \| `"space_right"` \| `"space_center"` | `"nul"` | String padding. `nul` puts the text first and fills with 0x00. The `space_*` values fill with spaces (0x20) and put the text left, right or in the middle (an odd space goes after the text). Counted in bytes of the encoding |
 | `value` | number \| string | — | Value to write; supports templates. Required for numbers and coils; an empty string clears a text register. A `uint16` also accepts -32768 to -1, written as two's complement. Coils accept `0`, `1`, `true`, `false`, `on`, or `off` |
-| `values` | array | — | Block entries with `register`, `value`, and optional `type`, `order`, `scale`, `offset`, `length`, and `encoding`. Overlapping entries are rejected; gaps create separate requests. A request carries at most 123 registers or 1968 coils; longer runs are split, up to 32 requests per action |
+| `values` | array | — | Block entries with `register`, `value`, and optional `type`, `order`, `scale`, `offset`, `length`, `encoding`, and `fill`. Overlapping entries are rejected; gaps create separate requests. A request carries at most 123 registers or 1968 coils; longer runs are split, up to 32 requests per action |
 | `function` | `"auto"` \| `"fc05"` \| `"fc15"` \| `"fc06"` \| `"fc16"` | `"auto"` | Force a compatible single/multiple-coil or register write function |

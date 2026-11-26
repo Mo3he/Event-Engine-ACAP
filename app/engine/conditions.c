@@ -94,10 +94,21 @@ static int cond_time_window(cJSON* cfg) {
 
 /*-----------------------------------------------------
  * day_night
- * config: { "state": "day"|"night", "lat": 51.5, "lon": -0.12 }
+ * config: { "state": "day"|"night", "lat": 51.5, "lon": -0.12,
+ *          "sunrise_offset_minutes": 60, "sunset_offset_minutes": -30 }
  * Uses the sunrise/sunset engine from scheduler.c.
  * If no lat/lon provided, reads from engine settings.
+ * Offsets are optional (default 0, positive = later, clamped to ±12 h).
  *-----------------------------------------------------*/
+static int day_night_offset_sec(cJSON* cfg, const char* key) {
+    cJSON* j = cJSON_GetObjectItem(cfg, key);
+    if (!j || !cJSON_IsNumber(j)) return 0;
+    double m = j->valuedouble;
+    if (m >  720.0) m =  720.0;
+    if (m < -720.0) m = -720.0;
+    return (int)(m * 60.0);
+}
+
 static int cond_day_night(cJSON* cfg) {
     const char* want = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "state"));
     if (!want) want = "day";
@@ -108,8 +119,10 @@ static int cond_day_night(cJSON* cfg) {
     if (lat_j) lat = lat_j->valuedouble;
     if (lon_j) lon = lon_j->valuedouble;
 
-    if (!lat_j && !lon_j) {
-        cJSON* eng = ACAP_Get_Config("engine");
+    /* 0/0 means "not set" (older templates saved it), same as astronomical triggers */
+    if (lat == 0.0 && lon == 0.0) {
+        cJSON* sett = ACAP_Get_Config("settings");
+        cJSON* eng = sett ? cJSON_GetObjectItem(sett, "engine") : NULL;
         if (eng) {
             cJSON* sl = cJSON_GetObjectItem(eng, "latitude");
             cJSON* so = cJSON_GetObjectItem(eng, "longitude");
@@ -118,8 +131,9 @@ static int cond_day_night(cJSON* cfg) {
         }
     }
 
-    int is_day = Scheduler_Is_Daytime(lat, lon);
-    if (is_day < 0) return 0; /* polar — can't determine */
+    int is_day = Scheduler_Is_Daytime(lat, lon,
+                                      day_night_offset_sec(cfg, "sunrise_offset_minutes"),
+                                      day_night_offset_sec(cfg, "sunset_offset_minutes"));
     return (strcmp(want, "day") == 0) ? is_day : !is_day;
 }
 

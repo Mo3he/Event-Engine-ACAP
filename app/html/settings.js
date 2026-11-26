@@ -228,6 +228,17 @@ function calcSolarEvent(lat, lon, eventType, offsetMin) {
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
 }
 
+/* For a day with no sunrise or sunset: true for midnight sun, false for polar night. */
+function isMidnightSun(lat) {
+  const now = new Date();
+  const doy = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
+  const B = 2 * Math.PI * (doy - 1) / 365;
+  const decl = 0.006918 - 0.399912*Math.cos(B) + 0.070257*Math.sin(B)
+             - 0.006758*Math.cos(2*B) + 0.000907*Math.sin(2*B)
+             - 0.002697*Math.cos(3*B) + 0.00148 *Math.sin(3*B);
+  return lat * decl > 0;
+}
+
 function refreshSolarPreview(lat, lon, containerId) {
   const el = document.getElementById(containerId);
   if (!el) return;

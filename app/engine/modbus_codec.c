@@ -60,6 +60,15 @@ const char* mb_charset_name(mb_charset_t cs) {
     return (cs >= MB_CS_UTF8 && cs <= MB_CS_CP1252) ? charset_names[cs] : "invalid";
 }
 
+static const char* const fill_names[] = { "nul", "space_left", "space_right", "space_center", NULL };
+
+mb_fill_t mb_fill_parse(const char* s) {
+    if (!s || !s[0]) return MB_FILL_NUL;
+    for (int i = 0; fill_names[i]; i++)
+        if (strcmp(s, fill_names[i]) == 0) return (mb_fill_t)i;
+    return MB_FILL_INVALID;
+}
+
 /* Unicode code points of bytes 0x80-0xFF; 0 = not defined. 0x80-0x9F of
  * ISO-8859-2 are C1 controls, which are treated as not printable. */
 static const uint16_t cs_latin2[128] = {
@@ -341,12 +350,18 @@ int mb_encode_number(double v, mb_type_t t, mb_order_t o, uint16_t* regs) {
 }
 
 int mb_encode_string(const char* s, int nregs, mb_order_t o, mb_charset_t cs,
-                     uint16_t* regs, int* bad) {
+                     mb_fill_t fill, uint16_t* regs, int* bad) {
     if (nregs < 1 || nregs > MB_MAX_STRING_REGS) return -1;
+    uint8_t text[2 * MB_MAX_STRING_REGS];
+    size_t len = mb_text_encode(s, cs, text, sizeof(text), bad, NULL);
+    size_t total = (size_t)nregs * 2;
+    if (len > total) return -1;
+    size_t pad = total - len, start = 0;
+    if (fill == MB_FILL_SPACE_RIGHT)       start = pad;
+    else if (fill == MB_FILL_SPACE_CENTER) start = pad / 2;
     uint8_t bytes[2 * MB_MAX_STRING_REGS];
-    memset(bytes, 0, sizeof(bytes));
-    size_t len = mb_text_encode(s, cs, bytes, sizeof(bytes), bad, NULL);
-    if (len > (size_t)nregs * 2) return -1;
+    memset(bytes, fill == MB_FILL_NUL ? 0x00 : 0x20, total);
+    memcpy(bytes + start, text, len);
     int swap = (o == MB_O_BADC || o == MB_O_DCBA);
     for (int i = 0; i < nregs; i++) {
         uint8_t hi = bytes[2 * i], lo = bytes[2 * i + 1];
@@ -471,6 +486,12 @@ int mb_field_parse(cJSON* obj, const char* type_key, const char* order_key,
         if (f->charset == MB_CS_INVALID) {
             snprintf(err, err_size, "unknown encoding '%s' (use ascii, utf-8, iso-8859-1, iso-8859-2, "
                      "windows-1250 or windows-1252)", cs);
+            return -1;
+        }
+        const char* fs = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "fill"));
+        f->fill = mb_fill_parse(fs);
+        if (f->fill == MB_FILL_INVALID) {
+            snprintf(err, err_size, "unknown fill '%s' (use nul, space_left, space_right or space_center)", fs);
             return -1;
         }
     }
