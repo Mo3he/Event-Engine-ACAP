@@ -448,7 +448,7 @@ a.tab-btn[href^="help"]        { --ico: url("data:image/svg+xml,%3Csvg xmlns='ht
   width: 100%;
   max-width: 900px;
   height: 100%;
-  max-height: 960px;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;

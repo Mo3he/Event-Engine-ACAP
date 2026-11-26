@@ -1,5 +1,11 @@
 # Release Notes
 
+## v1.10.5 - Taller rule editor
+
+The rule editor now uses more of the screen on tall displays, making it easier
+to see more of the configuration at once. The header and Save/Cancel buttons
+stay visible while longer configurations scroll.
+
 ## v1.10.4 - Day/Night offsets and Modbus text padding
 
 The Day / Night condition can shift sunrise and sunset by a number of minutes,

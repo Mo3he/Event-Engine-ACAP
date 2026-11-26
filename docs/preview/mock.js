@@ -82,7 +82,7 @@
   };
 
   const fakeStatus = {
-    engine_version: '1.10.4',
+    engine_version: '1.10.5',
     rules_total: state.rules.length,
     rules_enabled: state.rules.filter(rule => rule.enabled).length,
     events_today: 4,
@@ -238,7 +238,7 @@
     if (url.origin !== window.location.origin) {
       preview.blockedExternalRequests.push(url.href);
       if (url.hostname === 'api.github.com') {
-        return json({ tag_name: 'v1.10.4', html_url: 'https://example.invalid/preview-release' });
+        return json({ tag_name: 'v1.10.5', html_url: 'https://example.invalid/preview-release' });
       }
       return text('External requests are disabled in this offline preview.', 451);
     }
