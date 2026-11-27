@@ -4,15 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Event Engine for Axis Cameras</title>
-  <meta name="description" content="Build camera automations from triggers, conditions and actions, including schedules, MQTT, webhooks, recording, PTZ and notifications.">
+  <meta name="description" content="A rule engine that runs on Axis cameras: 16 triggers, 9 conditions and 39 actions for alerts, recording, PTZ, sirens, speakers, MQTT, Modbus and Sparkplug, with no server needed.">
   <link rel="canonical" href="https://mo3he.github.io/Event-Engine-ACAP/">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://mo3he.github.io/Event-Engine-ACAP/">
   <meta property="og:title" content="Event Engine for Axis Cameras">
-  <meta property="og:description" content="Build camera automations from triggers, conditions and actions, including schedules, MQTT, webhooks, recording, PTZ and notifications.">
+  <meta property="og:description" content="A rule engine that runs on Axis cameras: 16 triggers, 9 conditions and 39 actions for alerts, recording, PTZ, sirens, speakers, MQTT, Modbus and Sparkplug, with no server needed.">
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Event Engine for Axis Cameras">
-  <meta name="twitter:description" content="Build camera automations from triggers, conditions and actions, including schedules, MQTT, webhooks, recording, PTZ and notifications.">
+  <meta name="twitter:description" content="A rule engine that runs on Axis cameras: 16 triggers, 9 conditions and 39 actions for alerts, recording, PTZ, sirens, speakers, MQTT, Modbus and Sparkplug, with no server needed.">
   <style>
     :root {
       --bg: #0f1117;
@@ -97,6 +97,31 @@
     .story .q::before { content: "\201C"; color: var(--accent); margin-right: 0.1rem; }
     .story .q::after { content: "\201D"; color: var(--accent); margin-left: 0.05rem; }
     .story p { color: var(--muted); font-size: 0.95rem; }
+    .hero-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6rem 2rem; margin: -0.5rem auto 2rem; }
+    .hero-stats div { text-align: center; }
+    .hero-stats strong { display: block; font-size: 1.7rem; line-height: 1.1; color: var(--text); }
+    .hero-stats span { font-size: 0.85rem; color: var(--muted); }
+    .rule-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; }
+    .rule { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; display: flex; flex-direction: column; gap: 0.7rem; }
+    .rule h3 { font-size: 1.1rem; line-height: 1.35; margin-bottom: 0.15rem; }
+    .rule-row { display: grid; grid-template-columns: 4.6rem 1fr; gap: 0.75rem; align-items: start; font-size: 0.93rem; }
+    .rule-row p, .rule-row ul { color: var(--muted); margin: 0; }
+    .rule-row ul { padding-left: 1.1rem; }
+    .rule-tag { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; text-align: center; border-radius: 6px; padding: 0.2rem 0.3rem; margin-top: 0.1rem; }
+    .rule-tag.when { background: rgba(79, 143, 247, 0.14); color: var(--accent); }
+    .rule-tag.if { background: rgba(217, 130, 30, 0.15); color: #d9821e; }
+    .rule-tag.then { background: rgba(34, 197, 94, 0.14); color: #16a34a; }
+    .rule .rule-note { margin-top: auto; padding-top: 0.4rem; border-top: 1px solid var(--border); font-size: 0.85rem; color: var(--muted); }
+    .more-link { text-align: center; margin-top: 1.75rem; font-weight: 600; }
+    .catalog { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.25rem; }
+    .cat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
+    .cat.wide { grid-column: 1 / -1; }
+    .cat-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 0 1.75rem; }
+    .cat h3 { font-size: 1.05rem; margin-bottom: 0.2rem; }
+    .cat > p { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.9rem; }
+    .cat h4 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0.9rem 0 0.45rem; }
+    .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; list-style: none; padding: 0; margin: 0; }
+    .chips li { font-size: 0.85rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.7rem; }
     /* Flow diagram */
     .flow { display: grid; grid-template-columns: 1fr auto 1.15fr auto 1fr; align-items: stretch; gap: 0.75rem; }
     .flow-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
@@ -207,8 +232,9 @@
 
   <header class="hero">
     <div class="badge">Open Source &middot; ACAP for Axis devices</div>
-    <h1>Make camera events trigger <span>useful actions</span></h1>
-    <p>Create If-This-Then-That rules on the camera: choose what starts a rule, add conditions, then decide what should happen.</p>
+    <h1>Make your camera <span>react on its own</span></h1>
+    <p>An If-This-Then-That rule engine that runs on the camera. Pick what starts a rule, add conditions, then chain actions: record, move the camera, sound a siren, show a message, alert Teams or Slack, or talk to building and industrial systems. No server needed.</p>
+    <div class="hero-stats"><div><strong>16</strong><span>triggers</span></div><div><strong>9</strong><span>conditions</span></div><div><strong>39</strong><span>actions</span></div><div><strong>43</strong><span>ready-made templates</span></div></div>
     <div class="hero-buttons">
       <a href="#preview" class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 18v3"/></svg> Try the live preview</a>
       <a href="#download" class="btn btn-outline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download</a>
@@ -224,14 +250,18 @@
       <div class="wrap">
         <div class="section-head">
           <span class="eyebrow">Why you'd use it</span>
-          <h2>Real ways to use Event Engine</h2>
-          <p>These examples show what the app can do and where it fits into an existing setup.</p>
+          <h2>Rules people build with Event Engine</h2>
+          <p>Six examples from the template library. Each one runs entirely on the camera.</p>
         </div>
-        <div class="story-grid">
-          <div class="story"><div class="q">I want to record only when something matters</div><p>Combine an event with a schedule or condition, then start a recording when the rule matches.</p></div>
-          <div class="story"><div class="q">I want to notify another system</div><p>Send webhooks or MQTT messages when camera events meet your conditions.</p></div>
-          <div class="story"><div class="q">I want cameras to coordinate</div><p>Use supported MQTT and cross-device automation patterns to connect camera events and actions.</p></div>
+        <div class="rule-grid">
+          <article class="rule"><h3>Night-time intruder response</h3><div class="rule-row"><span class="rule-tag when">When</span><p>Object Analytics spots a person inside the perimeter zone</p></div><div class="rule-row"><span class="rule-tag if">Only if</span><p>It's between 19:00 and 06:00 and the system is armed</p></div><div class="rule-row"><span class="rule-tag then">Then</span><ul><li>Start recording</li><li>Sound the siren and strobe</li><li>Switch on the alarm output for 30 seconds</li><li>Send a Telegram message with a snapshot</li><li>Show a warning on the video</li></ul></div></article>
+          <article class="rule"><h3>Catch tailgating at a door</h3><div class="rule-row"><span class="rule-tag when">When</span><p>The door opens <em>and</em> motion is detected within 8 seconds of each other</p></div><div class="rule-row"><span class="rule-tag if">Only if</span><p>It's outside office hours</p></div><div class="rule-row"><span class="rule-tag then">Then</span><ul><li>Record 30 seconds</li><li>Send a Telegram alert with a snapshot</li><li>Pulse the alarm relay</li></ul></div></article>
+          <article class="rule"><h3>Room air quality on a speaker display</h3><div class="rule-row"><span class="rule-tag when">When</span><p>Every 60 seconds</p></div><div class="rule-row"><span class="rule-tag then">Then</span><ul><li>Read CO₂, temperature and humidity from a nearby Axis air quality sensor</li><li>Show the values on an Axis speaker display</li></ul></div><p class="rule-note">No broker, gateway or server: one Axis device reads another directly.</p></article>
+          <article class="rule"><h3>Follow the sun</h3><div class="rule-row"><span class="rule-tag when">When</span><p>The sun sets at the camera's location</p></div><div class="rule-row"><span class="rule-tag then">Then</span><ul><li>Switch the camera to night mode</li><li>Turn on the IR illuminator at 80%</li></ul></div><p class="rule-note">A matching sunrise rule switches back. The times adjust through the year automatically.</p></article>
+          <article class="rule"><h3>Block-listed plate to a Milestone alarm</h3><div class="rule-row"><span class="rule-tag when">When</span><p>AXIS License Plate Verifier reads a plate</p></div><div class="rule-row"><span class="rule-tag if">Only if</span><p>The plate is on the block list and hasn't been reported yet</p></div><div class="rule-row"><span class="rule-tag then">Then</span><ul><li>Raise an alarm in Milestone XProtect that shows the plate and a snapshot</li></ul></div></article>
+          <article class="rule"><h3>The camera as a SCADA edge node</h3><div class="rule-row"><span class="rule-tag when">When</span><p>Every 30 seconds</p></div><div class="rule-row"><span class="rule-tag then">Then</span><ul><li>Read the latest sensor values</li><li>Publish them as Sparkplug B to Ignition or another SCADA host</li></ul></div><p class="rule-note">Replaces the industrial gateway normally placed between the camera and the plant network.</p></article>
         </div>
+        <p class="more-link"><a href="use-cases.html">Browse all 43 ready-made templates &rarr;</a></p>
       </div>
     </section>
 
@@ -239,25 +269,28 @@
       <div class="wrap">
         <div class="section-head">
           <span class="eyebrow">How it works</span>
-          <h2>Triggers and conditions lead to actions</h2>
-          <p>Event Engine listens for supported device or integration events, evaluates rule conditions and runs the configured actions.</p>
+          <h2>One camera, any number of rules</h2>
+          <p>Each rule listens for one or more triggers, checks its conditions and then runs its actions in order. Rules can also check and control other Axis devices on the network.</p>
         </div>
         <div class="flow">
           <div class="flow-col">
-            <h3>Camera and integrations</h3>
-            <div class="node"><span class="i" aria-hidden="true">📡</span><div><strong>Events and schedules</strong><span>Device events, MQTT, webhooks and timers</span></div></div>
+            <h3>What starts a rule</h3>
+            <div class="node"><span class="i" aria-hidden="true">📡</span><div><strong>Camera and analytics events</strong><span>Motion, Object Analytics, plates, sensors, I/O</span></div></div>
+            <div class="node"><span class="i" aria-hidden="true">⏰</span><div><strong>Time</strong><span>Schedules, cron, sunrise and sunset</span></div></div>
+            <div class="node"><span class="i" aria-hidden="true">🔌</span><div><strong>Other systems</strong><span>MQTT, webhooks, Modbus, Sparkplug, GPS</span></div></div>
           </div>
-          <div class="flow-link"><span class="arrow" aria-hidden="true"></span><small>matching trigger</small></div>
+          <div class="flow-link"><span class="arrow" aria-hidden="true"></span><small>trigger fires</small></div>
           <div class="flow-col core">
             <h3>Event Engine, on the camera</h3>
-            <div class="node"><span class="i" aria-hidden="true">🧩</span><div><strong>Combines conditions</strong><span>Decide when a rule should run</span></div></div>
-            <div class="node"><span class="i" aria-hidden="true">⚙️</span><div><strong>Runs actions</strong><span>Execute configured actions in sequence</span></div></div>
+            <div class="node"><span class="i" aria-hidden="true">🧩</span><div><strong>Checks conditions</strong><span>Time, day or night, variables, other devices</span></div></div>
+            <div class="node"><span class="i" aria-hidden="true">⚙️</span><div><strong>Runs actions in order</strong><span>With delays, cooldowns and limits</span></div></div>
           </div>
-          <div class="flow-link"><span class="arrow" aria-hidden="true"></span><small>configured actions</small></div>
+          <div class="flow-link"><span class="arrow" aria-hidden="true"></span><small>actions run</small></div>
           <div class="flow-col">
-            <h3>Your devices and services</h3>
-            <div class="node"><span class="i" aria-hidden="true">📹</span><div><strong>Camera actions</strong><span>Recording, PTZ, overlays, I/O or siren/light</span></div></div>
-            <div class="node"><span class="i" aria-hidden="true">🌐</span><div><strong>External services</strong><span>HTTP and MQTT actions</span></div></div>
+            <h3>What happens</h3>
+            <div class="node"><span class="i" aria-hidden="true">📹</span><div><strong>This camera or others</strong><span>Record, PTZ, overlays, sirens, speakers, I/O</span></div></div>
+            <div class="node"><span class="i" aria-hidden="true">💬</span><div><strong>People are told</strong><span>Slack, Teams, Telegram, email</span></div></div>
+            <div class="node"><span class="i" aria-hidden="true">🏭</span><div><strong>Systems are updated</strong><span>MQTT, HTTP, InfluxDB, Modbus, SCADA, VMS</span></div></div>
           </div>
         </div>
         <p class="flow-note">The preview uses invented sample data. Connect the app to your real device and network for live results.</p>
@@ -286,19 +319,34 @@
       </div>
     </section>
 
+
+    <section id="capabilities">
+      <div class="wrap">
+        <div class="section-head">
+          <span class="eyebrow">Everything it can do</span>
+          <h2>Building blocks for your rules</h2>
+          <p>Mix and match these in any rule. Most camera actions can also target another Axis device on the network.</p>
+        </div>
+        <div class="catalog">
+          <div class="cat"><h3>16 triggers</h3><p>What starts a rule.</p><div><ul class="chips"><li>Any camera or sensor event</li><li>Object Analytics scenarios</li><li>Schedules, cron, sunrise and sunset</li><li>MQTT messages</li><li>HTTP webhooks</li><li>I/O inputs, including wire cut</li><li>Manual “Fire now”</li><li>Another rule ran</li><li>Counter reaches a value</li><li>Modbus readings</li><li>Modbus device errors</li><li>Sparkplug commands</li><li>GPS position updates</li><li>GPS speed</li><li>Geofence entry and exit</li><li>GPS fix lost</li></ul></div></div>
+          <div class="cat"><h3>9 conditions</h3><p>Checks that must pass before the actions run.</p><div><ul class="chips"><li>Time window</li><li>Day or night</li><li>I/O state</li><li>Counter value</li><li>Variable value</li><li>Event data</li><li>Web check (status, text or JSON value)</li><li>Object Analytics occupancy</li><li>Current event state</li></ul></div></div>
+          <div class="cat wide"><h3>39 actions</h3><p>What happens, run in the order you choose.</p><div class="cat-groups"><div><h4>Tell people</h4><ul class="chips"><li>Slack</li><li>Microsoft Teams</li><li>Telegram</li><li>Email with snapshot</li><li>Batched digest</li></ul></div><div><h4>Control the camera</h4><ul class="chips"><li>Recording</li><li>Text overlay</li><li>Image overlay</li><li>PTZ preset</li><li>Guard tour</li><li>Day/night mode</li><li>Privacy mask</li><li>Wiper</li><li>Illuminator and strobe</li></ul></div><div><h4>Sound and signals</h4><ul class="chips"><li>Audio clip</li><li>Siren and light</li><li>Speaker display text</li><li>Paging console action</li><li>Paging console button</li><li>I/O output</li><li>I/O flash patterns</li></ul></div><div><h4>Send data</h4><ul class="chips"><li>HTTP request</li><li>MQTT</li><li>Snapshot upload</li><li>FTP / SFTP upload</li><li>InfluxDB</li><li>Syslog</li><li>Sparkplug B</li><li>Modbus write</li><li>Camera event for VMS</li></ul></div><div><h4>Logic and system</h4><ul class="chips"><li>Delay</li><li>Set variable</li><li>Counter</li><li>Run another rule</li><li>Enable or disable a rule</li><li>Read device data</li><li>Set camera parameter</li><li>Start or stop an app</li><li>Object Analytics counts</li></ul></div></div></div>
+        </div>
+      </div>
+    </section>
     <section id="features">
       <div class="wrap">
         <div class="section-head">
           <span class="eyebrow">Features</span>
-          <h2>Build automations without a separate server</h2>
+          <h2>Powerful when you need it, simple when you don't</h2>
         </div>
         <div class="features">
-          <div class="feature-card"><div class="icon" aria-hidden="true">🧲</div><h3>Many trigger types</h3><p>Use device events, schedules, MQTT and webhooks.</p></div>
-          <div class="feature-card"><div class="icon" aria-hidden="true">🔎</div><h3>Add conditions</h3><p>Run actions only when the rule's conditions match.</p></div>
-          <div class="feature-card"><div class="icon" aria-hidden="true">🎬</div><h3>Act on the camera</h3><p>Start recordings or use supported PTZ, overlay, I/O and signal actions.</p></div>
-          <div class="feature-card"><div class="icon" aria-hidden="true">🌐</div><h3>Notify other systems</h3><p>Send HTTP webhooks or MQTT messages.</p></div>
-          <div class="feature-card"><div class="icon" aria-hidden="true">🔗</div><h3>Connect devices</h3><p>Use documented cross-device automation patterns.</p></div>
-          <div class="feature-card"><div class="icon" aria-hidden="true">⚠️</div><h3>Rules have real effects</h3><p>Review each action before enabling it on a production camera.</p></div>
+          <div class="feature-card"><div class="icon" aria-hidden="true">🔗</div><h3>Combine triggers</h3><p>Run a rule when any trigger fires, when all fire within a few seconds, or only while all are active, like a door opening plus motion.</p></div>
+          <div class="feature-card"><div class="icon" aria-hidden="true">🛰️</div><h3>Control other Axis devices</h3><p>Detect on one camera, check a second device, then act on a third: speakers, sirens, I/O modules and paging consoles included.</p></div>
+          <div class="feature-card"><div class="icon" aria-hidden="true">🧠</div><h3>Variables and counters</h3><p>Arm and disarm the system, count events and escalate once a limit is reached.</p></div>
+          <div class="feature-card"><div class="icon" aria-hidden="true">✏️</div><h3>Live values in messages</h3><p>Drop the camera name, time, a sensor reading or the GPS speed into any alert, overlay or message.</p></div>
+          <div class="feature-card"><div class="icon" aria-hidden="true">🛑</div><h3>Cooldowns and limits</h3><p>Avoid alert floods with a minimum gap between runs and a cap per minute, hour or day.</p></div>
+          <div class="feature-card"><div class="icon" aria-hidden="true">📦</div><h3>43 ready-made templates</h3><p>Import a <a href="use-cases.html">template</a>, fill in your details and you're running.</p></div>
         </div>
       </div>
     </section>
@@ -334,9 +382,9 @@
         </div>
         <div class="steps">
           <div class="step"><div class="step-num">1</div><div class="step-text"><strong>Install Event Engine</strong><span>Upload the matching package via <strong>Apps &rarr; Add app</strong>.</span></div></div>
-          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Create a rule</strong><span>Choose a trigger, add optional conditions and select an action.</span></div></div>
-          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Test the rule</strong><span>Use a safe test trigger and verify the outcome before enabling it in production.</span></div></div>
-          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Read the manual</strong><span>Use the online documentation for detailed action options and examples.</span></div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-text"><strong>Start from a template</strong><span>Import one of the <a href="use-cases.html">ready-made templates</a>, or build a rule from scratch: trigger, conditions, actions.</span></div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-text"><strong>Test the rule</strong><span>Press <strong>Fire now</strong> to run it on demand and check the result before relying on it.</span></div></div>
+          <div class="step"><div class="step-num">4</div><div class="step-text"><strong>Read the manual</strong><span>The <a href="help.html">online manual</a> covers every trigger, condition and action.</span></div></div>
         </div>
       </div>
     </section>
@@ -348,8 +396,10 @@
           <h2>Good to know</h2>
         </div>
         <div class="faq">
+          <details><summary>Do I need a server or cloud service?</summary><p>No. Rules run entirely on the camera. External services are only contacted if you add an action that sends to them.</p></details>
+          <details><summary>Does it replace the camera's built-in event rules?</summary><p>It extends them. Event Engine uses the same device events, adds many more actions, and can fire its own events that the camera's built-in rules and a VMS can react to.</p></details>
           <details><summary>Can a rule affect the camera?</summary><p>Yes. Actions can start recordings, move PTZ, change overlays, use I/O, or operate supported signals. Review and test rules before enabling them.</p></details>
-          <details><summary>Where is the full manual?</summary><p>See the <a href="https://github.com/Mo3he/Event-Engine-ACAP#readme" target="_blank" rel="noopener">README and linked documentation</a> for current details.</p></details>
+          <details><summary>Where is the full manual?</summary><p>See the <a href="help.html">online manual</a>, the <a href="use-cases.html">use cases</a> and the <a href="https://github.com/Mo3he/Event-Engine-ACAP#readme" target="_blank" rel="noopener">README</a>.</p></details>
           <details><summary>Is Event Engine an official Axis product?</summary><p>No. It is an independent community-developed ACAP.</p></details>
         </div>
       </div>
