@@ -161,13 +161,111 @@ static int value_passes_cond(double actual, const char* op, double thr, double t
     return 0;
 }
 
+static int event_value_matches(cJSON* val, const char* op, const char* expected,
+                               double threshold, double threshold2) {
+    if (!val) return 0;
+    /* PullPoint values are strings; eventhandler.cgi values may be string,
+     * number or bool. */
+    if (!op || strcmp(op, "eq_str") == 0) {
+        if (!expected) return 0;
+        char val_str[128] = "";
+        if (cJSON_IsString(val))
+            snprintf(val_str, sizeof(val_str), "%s", val->valuestring);
+        else if (cJSON_IsNumber(val))
+            snprintf(val_str, sizeof(val_str), "%g", val->valuedouble);
+        else if (cJSON_IsBool(val))
+            snprintf(val_str, sizeof(val_str), "%s", cJSON_IsTrue(val) ? "1" : "0");
+        return strcmp(val_str, expected) == 0;
+    }
+    if (strcmp(op, "boolean") == 0) {
+        if (!expected) return 0;
+        int want = (strcmp(expected, "true") == 0 || strcmp(expected, "1") == 0) ? 1 : 0;
+        int actual = 0;
+        if (cJSON_IsBool(val)) actual = cJSON_IsTrue(val) ? 1 : 0;
+        else if (cJSON_IsString(val)) actual = (strcmp(val->valuestring, "true") == 0 || strcmp(val->valuestring, "1") == 0) ? 1 : 0;
+        else if (cJSON_IsNumber(val)) actual = val->valuedouble != 0 ? 1 : 0;
+        return actual == want;
+    }
+    if (strcmp(op, "contains") == 0) {
+        if (!expected) return 0;
+        const char* sval = cJSON_GetStringValue(val);
+        char num_buf[64] = "";
+        if (!sval && cJSON_IsNumber(val)) {
+            snprintf(num_buf, sizeof(num_buf), "%g", val->valuedouble);
+            sval = num_buf;
+        }
+        return sval && strstr(sval, expected) != NULL;
+    }
+    double actual_num = 0;
+    int valid = 0;
+    if (cJSON_IsNumber(val)) {
+        actual_num = val->valuedouble; valid = 1;
+    } else if (cJSON_IsString(val)) {
+        char* endp;
+        actual_num = strtod(val->valuestring, &endp);
+        if (endp != val->valuestring) valid = 1;
+    } else if (cJSON_IsBool(val)) {
+        actual_num = cJSON_IsTrue(val) ? 1.0 : 0.0; valid = 1;
+    }
+    return valid && value_passes_cond(actual_num, op, threshold, threshold2);
+}
+
+/* True if the instance's source_key item equals source_value (string or number). */
+static int event_source_matches(cJSON* inst, const char* source_key, const char* source_value) {
+    if (!source_key || !source_key[0] || !source_value || !source_value[0]) return 1;
+    cJSON* sv = cJSON_GetObjectItem(inst, source_key);
+    if (cJSON_IsString(sv)) return strcmp(sv->valuestring, source_value) == 0;
+    if (cJSON_IsNumber(sv)) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%g", sv->valuedouble);
+        return strcmp(buf, source_value) == 0;
+    }
+    return 0;
+}
+
+/* Local eventhandler.cgi getEventInstances → array of instance objects with
+ * source and data items merged, like the PullPoint path. NULL if unavailable. */
+static cJSON* cond_local_eventhandler(const char* event_key) {
+    char* resp = ACAP_VAPIX_Post("eventhandler.cgi",
+                                 "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\"}");
+    if (!resp) return NULL;
+    cJSON* root = cJSON_Parse(resp);
+    free(resp);
+    if (!root) return NULL;
+    cJSON* out = cJSON_CreateArray();
+    cJSON* data = cJSON_GetObjectItem(root, "data");
+    cJSON* instances = data ? cJSON_GetObjectItem(data, "instances") : NULL;
+    cJSON* inst;
+    cJSON_ArrayForEach(inst, instances) {
+        const char* topic = cJSON_GetStringValue(cJSON_GetObjectItem(inst, "topic"));
+        if (!topic || !strstr(topic, event_key)) continue;
+        cJSON* d = cJSON_GetObjectItem(inst, "data");
+        if (!cJSON_IsObject(d)) continue;
+        cJSON* merged = cJSON_Duplicate(d, 1);
+        cJSON* src = cJSON_GetObjectItem(inst, "source");
+        cJSON* it;
+        if (cJSON_IsObject(src))
+            cJSON_ArrayForEach(it, src)
+                if (it->string && !cJSON_GetObjectItem(merged, it->string))
+                    cJSON_AddItemToObject(merged, it->string, cJSON_Duplicate(it, 1));
+        cJSON_AddItemToArray(out, merged);
+    }
+    cJSON_Delete(root);
+    if (cJSON_GetArraySize(out) == 0) { cJSON_Delete(out); return NULL; }
+    return out;
+}
+
+/* Passes when any instance of the event (optionally only the one whose
+ * source_key equals source_value, e.g. port 17) has a matching data_key value. */
 static int cond_vapix_event_state(cJSON* cfg) {
     const char* event_key = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "event_key"));
     const char* data_key  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "data_key"));
-    if (!event_key || !data_key) return 0;
+    if (!event_key || !event_key[0] || !data_key || !data_key[0]) return 0;
 
     const char* op        = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "op"));
     const char* expected  = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "expected"));
+    const char* source_key   = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "source_key"));
+    const char* source_value = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "source_value"));
     double threshold  = 0, threshold2 = 0;
     if (op && (strcmp(op, "gt") == 0 || strcmp(op, "lt") == 0 ||
                strcmp(op, "gte") == 0 || strcmp(op, "lte") == 0 ||
@@ -186,105 +284,28 @@ static int cond_vapix_event_state(cJSON* cfg) {
     const char* ru = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_user"));
     const char* rp = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_pass"));
 
-    /* Remote: use ONVIF PullPoint to get current event state.
-     * Local: use internal eventhandler.cgi (accessible on 127.0.0.12). */
-    cJSON* root = NULL;
-    cJSON* val  = NULL;
-    int    remote_mode = (rh && rh[0]);
-
-    if (remote_mode) {
-        cJSON* pp_data = cond_remote_pullpoint(rh, ru, rp, event_key);
-        if (!pp_data) return 0;
-        val = cJSON_GetObjectItem(pp_data, data_key);
-        /* val points inside pp_data — keep pp_data alive as root */
-        root = pp_data;
+    /* Remote: ONVIF PullPoint. Local: eventhandler.cgi, falling back to a local
+     * PullPoint where eventhandler.cgi is missing (404 on AXIS OS 11 and 12). */
+    cJSON* instances;
+    if (rh && rh[0]) {
+        instances = cond_remote_pullpoint(rh, ru, rp, event_key);
     } else {
-        const char* body =
-            "{\"apiVersion\":\"1.0\",\"method\":\"getEventInstances\"}";
-        char* resp = ACAP_VAPIX_Post("eventhandler.cgi", body);
-        if (resp) {
-            root = cJSON_Parse(resp);
-            free(resp);
-            if (root) {
-                cJSON* data = cJSON_GetObjectItem(root, "data");
-                cJSON* instances = data ? cJSON_GetObjectItem(data, "instances") : NULL;
-                if (instances && cJSON_IsArray(instances)) {
-                    cJSON* inst;
-                    cJSON_ArrayForEach(inst, instances) {
-                        const char* topic = cJSON_GetStringValue(cJSON_GetObjectItem(inst, "topic"));
-                        if (!topic || !strstr(topic, event_key)) continue;
-                        cJSON* d = cJSON_GetObjectItem(inst, "data");
-                        if (!d) continue;
-                        val = cJSON_GetObjectItem(d, data_key);
-                        if (val) break;
-                    }
-                }
-            }
-        }
-        /* Fallback: if eventhandler.cgi is unavailable (404 on some devices),
-         * use local PullPoint via /vapix/services. */
-        if (!val) {
-            if (root) { cJSON_Delete(root); root = NULL; }
-            cJSON* pp_data = cond_local_pullpoint(event_key);
-            if (pp_data) {
-                val = cJSON_GetObjectItem(pp_data, data_key);
-                root = pp_data;
-            }
-        }
+        instances = cond_local_eventhandler(event_key);
+        if (!instances) instances = cond_local_pullpoint(event_key);
     }
+    if (!instances) return 0;
 
     int result = 0;
-    if (!val) { cJSON_Delete(root); return 0; }
-
-    /* For remote mode, val is always a cJSON string (from PullPoint XML).
-     * For local mode, val may be string, number, or bool from JSON. */
-    if (!op || strcmp(op, "eq_str") == 0) {
-        if (expected) {
-            char val_str[128] = "";
-            if (cJSON_IsString(val))
-                snprintf(val_str, sizeof(val_str), "%s", val->valuestring);
-            else if (cJSON_IsNumber(val))
-                snprintf(val_str, sizeof(val_str), "%g", val->valuedouble);
-            else if (cJSON_IsBool(val))
-                snprintf(val_str, sizeof(val_str), "%s", cJSON_IsTrue(val) ? "1" : "0");
-            if (strcmp(val_str, expected) == 0) result = 1;
-        }
-    } else if (strcmp(op, "boolean") == 0) {
-        if (expected) {
-            int want = (strcmp(expected, "true") == 0 || strcmp(expected, "1") == 0) ? 1 : 0;
-            int actual = 0;
-            if (cJSON_IsBool(val)) actual = cJSON_IsTrue(val) ? 1 : 0;
-            else if (cJSON_IsString(val)) actual = (strcmp(val->valuestring, "true") == 0 || strcmp(val->valuestring, "1") == 0) ? 1 : 0;
-            else if (cJSON_IsNumber(val)) actual = val->valuedouble != 0 ? 1 : 0;
-            if (actual == want) result = 1;
-        }
-    } else if (strcmp(op, "contains") == 0) {
-        if (expected) {
-            const char* sval = cJSON_GetStringValue(val);
-            char num_buf[64] = "";
-            if (!sval && cJSON_IsNumber(val)) {
-                snprintf(num_buf, sizeof(num_buf), "%g", val->valuedouble);
-                sval = num_buf;
-            }
-            if (sval && strstr(sval, expected) != NULL) result = 1;
-        }
-    } else {
-        double actual_num;
-        int valid = 0;
-        if (cJSON_IsNumber(val)) {
-            actual_num = val->valuedouble; valid = 1;
-        } else if (cJSON_IsString(val)) {
-            char* endp;
-            actual_num = strtod(val->valuestring, &endp);
-            if (endp != val->valuestring) valid = 1;
-        } else if (cJSON_IsBool(val)) {
-            actual_num = cJSON_IsTrue(val) ? 1.0 : 0.0; valid = 1;
-        }
-        if (valid && value_passes_cond(actual_num, op, threshold, threshold2))
+    cJSON* inst;
+    cJSON_ArrayForEach(inst, instances) {
+        if (!event_source_matches(inst, source_key, source_value)) continue;
+        if (event_value_matches(cJSON_GetObjectItem(inst, data_key), op, expected,
+                                threshold, threshold2)) {
             result = 1;
+            break;
+        }
     }
-
-    cJSON_Delete(root);
+    cJSON_Delete(instances);
     return result;
 }
 
@@ -426,9 +447,78 @@ static size_t cond_xml_attr(const char* xml, const char* end,
     return len;
 }
 
+/* Append one object per NotificationMessage whose Topic contains event_key,
+ * holding all its SimpleItem Name/Value pairs (Source and Data). Events with a
+ * source (virtual inputs, I/O ports, ...) have one message per instance. */
+#define PP_SOURCE_SIG "\x01source"
+
+static void pp_collect(const char* resp, const char* event_key, cJSON* out) {
+    const char* pos = resp;
+    while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
+        const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
+        if (!msg_end) break;
+        msg_end += strlen("</wsnt:NotificationMessage>");
+
+        const char* t_start = strstr(pos, "<wsnt:Topic");
+        if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
+        t_start = strchr(t_start, '>');
+        if (!t_start) { pos = msg_end; continue; }
+        t_start++;
+        const char* t_end = strchr(t_start, '<');
+        if (!t_end || t_end >= msg_end) { pos = msg_end; continue; }
+
+        char topic[512];
+        size_t tlen = (size_t)(t_end - t_start);
+        if (tlen >= sizeof(topic)) tlen = sizeof(topic) - 1;
+        memcpy(topic, t_start, tlen);
+        topic[tlen] = '\0';
+
+        if (!strstr(topic, event_key)) { pos = msg_end; continue; }
+
+        const char* src_start = strstr(pos, "<tt:Source");
+        const char* src_end   = src_start ? strstr(src_start, "</tt:Source>") : NULL;
+        if (src_start && src_start >= msg_end) src_start = NULL;
+        if (!src_end || src_end >= msg_end) src_start = NULL;
+
+        cJSON* inst = cJSON_CreateObject();
+        char src_sig[256] = "";
+        const char* si = pos;
+        while ((si = strstr(si, "SimpleItem")) != NULL && si < msg_end) {
+            const char* tag_lt = si;
+            while (tag_lt > pos && *tag_lt != '<') tag_lt--;
+            const char* tag_gt = strchr(si, '>');
+            if (!tag_gt || tag_gt >= msg_end) break;
+
+            char name[128] = "", value[256] = "";
+            cond_xml_attr(tag_lt, tag_gt + 1, "Name", name, sizeof(name));
+            cond_xml_attr(tag_lt, tag_gt + 1, "Value", value, sizeof(value));
+            if (name[0] && value[0]) {
+                cJSON_DeleteItemFromObject(inst, name);
+                cJSON_AddStringToObject(inst, name, value);
+                if (src_start && si > src_start && si < src_end) {
+                    size_t l = strlen(src_sig);
+                    snprintf(src_sig + l, sizeof(src_sig) - l, "%s=%s;", name, value);
+                }
+            }
+            si = tag_gt + 1;
+        }
+        /* A later message for the same source is a newer state of that instance */
+        cJSON_AddStringToObject(inst, PP_SOURCE_SIG, src_sig);
+        int idx = 0, replaced = 0;
+        cJSON* prev;
+        cJSON_ArrayForEach(prev, out) {
+            const char* ps = cJSON_GetStringValue(cJSON_GetObjectItem(prev, PP_SOURCE_SIG));
+            if (ps && strcmp(ps, src_sig) == 0) { replaced = 1; break; }
+            idx++;
+        }
+        if (replaced) cJSON_ReplaceItemInArray(out, idx, inst);
+        else          cJSON_AddItemToArray(out, inst);
+        pos = msg_end;
+    }
+}
+
 /* Query current event state from a remote device using ONVIF PullPoint.
- * Returns a cJSON object with all SimpleItem Name/Value pairs from the
- * first NotificationMessage whose Topic contains event_key, or NULL. */
+ * Returns an array of instance objects (see pp_collect), or NULL. */
 static cJSON* cond_remote_pullpoint(const char* host, const char* user,
                                      const char* pass, const char* event_key) {
     static const char create_soap[] =
@@ -457,9 +547,9 @@ static cJSON* cond_remote_pullpoint(const char* host, const char* user,
     free(resp);
     if (strspn(sub_id, "0123456789") != sid_len) return NULL;
 
-    cJSON* result = NULL;
+    cJSON* result = cJSON_CreateArray();
     int drained = 0;
-    for (int attempt = 0; attempt < 53 && !result; attempt++) {
+    for (int attempt = 0; attempt < 53; attempt++) {
         const char* timeout_str = drained ? "PT5S" : "PT1S";
         char pull_soap[1024];
         snprintf(pull_soap, sizeof(pull_soap),
@@ -478,55 +568,15 @@ static cJSON* cond_remote_pullpoint(const char* host, const char* user,
         if (!resp) break;
         if (strstr(resp, "Fault")) { free(resp); break; }
 
-        const char* pos = resp;
-        while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
-            const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
-            if (!msg_end) break;
-            msg_end += strlen("</wsnt:NotificationMessage>");
-
-            const char* t_start = strstr(pos, "<wsnt:Topic");
-            if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
-            t_start = strchr(t_start, '>');
-            if (!t_start) { pos = msg_end; continue; }
-            t_start++;
-            const char* t_end = strchr(t_start, '<');
-            if (!t_end || t_end >= msg_end) { pos = msg_end; continue; }
-
-            char topic[512];
-            size_t tlen = (size_t)(t_end - t_start);
-            if (tlen >= sizeof(topic)) tlen = sizeof(topic) - 1;
-            memcpy(topic, t_start, tlen);
-            topic[tlen] = '\0';
-
-            if (!strstr(topic, event_key)) { pos = msg_end; continue; }
-
-            result = cJSON_CreateObject();
-            const char* si = pos;
-            while ((si = strstr(si, "SimpleItem")) != NULL && si < msg_end) {
-                const char* tag_lt = si;
-                while (tag_lt > pos && *tag_lt != '<') tag_lt--;
-                const char* tag_gt = strchr(si, '>');
-                if (!tag_gt || tag_gt >= msg_end) break;
-
-                char name[128] = "", value[256] = "";
-                cond_xml_attr(tag_lt, tag_gt + 1, "Name", name, sizeof(name));
-                cond_xml_attr(tag_lt, tag_gt + 1, "Value", value, sizeof(value));
-                if (name[0] && value[0]) {
-                    cJSON_DeleteItemFromObject(result, name);
-                    cJSON_AddStringToObject(result, name, value);
-                }
-                si = tag_gt + 1;
-            }
-            break;
-        }
-
-        if (!strstr(resp, "NotificationMessage")) {
-            free(resp);
-            if (drained) break;
-            drained = attempt + 1;
-            continue;
-        }
+        int got = strstr(resp, "NotificationMessage") != NULL;
+        pp_collect(resp, event_key, result);
         free(resp);
+        if (!got) {
+            if (drained) break;
+            drained = 1;
+        }
+        /* Every instance's state arrives before the first empty pull */
+        if (drained && cJSON_GetArraySize(result) > 0) break;
     }
 
     char unsub_soap[512];
@@ -543,6 +593,7 @@ static cJSON* cond_remote_pullpoint(const char* host, const char* user,
         LOG_WARN("PullPoint unsubscribe failed for %s (sub %s)", host, sub_id);
     free(unsub_resp);
 
+    if (cJSON_GetArraySize(result) == 0) { cJSON_Delete(result); return NULL; }
     return result;
 }
 
@@ -575,9 +626,9 @@ static cJSON* cond_local_pullpoint(const char* event_key) {
     free(resp);
     if (strspn(sub_id, "0123456789") != sid_len) return NULL;
 
-    cJSON* result = NULL;
+    cJSON* result = cJSON_CreateArray();
     int drained = 0;
-    for (int attempt = 0; attempt < 53 && !result; attempt++) {
+    for (int attempt = 0; attempt < 53; attempt++) {
         const char* timeout_str = drained ? "PT5S" : "PT1S";
         char pull_soap[1024];
         snprintf(pull_soap, sizeof(pull_soap),
@@ -596,55 +647,15 @@ static cJSON* cond_local_pullpoint(const char* event_key) {
         if (!resp) break;
         if (strstr(resp, "Fault")) { free(resp); break; }
 
-        const char* pos = resp;
-        while ((pos = strstr(pos, "<wsnt:NotificationMessage")) != NULL) {
-            const char* msg_end = strstr(pos + 1, "</wsnt:NotificationMessage>");
-            if (!msg_end) break;
-            msg_end += strlen("</wsnt:NotificationMessage>");
-
-            const char* t_start = strstr(pos, "<wsnt:Topic");
-            if (!t_start || t_start >= msg_end) { pos = msg_end; continue; }
-            t_start = strchr(t_start, '>');
-            if (!t_start) { pos = msg_end; continue; }
-            t_start++;
-            const char* t_end = strchr(t_start, '<');
-            if (!t_end || t_end >= msg_end) { pos = msg_end; continue; }
-
-            char topic[512];
-            size_t tlen = (size_t)(t_end - t_start);
-            if (tlen >= sizeof(topic)) tlen = sizeof(topic) - 1;
-            memcpy(topic, t_start, tlen);
-            topic[tlen] = '\0';
-
-            if (!strstr(topic, event_key)) { pos = msg_end; continue; }
-
-            result = cJSON_CreateObject();
-            const char* si = pos;
-            while ((si = strstr(si, "SimpleItem")) != NULL && si < msg_end) {
-                const char* tag_lt = si;
-                while (tag_lt > pos && *tag_lt != '<') tag_lt--;
-                const char* tag_gt = strchr(si, '>');
-                if (!tag_gt || tag_gt >= msg_end) break;
-
-                char name[128] = "", value[256] = "";
-                cond_xml_attr(tag_lt, tag_gt + 1, "Name", name, sizeof(name));
-                cond_xml_attr(tag_lt, tag_gt + 1, "Value", value, sizeof(value));
-                if (name[0] && value[0]) {
-                    cJSON_DeleteItemFromObject(result, name);
-                    cJSON_AddStringToObject(result, name, value);
-                }
-                si = tag_gt + 1;
-            }
-            break;
-        }
-
-        if (!strstr(resp, "NotificationMessage")) {
-            free(resp);
-            if (drained) break;
-            drained = attempt + 1;
-            continue;
-        }
+        int got = strstr(resp, "NotificationMessage") != NULL;
+        pp_collect(resp, event_key, result);
         free(resp);
+        if (!got) {
+            if (drained) break;
+            drained = 1;
+        }
+        /* Every instance's state arrives before the first empty pull */
+        if (drained && cJSON_GetArraySize(result) > 0) break;
     }
 
     char unsub_soap[512];
@@ -659,6 +670,7 @@ static cJSON* cond_local_pullpoint(const char* event_key) {
     char* unsub_resp = ACAP_VAPIX_Soap_Post("/vapix/services", unsub_soap);
     free(unsub_resp);
 
+    if (cJSON_GetArraySize(result) == 0) { cJSON_Delete(result); return NULL; }
     return result;
 }
 

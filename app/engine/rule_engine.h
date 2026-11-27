@@ -37,8 +37,12 @@ void   RuleEngine_Dispatch_RuleFired(const char* rule_id);
 /* Tick — call every 1s from GMainLoop */
 void   RuleEngine_Tick(void);
 
-/* Force-execute a rule (test/manual fire — bypasses cooldown) */
+/* Manually fire a rule (evaluates conditions, bypasses cooldown). */
 int    RuleEngine_Fire(const char* id, cJSON* trigger_data);
+
+/* Execute a rule's actions if its conditions pass (Run Rule action — bypasses
+ * cooldown). Returns 1 if run, -1 if a condition failed, 0 if not found. */
+int    RuleEngine_Run(const char* id, cJSON* trigger_data);
 
 /* Stats */
 int    RuleEngine_Count(void);

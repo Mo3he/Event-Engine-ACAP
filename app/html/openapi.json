@@ -3,7 +3,7 @@
   "info": {
     "title": "ACAP Event Engine",
     "description": "REST API for the Axis Event Engine ACAP — an If-This-Then-That style rule engine running on Axis cameras.\n\nAll endpoints are served via FastCGI at `/local/acap_event_engine/{endpoint}` and require HTTP Basic Auth with admin credentials.\n\n### Template Variables\nAction strings (URLs, payloads, messages, overlay text, etc.) support `{{...}}` substitution:\n\n| Variable | Value |\n|----------|-------|\n| `{{timestamp}}` | RFC 3339 timestamp in device local time (e.g. `2026-04-30T13:00:00+02:00`) |\n| `{{date}}` | YYYY-MM-DD |\n| `{{time}}` | HH:MM:SS |\n| `{{camera.serial}}` | Device serial number |\n| `{{camera.model}}` | Device model name |\n| `{{camera.ip}}` | Device IP address |\n| `{{trigger_json}}` | Full trigger event data as compact JSON |\n| `{{trigger.KEY}}` | Individual field from the trigger event |\n| `{{var.NAME}}` | Named variable value |\n| `{{counter.NAME}}` | Named counter value |\n| `{{gps.latitude}}`, `{{gps.longitude}}` | Latest coordinates from a fresh GPS fix |\n| `{{gps.speed_kmh}}`, `{{gps.speed_mph}}`, `{{gps.speed_knots}}`, `{{gps.speed_mps}}` | Latest speed in the named units |\n| `{{gps.heading}}`, `{{gps.heading_cardinal}}`, `{{gps.altitude_m}}` | Heading, compass direction, and altitude |\n| `{{gps.age}}` | Seconds since the latest valid fix |\n| `{{trigger.snapshot_base64}}` | Base64 JPEG (when `attach_snapshot` is true on HTTP Request, Email, MQTT Publish, Slack, Teams, or Telegram actions) |\n\nNumeric formatting: `{{trigger.KEY|N}}` rounds a numeric field to N decimal places — e.g. `{{trigger.Temperature|2}}` → `20.35`. GPS values other than age resolve to `--` unless GPS is enabled and a fresh fix is available.\n",
-    "version": "1.10.5",
+    "version": "1.10.6",
     "contact": {
       "name": "GitHub",
       "url": "https://github.com/Mo3he"
@@ -325,16 +325,16 @@
                 "description": "Name of the counter to watch",
                 "example": "motion_count"
               },
-              "threshold": {
+              "value": {
                 "type": "number",
-                "description": "Value the counter must reach or cross",
+                "description": "Value the counter is compared against",
                 "example": 10
               },
               "op": {
                 "type": "string",
-                "enum": ["gte", "lte", "eq"],
+                "enum": ["gte", "gt", "lte", "lt", "eq", "ne"],
                 "default": "gte",
-                "description": "Comparison operator (gte = ≥, lte = ≤, eq = =)"
+                "description": "Comparison operator (gte = ≥, gt = >, lte = ≤, lt = <, eq = =, ne = ≠)"
               }
             }
           }
@@ -571,13 +571,13 @@
             "description": "Compare a named counter against a threshold.",
             "properties": {
               "type":         { "type": "string", "enum": ["counter"] },
-              "counter_name": { "type": "string", "example": "motion_count" },
+              "name":  { "type": "string", "description": "Counter name", "example": "motion_count" },
               "op": {
                 "type": "string",
-                "enum": ["gt", "lt", "eq", "gte", "lte"],
+                "enum": ["gt", "lt", "eq", "ne", "gte", "lte"],
                 "example": "gte"
               },
-              "threshold": { "type": "number", "example": 5 }
+              "value": { "type": "number", "example": 5 }
             }
           }
         ]
@@ -594,8 +594,9 @@
               "name":     { "type": "string", "example": "system.armed" },
               "op": {
                 "type": "string",
-                "enum": ["eq", "neq", "gt", "lt"],
-                "default": "eq"
+                "enum": ["eq", "ne", "gt", "gte", "lt", "lte"],
+                "default": "eq",
+                "description": "String comparison (lt/gt order alphabetically, so \"10\" < \"9\")"
               },
               "value":    { "type": "string", "example": "true" }
             }
@@ -691,6 +692,8 @@
               "type":      { "type": "string", "enum": ["vapix_event_state"] },
               "event_key": { "type": "string", "description": "Partial topic string to match (e.g. tns1:Device/tnsaxis:IO/VirtualInput)", "example": "tnsaxis:AirQuality" },
               "data_key":  { "type": "string", "description": "Data field name to check", "example": "active" },
+              "source_key": { "type": "string", "description": "Optional source field identifying one instance of the event (e.g. port for virtual inputs and I/O ports). Without a source filter the condition passes when any instance matches.", "example": "port" },
+              "source_value": { "type": "string", "description": "Required value of source_key", "example": "17" },
               "op":        { "type": "string", "enum": ["boolean", "gt", "lt", "gte", "lte", "eq", "between", "contains", "eq_str"], "description": "Comparison operator. Omit or use eq_str for legacy exact-match behaviour." },
               "expected":  { "type": "string", "description": "Expected value for boolean (true/false), contains (substring), or exact match modes" },
               "threshold": { "type": "number", "description": "Numeric threshold (for gt/lt/gte/lte/eq/between)" },
@@ -714,7 +717,7 @@
             "enum": [
               "http_request", "mqtt_publish", "recording", "overlay_text", "overlay_image", "ptz_preset",
               "io_output", "io_flash", "audio_clip", "siren_light", "vapix_query",
-              "set_variable", "increment_counter", "fire_rule",
+              "set_variable", "increment_counter", "run_rule",
               "fire_vapix_event", "send_syslog", "delay",
               "guard_tour", "set_device_param", "snapshot_upload",
               "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control",
@@ -1057,9 +1060,9 @@
           { "$ref": "#/components/schemas/Action" },
           {
             "type": "object",
-            "description": "Immediately trigger another rule by ID.",
+            "description": "Run another rule's actions by ID. The target rule must be enabled and its conditions must pass.",
             "properties": {
-              "type":    { "type": "string", "enum": ["fire_rule"] },
+              "type":    { "type": "string", "enum": ["run_rule"] },
               "rule_id": { "type": "string", "format": "uuid", "description": "ID of the rule to trigger" }
             }
           }

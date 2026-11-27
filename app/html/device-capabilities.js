@@ -82,7 +82,7 @@ async function loadRemoteCondCap(rowIndexStr, query) {
     const parsed = parseVapixEventCatalog(result[0].soap);
     remoteCapCache[`${host}:::vapix_events_catalog`] = parsed;  /* full catalog — shared with action loader */
     remoteCapCache[`${host}:::vapix_events`] = parsed
-      .map(ev => ({ topic: vapixCatalogTopicPath(ev), dataKeys: ev.dataKeys }))
+      .map(ev => ({ topic: vapixCatalogTopicPath(ev), dataKeys: ev.dataKeys, sourceKeys: ev.sourceKeys }))
       .filter(ev => ev.topic);
     if (!remoteCapCache[`${host}:::vapix_events`].length)
       toast('No events found on remote device', 'warning');
@@ -567,7 +567,8 @@ function parseVapixEventCatalog(xmlText) {
           const dataTypes = { ...getTypes('Source'), ...getTypes('Data') };
           const topics = {};
           newPath.slice(0, 4).forEach((p, i) => { topics[`topic${i}`] = { [p.ns]: p.name }; });
-          events.push({ label: newPath.map(p => p.name).join(' / '), topics, dataKeys, dataTypes });
+          const sourceKeys = getKeys('Source');
+          events.push({ label: newPath.map(p => p.name).join(' / '), topics, dataKeys, dataTypes, sourceKeys });
         }
         traverse(child, newPath);
       }

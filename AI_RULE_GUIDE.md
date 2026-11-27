@@ -362,7 +362,7 @@ Fires when a named counter crosses a threshold value. Checked every 1 second.
 {
   "type": "counter_threshold",
   "counter_name": "motion_count",
-  "threshold": 10,
+  "value": 10,
   "op": "gte"
 }
 ```
@@ -370,8 +370,8 @@ Fires when a named counter crosses a threshold value. Checked every 1 second.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `counter_name` | string | — | Name of counter to watch |
-| `threshold` | number | — | Value to compare against |
-| `op` | `"gte"` \| `"lte"` \| `"eq"` | `"gte"` | Comparison: ≥, ≤, = |
+| `value` | number | — | Value to compare against |
+| `op` | `"gte"` \| `"gt"` \| `"lte"` \| `"lt"` \| `"eq"` \| `"ne"` | `"gte"` | Comparison: ≥, >, ≤, <, =, ≠ |
 
 ### 7. `rule_fired` — Rule Chain
 
@@ -448,17 +448,17 @@ Conditions are optional. If the `conditions` array is empty, the rule always pas
 ```json
 {
   "type": "counter",
-  "counter_name": "motion_count",
+  "name": "motion_count",
   "op": "gte",
-  "threshold": 5
+  "value": 5
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `counter_name` | string | Counter name |
-| `op` | `"gt"` \| `"lt"` \| `"eq"` \| `"gte"` \| `"lte"` | Comparison operator |
-| `threshold` | number | Value to compare against |
+| `name` | string | Counter name |
+| `op` | `"gt"` \| `"lt"` \| `"eq"` \| `"ne"` \| `"gte"` \| `"lte"` | Comparison operator |
+| `value` | number | Value to compare against |
 
 ### 4. `variable_compare` — Variable Comparison
 
@@ -474,8 +474,8 @@ Conditions are optional. If the `conditions` array is empty, the rule always pas
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | string | — | Variable name |
-| `op` | `"eq"` \| `"neq"` \| `"gt"` \| `"lt"` | `"eq"` | Comparison operator |
-| `value` | string | — | Value to compare against (string comparison; `"gt"` and `"lt"` are numeric) |
+| `op` | `"eq"` \| `"ne"` \| `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` | `"eq"` | Comparison operator |
+| `value` | string | — | Value to compare against (string comparison, so `"10"` sorts before `"9"`) |
 
 ### 4b. `trigger_data` — Trigger Data Comparison
 
@@ -548,6 +548,8 @@ Checks the current state of a VAPIX event instance on the local or a remote devi
 |-------|------|-------------|
 | `event_key` | string | Partial topic string to match |
 | `data_key` | string | Data field name to check |
+| `source_key` | string | Optional: source field that identifies the instance, e.g. `"port"` for `tns1:Device/tnsaxis:IO/VirtualInput` |
+| `source_value` | string | Optional: required value of `source_key`, e.g. `"17"`. Without a source filter the condition passes when any instance matches |
 | `op` | `"boolean"` \| `"gt"` \| `"lt"` \| `"gte"` \| `"lte"` \| `"eq"` \| `"between"` \| `"contains"` \| `"eq_str"` | Comparison operator |
 | `expected` | string | For boolean (`"true"`/`"false"`), contains (substring), or exact match |
 | `threshold` | number | For numeric comparisons |
@@ -1005,7 +1007,7 @@ A VMS or another ACAP application subscribed to `CameraApplicationPlatform/acap_
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `rule_id` | UUID string | ID of the rule to trigger. Skipped if target rule is disabled. |
+| `rule_id` | UUID string | ID of the rule to run. Skipped if the target rule is disabled or its conditions fail (triggers, cooldown and execution limits are not checked; the target gets no trigger data). |
 
 ### 15. `set_rule_enabled` — Enable/Disable Another Rule
 
@@ -1074,7 +1076,7 @@ Fetches the latest cached data from a device event and injects values as `{{trig
 | Field | Type | Description |
 |-------|------|-------------|
 | `parameter` | string | Parameter path (e.g. `ImageSource.I0.Sensor.Sharpness`). The `root.` prefix is added automatically. |
-| `value` | string | Value to set |
+| `value` | string | Value to set. Supports `{{...}}` templates; the value is URL-encoded, so `&`, `=` and spaces are written literally. Fails when the camera rejects the value |
 
 ### 19. `snapshot_upload` — Capture & Upload JPEG
 

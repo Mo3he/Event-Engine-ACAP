@@ -704,6 +704,7 @@ Content-Type: application/json
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>Topic / Event</strong></td><td>Select from the live event catalog or type a topic substring. When a remote device is configured, click <strong>Load</strong> to fetch the full event catalog from that device — no manual entry needed.</td></tr>
+        <tr><td><strong>Source</strong></td><td>Shown for events with several instances, such as virtual inputs or I/O ports (source <code>port</code>). Enter a <strong>Source Value</strong>, for example <code>17</code>, to check that instance only. Left empty, the condition passes when any instance matches.</td></tr>
         <tr><td><strong>Data key</strong></td><td>The event data key to inspect (e.g. <code>active</code>).</td></tr>
         <tr><td><strong>Expected value</strong></td><td>The value the data key must equal (e.g. <code>true</code> or <code>1</code>).</td></tr>
         <tr><td><strong>Target Device</strong></td><td>Check <em>Local (this camera)</em> (default) or a <em>Remote device</em>. See <a href="#remote-device-conditions">Remote Device Conditions</a>.</td></tr>
@@ -1026,7 +1027,7 @@ Content-Type: application/json
       </table>
 
       <h3 id="act-run-rule">Run Rule</h3>
-      <p>Immediately trigger another named rule. Useful for shared action sequences or conditional branching via variable state.</p>
+      <p>Immediately run another rule's actions. The target rule must be enabled and its conditions must pass; its triggers, cooldown and execution limits are not checked. Useful for shared action sequences, or conditional branching: give each target rule a <em>Variable</em> condition and only the matching one runs. The target gets no trigger data, so <em>Trigger Data</em> conditions in it never pass.</p>
 
       <h3 id="act-fire-event">Fire ACAP Event</h3>
       <p>Fire an ACAP event that is visible to other Axis applications and to the camera's built-in Action Rules system. Events you create here appear as trigger conditions in the camera's native event handler, letting you chain Event Engine rules into built-in camera automations.</p>
