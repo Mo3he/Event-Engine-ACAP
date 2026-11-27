@@ -130,6 +130,11 @@ jobs:
             echo "Verification of $f:"
             tar tzf "$f"
           done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eap-${{ matrix.arch }}
+          path: "*.eap"
+          if-no-files-found: error
       - name: Check glibc symbol versions
         # Newer SDK symbol versions (e.g. GLIBC_2.42 cfsetospeed) stop the app
         # loading on older AXIS OS; 2.34 is what released builds require.
@@ -161,3 +166,50 @@ jobs:
                 --library-path /opt/axis/acapsdk/sysroots/aarch64/usr/lib /tmp/unsubscribe-test
             done
           '
+
+  # Unsigned packages go to a DRAFT release only. The build host device-tests
+  # every draft (tools/devtest/acap-verify.sh --drafts) and acap-sign.sh
+  # refuses to publish one without a passing record for these exact files.
+  draft_release:
+    name: Draft release
+    needs: [docs_sync, sparkplug_codec, modbus_codec, scheduler, gps_nmea, gps_reader, certs, rule_secrets,
+            build_acap]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: draft-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: eap-*
+          path: releases
+          merge-multiple: true
+      - name: Create or refresh the draft
+        run: |
+          set -euo pipefail
+          version=$(jq -r .acapPackageConf.setup.version app/manifest.json)
+          tag="v$version"
+          if gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null | grep -qx false; then
+            echo "$tag is already published; nothing to do"
+            exit 0
+          fi
+          # Title and notes come from the version's RELEASE_NOTES.md section.
+          heading=$(grep -m1 "^## $tag\b" RELEASE_NOTES.md || true)
+          title=${heading#\#\# }
+          title=${title:-$tag}
+          awk -v h="$heading" '$0 == h {on=1; next} on && /^## v/ {exit} on' RELEASE_NOTES.md > /tmp/notes.md
+          [ -s /tmp/notes.md ] || echo "Draft built from ${GITHUB_SHA}." > /tmp/notes.md
+          ls -l releases
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" releases/*.eap --clobber
+            gh release edit "$tag" --title "$title" --notes-file /tmp/notes.md
+          else
+            gh release create "$tag" releases/*.eap --draft --target "$GITHUB_SHA" \
+              --title "$title" --notes-file /tmp/notes.md
+          fi
