@@ -77,8 +77,12 @@ Rules are built in a clean web UI.
 ## Compatibility
 
 - **AXIS OS:** 11.11 through 13.
-- **Verified on AXIS OS 13** (13.0.0, aarch64).
+- **Verified on AXIS OS:** 11.11.238 and 13.0.0 (`aarch64`).
 - **Architectures:** `aarch64` and `armv7hf`.
+
+On firmware without the asynchronous event-unsubscribe API (including
+11.11.238), Event Engine uses the older API on a worker thread so rule saves
+do not block the main event loop.
 
 ## Installation
 

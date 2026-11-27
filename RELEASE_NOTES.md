@@ -1,5 +1,34 @@
 # Release Notes
 
+## v1.10.6 - Reliability and correctness fixes
+
+- **AXIS OS 11.11 startup:** fixed the `undefined symbol:
+  ax_event_handler_unsubscribe_and_notify` failure introduced in 1.10.3.
+  Firmware without this API now uses the older unsubscribe API on a worker
+  thread, keeping event handling responsive during rule and Sparkplug saves.
+  The minimum supported AXIS OS version remains 11.11.
+  Startup and I/O-trigger rule updates/removal verified on 11.11.238 (`aarch64`).
+- **Set Device Parameter:** the value can no longer inject other parameters
+  into the param.cgi request, and the value now expands `{{trigger.*}}`
+  templates.
+- **Hardware actions report errors:** Audio Clip, Siren and Light, Speaker
+  Display, Wiper and Light Control now fail when the device answers with an
+  HTTP or VAPIX error, instead of reporting success.
+- **Slack, Teams and Telegram:** a message the service rejects is now reported
+  as an error.
+- **Recording on cameras that record continuously:** when the camera has no
+  free continuous recording profile, the action falls back to a regular
+  recording instead of failing, and the camera's error is shown if both fail.
+- **Device Event State:** works on cameras without eventhandler.cgi (PullPoint),
+  checks every instance of an event, and can be limited to one source with
+  the new Source / Source Value fields (for example one virtual input port).
+- **Webhook trigger:** rules with an empty token are rejected, and an empty
+  token never matches.
+- **Run Rule and Fire Now:** the target rule's conditions are now evaluated;
+  the rule's actions are skipped when they are not met.
+- **API documentation:** openapi.json and the AI rule guide now use the field
+  names the app accepts (counter `name`/`value`, `ne`, `run_rule`).
+
 ## v1.10.5 - Taller rule editor
 
 The rule editor now uses more of the screen on tall displays, making it easier

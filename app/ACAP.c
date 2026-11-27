@@ -29,6 +29,8 @@
 #include "fcgi_stdio.h"
 #include "ACAP.h"
 
+#pragma weak ax_event_handler_unsubscribe_and_notify
+
 /*-----------------------------------------------------
  * Logging macros
  *-----------------------------------------------------*/
@@ -1854,24 +1856,68 @@ int ACAP_EVENTS_Subscribe(cJSON* event, void* user_data) {
     return declarationID;
 }
 
-static void unsubscribe_done(guint subscription, gpointer user_data, GError* error) {
+static void unsubscribe_done(guint subscription, gpointer user_data, GError *error) {
     (void)user_data;
-    if (retired_subscriptions)
-        g_hash_table_remove(retired_subscriptions, GUINT_TO_POINTER(subscription));
     if (error) {
         LOG_WARN("%s: subscription %u: %s\n", __func__, subscription, error->message);
         g_error_free(error);
+        return;
     }
+    if (retired_subscriptions)
+        g_hash_table_remove(retired_subscriptions, GUINT_TO_POINTER(subscription));
 }
 
-/* Not ax_event_handler_unsubscribe(): it blocks on the default main context,
- * which is where this runs, and stalled about 2 s per subscription (every
- * rule or Sparkplug save, and shutdown). */
+typedef struct {
+    AXEventHandler *handler;
+    guint subscription;
+} UnsubscribeTask;
+
+static void
+unsubscribe_legacy_worker(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
+    (void)source_object;
+    (void)cancellable;
+    UnsubscribeTask *data = task_data;
+    GError *error = NULL;
+    if (ax_event_handler_unsubscribe(data->handler, data->subscription, &error))
+        g_task_return_boolean(task, TRUE);
+    else if (error)
+        g_task_return_error(task, error);
+    else
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED, "Unsubscribe failed");
+}
+
+static void unsubscribe_legacy_done(GObject *source_object, GAsyncResult *result, gpointer user_data) {
+    (void)source_object;
+    (void)user_data;
+    GTask *task = G_TASK(result);
+    UnsubscribeTask *data = g_task_get_task_data(task);
+    GError *error = NULL;
+    g_task_propagate_boolean(task, &error);
+    unsubscribe_done(data->subscription, NULL, error);
+}
+
+/* The newer API is optional at load time: AXIS OS 11.11 lacks it. The legacy
+ * API must run outside the default main context, which it needs to complete. */
 static void unsubscribe_async(guint subscription) {
-    GError* error = NULL;
+    GError *error = NULL;
     if (!retired_subscriptions)
         retired_subscriptions = g_hash_table_new(g_direct_hash, g_direct_equal);
     g_hash_table_add(retired_subscriptions, GUINT_TO_POINTER(subscription));
+    if (!ax_event_handler_unsubscribe_and_notify) {
+        static gboolean fallback_logged = FALSE;
+        if (!fallback_logged) {
+            LOG("Async event unsubscribe API unavailable; using legacy worker fallback\n");
+            fallback_logged = TRUE;
+        }
+        UnsubscribeTask *data = g_new(UnsubscribeTask, 1);
+        data->handler = ACAP_EVENTS_HANDLER;
+        data->subscription = subscription;
+        GTask *task = g_task_new(NULL, NULL, unsubscribe_legacy_done, NULL);
+        g_task_set_task_data(task, data, g_free);
+        g_task_run_in_thread(task, unsubscribe_legacy_worker);
+        g_object_unref(task);
+        return;
+    }
     if (!ax_event_handler_unsubscribe_and_notify(ACAP_EVENTS_HANDLER, subscription, unsubscribe_done, NULL, &error)) {
         LOG_WARN("%s: subscription %u: %s\n", __func__, subscription, error ? error->message : "failed");
         g_clear_error(&error);
@@ -2352,6 +2398,12 @@ int ACAP_EVENTS_Fire_Values(const char* id, cJSON* values, int state, char* err,
 static char* VAPIX_Credentials = NULL;
 static CURL* VAPIX_CURL = NULL;
 static pthread_mutex_t vapix_mutex = PTHREAD_MUTEX_INITIALIZER;
+/* HTTP status of this thread's last ACAP_VAPIX_* request; -1 = no answer */
+static __thread long vapix_last_http = -1;
+
+long ACAP_VAPIX_Last_HTTP(void) {
+    return vapix_last_http;
+}
 
 static size_t append_to_buffer_callback(char* ptr, size_t size, size_t nmemb, void* userdata) {
     size_t processed_bytes = size * nmemb;
@@ -2371,6 +2423,7 @@ static size_t append_to_buffer_callback(char* ptr, size_t size, size_t nmemb, vo
 }
 
 char* ACAP_VAPIX_Get(const char* endpoint) {
+    vapix_last_http = -1;
     if (!VAPIX_CURL || !endpoint) {
         LOG_WARN("%s: Invalid input\n", __func__);
         return NULL;
@@ -2410,6 +2463,7 @@ char* ACAP_VAPIX_Get(const char* endpoint) {
 
     long response_code;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    vapix_last_http = response_code;
     if (response_code >= 300) {
         LOG_WARN("%s: Code %ld\n", __func__, response_code);
         free(response);
@@ -2479,6 +2533,7 @@ char* ACAP_VAPIX_GetBinary_Path(const char* path, size_t* out_size) {
 
     long response_code;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    vapix_last_http = response_code;
     if (response_code >= 300) {
         LOG_WARN("%s: HTTP %ld\n", __func__, response_code);
         free(buf.data);
@@ -2490,6 +2545,7 @@ char* ACAP_VAPIX_GetBinary_Path(const char* path, size_t* out_size) {
 }
 
 char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
+    vapix_last_http = -1;
     if (!VAPIX_Credentials || !VAPIX_CURL || !endpoint || !request) {
         LOG_WARN("%s: Invalid input\n", __func__);
         return NULL;
@@ -2520,6 +2576,7 @@ char* ACAP_VAPIX_Post(const char* endpoint, const char* request) {
     CURLcode res = curl_easy_perform(VAPIX_CURL);
     long response_code = 0;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    if (res == CURLE_OK) vapix_last_http = response_code;
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
     pthread_mutex_unlock(&vapix_mutex);
     curl_slist_free_all(json_hdr);
@@ -2583,6 +2640,7 @@ char* ACAP_VAPIX_Soap_Post(const char* path, const char* soap_body) {
 }
 
 char* ACAP_VAPIX_Get_Path(const char* path) {
+    vapix_last_http = -1;
     if (!VAPIX_CURL || !path) {
         LOG_WARN("%s: Invalid input\n", __func__);
         return NULL;
@@ -2619,6 +2677,7 @@ char* ACAP_VAPIX_Get_Path(const char* path) {
 
     long response_code;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    vapix_last_http = response_code;
     if (response_code >= 300) {
         LOG_WARN("%s: Code %ld\n", __func__, response_code);
         free(response);
@@ -2629,6 +2688,7 @@ char* ACAP_VAPIX_Get_Path(const char* path) {
 }
 
 char* ACAP_VAPIX_Post_Path(const char* path, const char* body) {
+    vapix_last_http = -1;
     if (!VAPIX_CURL || !path || !body) {
         LOG_WARN("%s: Invalid input\n", __func__);
         return NULL;
@@ -2659,6 +2719,7 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body) {
     CURLcode res = curl_easy_perform(VAPIX_CURL);
     long response_code = 0;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    if (res == CURLE_OK) vapix_last_http = response_code;
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);
     pthread_mutex_unlock(&vapix_mutex);
     curl_slist_free_all(headers);
@@ -2684,6 +2745,7 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body) {
 }
 
 char* ACAP_VAPIX_Put_Path(const char* path, const char* body) {
+    vapix_last_http = -1;
     if (!VAPIX_CURL || !path || !body) {
         LOG_WARN("%s: Invalid input\n", __func__);
         return NULL;
@@ -2715,6 +2777,7 @@ char* ACAP_VAPIX_Put_Path(const char* path, const char* body) {
     CURLcode res = curl_easy_perform(VAPIX_CURL);
     long response_code = 0;
     curl_easy_getinfo(VAPIX_CURL, CURLINFO_RESPONSE_CODE, &response_code);
+    if (res == CURLE_OK) vapix_last_http = response_code;
     curl_easy_setopt(VAPIX_CURL, CURLOPT_CUSTOMREQUEST, NULL);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPGET, 1L);
     curl_easy_setopt(VAPIX_CURL, CURLOPT_HTTPHEADER, NULL);

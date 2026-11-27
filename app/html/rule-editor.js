@@ -1563,7 +1563,7 @@ function conditionFields(c, rowIdx) {
       || (c.remote_host && c.remote_host_toggle !== 'local');
 
     /* --- Resolve event catalog, topic control, and data keys for both local and remote --- */
-    let topicSection, dataKeys = [], dataTypes = {};
+    let topicSection, dataKeys = [], dataTypes = {}, sourceKeys = [];
     if (isRemote) {
       const host = (c.remote_host || '').trim();
       const cachedEvents = host ? remoteCapCache[`${host}:::vapix_events`] : null;
@@ -1588,6 +1588,7 @@ function conditionFields(c, rowIdx) {
         </div>`;
         const matchedEv = cachedEvents.find(ev => ev.topic && c.event_key && ev.topic === c.event_key);
         dataKeys = matchedEv && matchedEv.dataKeys ? matchedEv.dataKeys : [];
+        sourceKeys = matchedEv && matchedEv.sourceKeys ? matchedEv.sourceKeys : [];
         if (fullCatalog && matchedEv) {
           const catEv = fullCatalog.find(ev => {
             const p = vapixCatalogTopicPath(ev);
@@ -1620,6 +1621,7 @@ function conditionFields(c, rowIdx) {
       if (matchIdx >= 0) {
         dataKeys = vapixEventCatalog[matchIdx].dataKeys || [];
         dataTypes = vapixEventCatalog[matchIdx].dataTypes || {};
+        sourceKeys = vapixEventCatalog[matchIdx].sourceKeys || [];
       }
       topicSection = `
       ${catalogOpts ? `
@@ -1642,11 +1644,10 @@ function conditionFields(c, rowIdx) {
     }
 
     /* --- Data key dropdown (shared by both local/remote) --- */
+    const selKey = c.data_key || dataKeys.find(k => !sourceKeys.includes(k)) || dataKeys[0] || '';
     const dataKeyCtrl = dataKeys.length
-      ? `<select data-k="data_key" onchange="rerenderCondition(this)">${dataKeys.map(k => `<option value="${escHtml(k)}" ${c.data_key===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
+      ? `<select data-k="data_key" onchange="rerenderCondition(this)">${dataKeys.map(k => `<option value="${escHtml(k)}" ${selKey===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
       : `<input type="text" data-k="data_key" value="${escHtml(c.data_key || '')}" placeholder="active">`;
-
-    const selKey = c.data_key || (dataKeys[0] || '');
     const selType = dataTypes[selKey] || '';
 
     const boolKeys    = dataKeys.filter(k => dataTypes[k] === 'boolean');
@@ -1725,7 +1726,26 @@ function conditionFields(c, rowIdx) {
       </div>
     </div>`;
 
+    /* Events with a source (virtual input / I/O port number, channel, ...) have
+     * one state per source; without a filter the condition passes when any does. */
+    const srcKey = c.source_key || (sourceKeys.length === 1 ? sourceKeys[0] : '');
+    const sourceSection = (sourceKeys.length || c.source_key || c.source_value) ? `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Source</label>
+        ${sourceKeys.length
+          ? `<select data-k="source_key">${[...new Set([...sourceKeys, ...(c.source_key ? [c.source_key] : [])])].map(k => `<option value="${escHtml(k)}" ${srcKey===k?'selected':''}>${escHtml(k)}</option>`).join('')}</select>`
+          : `<input type="text" data-k="source_key" value="${escHtml(srcKey)}" placeholder="port">`}
+      </div>
+      <div class="form-group">
+        <label>Source Value <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+        <input type="text" data-k="source_value" value="${escHtml(c.source_value || '')}" placeholder="any">
+        <div class="form-hint">For example port <b>17</b>. Leave empty to pass when any source matches.</div>
+      </div>
+    </div>` : '';
+
     return `${topicSection}
+    ${sourceSection}
     <div class="form-row">
       <div class="form-group">
         <label>Data Key</label>
@@ -4053,6 +4073,8 @@ function normalizeCondition(c) {
   } else if (c.type === 'vapix_event_state') {
     out.event_key = c.event_key || '';
     out.data_key  = c.data_key || '';
+    const srcVal = String(c.source_value ?? '').trim();
+    if (c.source_key && srcVal) { out.source_key = c.source_key; out.source_value = srcVal; }
     const mode = c.match_mode || 'exact';
     if (mode === 'boolean') {
       out.op = 'boolean';

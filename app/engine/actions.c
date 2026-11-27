@@ -1242,6 +1242,54 @@ static cJSON* remote_pullpoint_query(const char* host, const char* user,
          ? remote_vapix_put_path(_hb,_u,_p,(path),(body)) \
          : ACAP_VAPIX_Put_Path((path),(body)); })
 
+/* Did the VAPIX request this action just made (same thread) succeed? Checks
+ * the HTTP status (no answer, wrong password, missing API), a JSON "error"
+ * (VAPIX JSON and REST APIs) and param.cgi's "# Error" reply. On failure the
+ * reason is recorded as the action error and 0 is returned. */
+static int vapix_ok(cJSON* cfg, const char* what, const char* resp) {
+    const char* host = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "remote_host"));
+    int remote = host && host[0];
+    long http = remote ? (remote_last.res == CURLE_OK ? remote_last.http : -1) : ACAP_VAPIX_Last_HTTP();
+    const char* on = remote ? " on " : "";
+    if (!remote) host = "";
+    char why[CURL_ERROR_SIZE + 64];
+    if (http < 200 || http >= 300) {
+        if (remote) remote_failure_text(why, sizeof(why));
+        else if (http < 0) snprintf(why, sizeof(why), "no answer from the camera");
+        else snprintf(why, sizeof(why), "the camera answered HTTP %ld", http);
+        LOG_ACTION_ERR("%s failed%s%s: %s", what, on, host, why);
+        return 0;
+    }
+    if (!resp) return 1;
+    cJSON* j = cJSON_Parse(resp);
+    if (j) {
+        cJSON* e = cJSON_GetObjectItem(j, "error");
+        const char* status = cJSON_GetStringValue(cJSON_GetObjectItem(j, "status"));
+        int failed = e || (status && strcmp(status, "error") == 0);
+        if (failed) {
+            const char* m = cJSON_IsString(e) ? e->valuestring
+                          : cJSON_GetStringValue(cJSON_GetObjectItem(e, "message"));
+            cJSON* code = cJSON_GetObjectItem(e, "code");
+            if (cJSON_IsNumber(code))
+                LOG_ACTION_ERR("%s failed%s%s: %s (error %d)", what, on, host,
+                               m ? m : "error", (int)code->valuedouble);
+            else
+                LOG_ACTION_ERR("%s failed%s%s: %s", what, on, host, m ? m : "the device reported an error");
+        }
+        cJSON_Delete(j);
+        return !failed;
+    }
+    const char* t = resp;
+    while (*t == ' ' || *t == '\r' || *t == '\n') t++;
+    if (strncmp(t, "# Error", 7) == 0 || strncmp(t, "Error", 5) == 0) {
+        snprintf(why, sizeof(why), "%s", t);
+        why[strcspn(why, "\r\n")] = '\0';
+        LOG_ACTION_ERR("%s failed%s%s: %s", what, on, host, why);
+        return 0;
+    }
+    return 1;
+}
+
 /* Fill remote_host/user/pass into a WhileActiveEntry from a cfg JSON object.
  * The stored host is scheme-prefixed (https:// when remote_https is set) so the
  * later undo call reaches the device over the same transport. */
@@ -1435,13 +1483,22 @@ static int recording_use_continuous(cJSON* cfg) {
     return recording_host_uses_continuous(rh, ru, rp);
 }
 
-/* Stop a single recording identified by the stored handle. On OS 13 the handle
- * is a continuous-recording profile number; on older firmware a legacy recording
- * ID. Picks the correct CGI based on the product's capability. */
+/* Stop handles: a continuous-recording profile is a number; a record.cgi
+ * recording ID is not (e.g. "20261127_180320_DC1E_B8A44F305E20"). Both kinds
+ * can exist on one camera: record.cgi is the fallback when the camera's
+ * continuous profiles are all in use. */
+static int recording_id_is_profile(const char* id) {
+    if (!id || !id[0]) return 0;
+    for (const char* p = id; *p; p++)
+        if (!isdigit((unsigned char)*p)) return 0;
+    return 1;
+}
+
+/* Stop a single recording identified by the stored handle. */
 static void recording_stop_id(const char* host, const char* user, const char* pass, const char* id) {
     if (!id || !id[0]) return;
     char req[128];
-    if (recording_host_uses_continuous(host, user, pass))
+    if (recording_id_is_profile(id) && recording_host_uses_continuous(host, user, pass))
         snprintf(req, sizeof(req), "record/continuous/removeconfiguration.cgi?profile=%s", id);
     else
         snprintf(req, sizeof(req), "record/stop.cgi?recordingid=%s", id);
@@ -1555,6 +1612,15 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
         if (opts && opts[0])            { snprintf(opt_raw, sizeof(opt_raw), "%s", opts); have_opt = 1; }
         else if (profile && profile[0]) { snprintf(opt_raw, sizeof(opt_raw), "streamprofile=%s", profile); have_opt = 1; }
 
+        char legacy_req[512];
+        if (have_opt) {
+            char* opt_enc = curl_easy_escape(NULL, opt_raw, 0);
+            snprintf(legacy_req, sizeof(legacy_req), "record/record.cgi?diskid=%s&options=%s",
+                     diskid, opt_enc ? opt_enc : "");
+            if (opt_enc) curl_free(opt_enc);
+        } else {
+            snprintf(legacy_req, sizeof(legacy_req), "record/record.cgi?diskid=%s", diskid);
+        }
         if (use_continuous) {
             /* OS 13: addconfiguration.cgi REQUIRES the options parameter. When the
              * user specified none we default to videocodec=h264, which keeps the
@@ -1566,31 +1632,45 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
                      diskid, REC_EVENTID, opt_enc ? opt_enc : "videocodec%3Dh264");
             if (opt_enc) curl_free(opt_enc);
         } else {
-            /* Legacy record.cgi: options is optional (system default when omitted). */
-            if (have_opt) {
-                char* opt_enc = curl_easy_escape(NULL, opt_raw, 0);
-                snprintf(req, sizeof(req), "record/record.cgi?diskid=%s&options=%s",
-                         diskid, opt_enc ? opt_enc : "");
-                if (opt_enc) curl_free(opt_enc);
-            } else {
-                snprintf(req, sizeof(req), "record/record.cgi?diskid=%s", diskid);
-            }
+            snprintf(req, sizeof(req), "%s", legacy_req);
         }
 
-        char* resp = VAPIX_GET(cfg, req);
-        if (!resp) { LOG_WARN("recording: failed to start on disk %s", diskid); return; }
-
-        /* Continuous: <configure profile="N" .../>   Legacy: <record recordingid="..." .../> */
+        /* Continuous: <configure profile="N" result="OK"/>, or result="ERROR"
+         * errormsg="..." (e.g. when the camera's continuous profiles are all in
+         * use by the user's own continuous recording).
+         * Legacy: <record recordingid="..." result="OK"/> */
         char recording_id[64] = {0};
-        extract_xml_attr(resp, use_continuous ? "profile" : "recordingid",
-                         recording_id, sizeof(recording_id));
-        free(resp);
+        char why[256] = "";
+        char* resp = VAPIX_GET(cfg, req);
+        if (resp) {
+            extract_xml_attr(resp, use_continuous ? "profile" : "recordingid",
+                             recording_id, sizeof(recording_id));
+            if (!recording_id[0] && !extract_xml_attr(resp, "errormsg", why, sizeof(why)))
+                snprintf(why, sizeof(why), "unexpected answer from the camera");
+            free(resp);
+        } else {
+            snprintf(why, sizeof(why), "the camera did not accept the request");
+        }
 
-        LOG("recording: started on %s%s%s", diskid,
-            recording_id[0] ? (use_continuous ? ", profile=" : ", id=") : "", recording_id);
+        /* record.cgi records alongside a continuous recording (until AXIS OS 13) */
+        if (!recording_id[0] && use_continuous) {
+            LOG("recording: continuous profile refused on %s (%s), trying record.cgi", diskid, why);
+            resp = VAPIX_GET(cfg, legacy_req);
+            if (resp) {
+                extract_xml_attr(resp, "recordingid", recording_id, sizeof(recording_id));
+                free(resp);
+            }
+        }
+        if (!recording_id[0]) {
+            LOG_ACTION_ERR("recording: could not start on disk %s: %s", diskid, why);
+            return;
+        }
+
+        LOG("recording: started on %s, %s=%s", diskid,
+            recording_id_is_profile(recording_id) ? "profile" : "id", recording_id);
 
         /* Always store so an explicit "stop" rule in a separate trigger can find it */
-        if (recording_id[0]) {
+        {
             char _hb[192];
             const char* _rh = remote_host_scheme(cfg, _hb, sizeof(_hb));
             active_recording_store(_rh ? _rh : "", diskid, recording_id);
@@ -1638,6 +1718,20 @@ static void action_recording(const char* rule_id, cJSON* cfg) {
         int stopped = -1; /* -1 = query failed */
         if (use_continuous) {
             stopped = continuous_remove_ours(host, _ru ? _ru : "", _rp ? _rp : "", diskid);
+            /* A record.cgi fallback recording (started because the continuous
+             * profiles were all in use) is stopped with stop.cgi. */
+            for (int i = 0; i < active_recording_count; i++) {
+                if (strcmp(active_recordings[i].host, host ? host : "") == 0 &&
+                    strcmp(active_recordings[i].diskid, diskid) == 0 &&
+                    active_recordings[i].recording_id[0] &&
+                    !recording_id_is_profile(active_recordings[i].recording_id)) {
+                    recording_stop_id(host, _ru ? _ru : "", _rp ? _rp : "",
+                                      active_recordings[i].recording_id);
+                    LOG("recording: stopped recording %s", active_recordings[i].recording_id);
+                    stopped++;
+                    break;
+                }
+            }
         } else {
             char list_req[256];
             snprintf(list_req, sizeof(list_req),
@@ -3102,7 +3196,9 @@ static void action_audio_clip(const char* rule_id, cJSON* cfg) {
     (void)n;
 
     char* resp = VAPIX_GET(cfg, req);
-    if (resp) free(resp);
+    int ok = vapix_ok(cfg, "audio_clip", resp);
+    free(resp);
+    if (!ok) return;
 
     /* Register while_active only for infinite-loop clips (loop_count == 0) */
     if (rule_id && wa_j && cJSON_IsTrue(wa_j) && loop_count == 0) {
@@ -3359,6 +3455,33 @@ static void action_sparkplug_publish(cJSON* cfg, cJSON* trigger_data) {
     cJSON_Delete(out);
 }
 
+/* Did a chat service accept the message? Reports a transport error or an
+ * HTTP error status (a revoked webhook URL answers 404; Telegram answers 401
+ * or 404 for a bad bot token), with the service's own reason when it gives
+ * one (Telegram: {"ok":false,"description":...}). */
+static int chat_reply_ok(CURL* curl, CURLcode res, const char* what, const char* reply) {
+    if (res != CURLE_OK) {
+        LOG_ACTION_ERR("%s failed: %s", what, curl_easy_strerror(res));
+        return 0;
+    }
+    long http = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http);
+    cJSON* j = reply ? cJSON_Parse(reply) : NULL;
+    cJSON* ok_j = j ? cJSON_GetObjectItem(j, "ok") : NULL;
+    if (http >= 200 && http < 300 && !cJSON_IsFalse(ok_j)) { cJSON_Delete(j); return 1; }
+    const char* desc = j ? cJSON_GetStringValue(cJSON_GetObjectItem(j, "description")) : NULL;
+    char text[128] = "";
+    if (!desc && reply && !j) {
+        snprintf(text, sizeof(text), "%s", reply);
+        text[strcspn(text, "\r\n")] = '\0';
+        desc = text[0] ? text : NULL;
+    }
+    if (desc) LOG_ACTION_ERR("%s failed: HTTP %ld: %s", what, http, desc);
+    else      LOG_ACTION_ERR("%s failed: HTTP %ld", what, http);
+    cJSON_Delete(j);
+    return 0;
+}
+
 /* slack_webhook */
 static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
     const char* url = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "webhook_url"));
@@ -3391,9 +3514,13 @@ static void action_slack_webhook(cJSON* cfg, cJSON* trigger_data) {
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    char* reply = NULL;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &reply);
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_ACTION_ERR("slack_webhook failed: %s", curl_easy_strerror(res));
+    chat_reply_ok(curl, res, "slack_webhook", reply);
+    free(reply);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     free(json_str);
@@ -3466,9 +3593,13 @@ static void action_teams_webhook(cJSON* cfg, cJSON* trigger_data) {
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+    char* reply = NULL;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &reply);
 
     CURLcode res = curl_easy_perform(curl);
-    if (res != CURLE_OK) LOG_ACTION_ERR("teams_webhook failed: %s", curl_easy_strerror(res));
+    chat_reply_ok(curl, res, "teams_webhook", reply);
+    free(reply);
     curl_slist_free_all(hdrs);
     curl_easy_cleanup(curl);
     free(json_str);
@@ -3798,8 +3929,12 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
             curl_mime_data(part, snap_raw, (curl_off_t)snap_len);
 
             curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+            char* reply = NULL;
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &reply);
             CURLcode res = curl_easy_perform(curl);
-            if (res != CURLE_OK) LOG_ACTION_ERR("telegram sendPhoto failed: %s", curl_easy_strerror(res));
+            chat_reply_ok(curl, res, "telegram sendPhoto", reply);
+            free(reply);
 
             curl_mime_free(form);
             free(snap_raw);
@@ -3832,9 +3967,13 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
         curl_easy_setopt(curl, CURLOPT_POST, 1L);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_str);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, hdrs);
+        char* reply = NULL;
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, remote_write_cb);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &reply);
 
         CURLcode res = curl_easy_perform(curl);
-        if (res != CURLE_OK) LOG_ACTION_ERR("telegram failed: %s", curl_easy_strerror(res));
+        chat_reply_ok(curl, res, "telegram", reply);
+        free(reply);
 
         curl_slist_free_all(hdrs);
         free(json_str);
@@ -3914,7 +4053,9 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
     cJSON_Delete(req);
     char* resp = VAPIX_POST(cfg, "siren_and_light.cgi", body);
     free(body);
-    if (resp) free(resp);
+    int ok = vapix_ok(cfg, "siren_light", resp);
+    free(resp);
+    if (!ok) return;
 
     if (!stopping && rule_id) {
         cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
@@ -3937,7 +4078,8 @@ static void action_run_rule(cJSON* cfg) {
         LOG("run_rule: skipping disabled rule %s", rid);
         return;
     }
-    RuleEngine_Fire(rid, NULL);
+    if (RuleEngine_Run(rid, NULL) < 0)
+        LOG("run_rule: conditions of rule %s not met, actions skipped", rid);
 }
 
 /* set_rule_enabled — enable or disable another rule by ID */
@@ -4059,11 +4201,13 @@ static void action_guard_tour(cJSON* cfg) {
     LOG_WARN("guard_tour: tour '%s' not found", tour_name ? tour_name : "");
 }
 
-/* set_device_param — update a camera parameter via param.cgi */
-static void action_set_device_param(cJSON* cfg) {
+/* set_device_param — update a camera parameter via param.cgi. The value may
+ * come from trigger data, so both parts are URL-encoded: a '&' in the value
+ * must not set other parameters. */
+static void action_set_device_param(cJSON* cfg, cJSON* trigger_data) {
     const char* param = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "parameter"));
-    const char* value = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
-    if (!param || !param[0] || !value) { LOG_WARN("set_device_param: missing parameter or value"); return; }
+    const char* value_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
+    if (!param || !param[0] || !value_tmpl) { LOG_ACTION_ERR("set_device_param: missing parameter or value"); return; }
 
     char full_param[256];
     if (strncmp(param, "root.", 5) == 0)
@@ -4071,10 +4215,23 @@ static void action_set_device_param(cJSON* cfg) {
     else
         snprintf(full_param, sizeof(full_param), "root.%s", param);
 
-    char req[512];
-    snprintf(req, sizeof(req), "param.cgi?action=update&%s=%s", full_param, value);
+    char* value = Actions_Expand_Template(value_tmpl, trigger_data);
+    char* name_enc  = curl_easy_escape(NULL, full_param, 0);
+    char* value_enc = curl_easy_escape(NULL, value ? value : "", 0);
+    free(value);
+    if (!name_enc || !value_enc) {
+        curl_free(name_enc); curl_free(value_enc);
+        LOG_ACTION_ERR("set_device_param: out of memory");
+        return;
+    }
+    char* req = g_strdup_printf("param.cgi?action=update&%s=%s", name_enc, value_enc);
+    curl_free(name_enc);
+    curl_free(value_enc);
     char* resp = VAPIX_GET(cfg, req);
-    if (resp) free(resp);
+    g_free(req);
+    if (vapix_ok(cfg, "set_device_param", resp))
+        LOG("set_device_param: %s updated", full_param);
+    free(resp);
 }
 
 /* snapshot_upload — capture a JPEG snapshot and POST/PUT it to a URL */
@@ -4246,7 +4403,8 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
         char* resp = VAPIX_POST_PATH(cfg,
             "/config/rest/speaker-display-notification/v1/stop",
             "{\"data\":{}}");
-        if (resp) free(resp);
+        vapix_ok(cfg, "speaker_display stop", resp);
+        free(resp);
         return;
     }
 
@@ -4298,7 +4456,9 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
     char* resp = VAPIX_POST_PATH(cfg,
         "/config/rest/speaker-display-notification/v1/simple", body);
     free(body);
-    if (resp) free(resp);
+    int ok = vapix_ok(cfg, "speaker_display", resp);
+    free(resp);
+    if (!ok) return;
 
     if (rule_id) {
         cJSON* wa = cJSON_GetObjectItem(cfg, "while_active");
@@ -4331,7 +4491,9 @@ static void action_wiper(cJSON* cfg) {
 
     char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
     char* resp = VAPIX_POST(cfg, "clearviewcontrol.cgi", body);
-    free(body); if (resp) free(resp);
+    free(body);
+    vapix_ok(cfg, "wiper", resp);
+    free(resp);
 }
 
 /* light_control — control an Axis illuminator (white/IR LED) */
@@ -4403,7 +4565,10 @@ static void action_light_control(cJSON* cfg) {
             cJSON_AddNumberToObject(p, "intensity", intensity_j->valuedouble);
             char* body = cJSON_PrintUnformatted(req);
             char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
-            free(body); if (resp) free(resp);
+            free(body);
+            int ok = vapix_ok(cfg, "light_control intensity", resp);
+            free(resp);
+            if (!ok) { cJSON_Delete(req); return; }
             cJSON_SetValuestring(cJSON_GetObjectItem(req, "method"), "activateLight");
             cJSON_DeleteItemFromObject(p, "intensity");
         } else {
@@ -4413,7 +4578,10 @@ static void action_light_control(cJSON* cfg) {
 
     char* body = cJSON_PrintUnformatted(req); cJSON_Delete(req);
     char* resp = VAPIX_POST(cfg, "lightcontrol.cgi", body);
-    free(body); if (resp) free(resp);
+    free(body);
+    int ok = vapix_ok(cfg, "light_control", resp);
+    free(resp);
+    if (!ok) return;
 
     /* The call above emitted the first ON pulse; the strobe timer handles its
      * OFF edge and the remaining (count-1) pulses. Driving the LED directly
@@ -4932,7 +5100,7 @@ static void execute_from_ex(const char* rule_id, cJSON* actions_array,
         else if (strcmp(type, "set_rule_enabled")  == 0) action_set_rule_enabled(action);
         else if (strcmp(type, "vapix_query")       == 0) action_vapix_query(action, trigger_data);
         else if (strcmp(type, "guard_tour")        == 0) action_guard_tour(action);
-        else if (strcmp(type, "set_device_param")  == 0) action_set_device_param(action);
+        else if (strcmp(type, "set_device_param")  == 0) action_set_device_param(action, trigger_data);
         else if (strcmp(type, "snapshot_upload")   == 0) action_snapshot_upload(action, trigger_data);
         else if (strcmp(type, "ir_cut_filter")     == 0) action_ir_cut_filter(action);
         else if (strcmp(type, "privacy_mask")      == 0) action_privacy_mask(action);

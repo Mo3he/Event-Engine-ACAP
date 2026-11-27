@@ -177,6 +177,13 @@ static int validate_rule_json(cJSON* rule_json, char* error, size_t error_size) 
                     return 0;
                 }
             }
+            if (ttype && strcmp(ttype, "http_webhook") == 0) {
+                const char* tok = cJSON_GetStringValue(cJSON_GetObjectItem(t, "token"));
+                if (!tok || !tok[0]) {
+                    snprintf(error, error_size, "trigger %d (http_webhook) requires a non-empty token", tidx + 1);
+                    return 0;
+                }
+            }
             if (ttype && strcmp(ttype, "modbus_read") == 0 && !mb_validate_read(t, mb_err, sizeof(mb_err))) {
                 snprintf(error, error_size, "trigger %d (modbus_read): %s", tidx + 1, mb_err);
                 return 0;

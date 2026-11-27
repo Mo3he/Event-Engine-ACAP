@@ -859,7 +859,9 @@ int Triggers_On_Webhook(const char* token, cJSON* payload) {
     for (int i = 0; i < sub_count; i++) {
         Subscription* s = &subs[i];
         if (s->type != TRIG_HTTP_WEBHOOK) continue;
-        if (s->token[0] && !token_equals(s->token, token ? token : "")) continue;
+        /* A webhook trigger without a token never fires (stored rules may predate
+         * the token requirement). */
+        if (!s->token[0] || !token_equals(s->token, token ? token : "")) continue;
 
         cJSON* tdata = cJSON_CreateObject();
         cJSON_AddStringToObject(tdata, "type", "http_webhook");

@@ -866,6 +866,13 @@ char* ACAP_VAPIX_Post_Path(const char* path, const char* body);
 char* ACAP_VAPIX_Put_Path(const char* path, const char* body);
 
 /**
+ * @brief HTTP status of the calling thread's last ACAP_VAPIX_Get, _Post,
+ *        _Get_Path, _Post_Path or _Put_Path request, or -1 when it got no
+ *        answer. Tells an empty successful reply (NULL) from a failure.
+ */
+long ACAP_VAPIX_Last_HTTP(void);
+
+/**
  * @brief POST to an arbitrary local path, returning the response body even on
  *        HTTP error codes (for debugging). http_code_out receives the HTTP
  *        status code; pass NULL to ignore.

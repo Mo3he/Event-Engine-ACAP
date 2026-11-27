@@ -689,7 +689,7 @@ void RuleEngine_Tick(void) {
     free(refire_ids);
 }
 
-int RuleEngine_Fire(const char* id, cJSON* trigger_data) {
+static int fire_rule(const char* id, cJSON* trigger_data, int check_conditions) {
     pthread_mutex_lock(&store_lock);
     Rule* r = NULL;
     for (int i = 0; i < rule_count; i++) {
@@ -698,17 +698,38 @@ int RuleEngine_Fire(const char* id, cJSON* trigger_data) {
     if (!r) { pthread_mutex_unlock(&store_lock); return 0; }
 
     cJSON* actions_dup = cJSON_Duplicate(r->actions_json, 1);
+    cJSON* conds_dup = check_conditions && r->conditions_json
+                       ? cJSON_Duplicate(r->conditions_json, 1) : NULL;
+    int cond_logic = r->condition_logic;
     char rid[37]; snprintf(rid, sizeof(rid), "%.36s", r->id);
     char rname[128]; snprintf(rname, sizeof(rname), "%s", r->name);
     pthread_mutex_unlock(&store_lock);
 
     cJSON* tdata = trigger_data ? trigger_data : cJSON_CreateObject();
+    if (conds_dup) {
+        int pass = Conditions_Evaluate(conds_dup, cond_logic, tdata);
+        cJSON_Delete(conds_dup);
+        if (!pass) {
+            EventLog_Append(rid, rname, 0, "condition", tdata, 0, 0);
+            if (!trigger_data) cJSON_Delete(tdata);
+            cJSON_Delete(actions_dup);
+            return -1;
+        }
+    }
     EventLog_Append(rid, rname, 1, "manual", tdata, 0, 0);
     AlertStream_Broadcast(rid, rname, tdata);
     Actions_Execute(rid, actions_dup, tdata);
     if (!trigger_data) cJSON_Delete(tdata);
     cJSON_Delete(actions_dup);
     return 1;
+}
+
+int RuleEngine_Fire(const char* id, cJSON* trigger_data) {
+    return fire_rule(id, trigger_data, 1);
+}
+
+int RuleEngine_Run(const char* id, cJSON* trigger_data) {
+    return fire_rule(id, trigger_data, 1);
 }
 
 int RuleEngine_Count(void) {
