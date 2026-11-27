@@ -15,8 +15,8 @@ FC01 coil 0 = 1
 FC02 discrete 0 = 0
 
 Usage:
-  python3 test_modbus_rtu_slave.py [host] [port]
-  python3 test_modbus_rtu_slave.py 10.129.174.218 4001
+  python3 modbus_rtu_slave_sim.py [host] [port]
+  python3 modbus_rtu_slave_sim.py 10.129.174.218 4001
 """
 
 import socket, struct, time, logging, sys, threading

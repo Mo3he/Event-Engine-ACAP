@@ -1,7 +1,7 @@
 /*
  * Round-trip check for the Sparkplug B protobuf codec.
  * Not part of the ACAP build:
- *   cc -Wall -Wextra -I../app/engine -o /tmp/spbtest sparkplug_pb_test.c ../app/engine/sparkplug_pb.c && /tmp/spbtest
+ *   cc -Wall -Wextra -fsanitize=address,undefined -Iapp/engine -o /tmp/spbtest tools/sparkplug_pb_test.c app/engine/sparkplug_pb.c && /tmp/spbtest
  */
 #include <stdio.h>
 #include <string.h>
@@ -38,6 +38,24 @@ static void capture(const char* name, uint64_t alias, int has_alias,
     snprintf(c->value, sizeof(c->value), "%s", value_str);
     c->datatype = datatype;
     c->alias = alias;
+}
+
+static void expect_count(const char* what, int got, int want) {
+    if (got != want) {
+        printf("FAIL %-24s decoded %d metrics, want %d\n", what, got, want);
+        failures++;
+    }
+}
+
+/* Independent of the codec: walks the top-level fields of a payload. */
+static uint64_t read_varint(const uint8_t* data, int len, int* pos) {
+    uint64_t value = 0;
+    for (int shift = 0; *pos < len && shift < 64; shift += 7) {
+        uint8_t byte = data[(*pos)++];
+        value |= (uint64_t)(byte & 0x7f) << shift;
+        if (!(byte & 0x80)) break;
+    }
+    return value;
 }
 
 static void roundtrip(const char* label, int datatype, const char* text, const char* want) {
@@ -103,9 +121,8 @@ int main(void) {
         m.name = "F"; m.datatype = SPB_DT_FLOAT;
         SPB_Metric_Set_Value(&m, "1.5");
         SPB_Buf b;
-        SPB_Encode(&b, 1, 1, 0, &m, 1);
         Captured c; memset(&c, 0, sizeof(c));
-        SPB_Decode(b.data, b.len, capture, &c);
+        expect_count("Float", SPB_Encode(&b, 1, 1, 0, &m, 1) ? SPB_Decode(b.data, b.len, capture, &c) : -1, 1);
         expect_str("Float", c.value, "1.5");
         SPB_Buf_Free(&b);
     }
@@ -116,9 +133,9 @@ int main(void) {
         memset(&m, 0, sizeof(m));
         m.name = "N"; m.datatype = SPB_DT_INT32; m.is_null = 1;
         SPB_Buf b;
-        SPB_Encode(&b, 1, 1, 0, &m, 1);
         Captured c; memset(&c, 0, sizeof(c));
-        SPB_Decode(b.data, b.len, capture, &c);
+        expect_count("Null metric", SPB_Encode(&b, 1, 1, 0, &m, 1) ? SPB_Decode(b.data, b.len, capture, &c) : -1, 1);
+        expect_str("Null metric name", c.name, "N");
         expect_str("Null metric", c.value, "");
         SPB_Buf_Free(&b);
     }
@@ -131,27 +148,42 @@ int main(void) {
             m[i].name = "M"; m[i].datatype = SPB_DT_INT32; m[i].i64 = i;
         }
         SPB_Buf b;
-        SPB_Encode(&b, 1, 1, 5, m, 3);
         Captured c; memset(&c, 0, sizeof(c));
-        int n = SPB_Decode(b.data, b.len, capture, &c);
+        int n = SPB_Encode(&b, 1, 1, 5, m, 3) ? SPB_Decode(b.data, b.len, capture, &c) : -1;
         if (n != 3) { printf("FAIL %-24s got %d metrics\n", "Multi metric", n); failures++; }
         else        { printf("ok   %-24s 3\n", "Multi metric"); }
         SPB_Buf_Free(&b);
     }
 
-    /* Truncated payloads must be rejected, never over-read */
+    /* Truncated payloads must be rejected, never over-read. A cut on a
+     * top-level field boundary is a valid shorter message and must decode
+     * exactly the metrics before it; any other cut must be rejected. */
     {
         SPB_Metric m;
         memset(&m, 0, sizeof(m));
         m.name = "Trunc"; m.datatype = SPB_DT_STRING; m.str = "abcdefghij";
         SPB_Buf b;
         SPB_Encode(&b, 1, 1, 0, &m, 1);
-        int rejected = 0, total = 0;
+        int bad = 0;
         for (int cut = 1; cut < b.len; cut++) {
-            total++;
-            if (SPB_Decode(b.data, cut, NULL, NULL) < 0) rejected++;
+            int boundary = 0, metrics_before = 0;
+            for (int pos = 0; pos < cut;) {
+                uint64_t tag = read_varint(b.data, b.len, &pos);
+                uint64_t value = read_varint(b.data, b.len, &pos);
+                if ((tag & 7) == 2) pos += (int)value;
+                if (pos > cut) break;
+                if ((tag >> 3) == 2) metrics_before++;
+                if (pos == cut) boundary = 1;
+            }
+            int n = SPB_Decode(b.data, cut, NULL, NULL);
+            if (boundary ? n != metrics_before : n >= 0) {
+                printf("FAIL %-24s cut at %d of %d decoded %d (boundary %d, want %d)\n", "Truncation safety",
+                       cut, b.len, n, boundary, boundary ? metrics_before : -1);
+                bad++;
+            }
         }
-        printf("ok   %-24s %d/%d truncations rejected\n", "Truncation safety", rejected, total);
+        if (bad) failures++;
+        else printf("ok   %-24s %d cuts checked\n", "Truncation safety", b.len - 1);
         SPB_Buf_Free(&b);
     }
 

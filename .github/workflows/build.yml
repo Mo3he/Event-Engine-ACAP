@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v6
       - name: Build and run the protobuf round-trip tests
         run: |
-          cc -std=c11 -Wall -Wextra -Werror -Iapp/engine \
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iapp/engine \
              -o /tmp/sparkplug_pb_test \
              tools/sparkplug_pb_test.c app/engine/sparkplug_pb.c
           /tmp/sparkplug_pb_test
