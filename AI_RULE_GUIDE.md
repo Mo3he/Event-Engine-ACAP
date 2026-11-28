@@ -864,7 +864,6 @@ Firing the rule again while it flashes the same ports restarts the count or time
   "clip_name": "alarm.wav",
   "volume": 80,
   "loop_count": 1,
-  "channel": 1,
   "while_active": false
 }
 ```
@@ -874,7 +873,6 @@ Firing the rule again while it flashes the same ports restarts the count or time
 | `clip_name` | string | — | Name of audio clip as uploaded to the camera |
 | `volume` | integer 0–100 | `70` | Playback volume |
 | `loop_count` | integer | `1` | Number of times to play. Set to `0` with `while_active: true` to loop indefinitely |
-| `channel` | integer | `1` | Audio output channel |
 | `while_active` | boolean | `false` | Loop indefinitely and auto-stop when trigger deactivates. Requires `loop_count: 0` |
 
 ### 8. `siren_light` — Siren/Light Profile

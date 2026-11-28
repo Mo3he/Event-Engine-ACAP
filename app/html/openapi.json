@@ -978,7 +978,6 @@
               "clip_name":   { "type": "string", "description": "Name or ID of the audio clip to play", "example": "alarm.wav" },
               "volume":      { "type": "integer", "minimum": 0, "maximum": 100, "description": "Playback volume (0-100). Omit to use device default." },
               "loop_count":  { "type": "integer", "minimum": 0, "default": 1, "description": "Number of times to repeat. 0 = loop indefinitely until while_active stop. 1 = play once." },
-              "channel":     { "type": "integer", "description": "Audio output channel. Omit to use device default." },
               "while_active": { "type": "boolean", "default": false, "description": "If true and loop_count is 0, stop the clip automatically when the triggering condition clears" }
             }
           }

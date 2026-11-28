@@ -306,9 +306,28 @@ static char* xml_escape(const char* s) {
     return out;
 }
 
-/* url_encode_values percent-encodes each substituted value so a '+' (timezone
- * offset) is not decoded as a space by form-urlencoded servers. */
-static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url_encode_values) {
+/* How values substituted into a template are escaped. URL mode percent-encodes
+ * so a '+' (timezone offset) is not decoded as a space by form-urlencoded
+ * servers. InfluxDB line protocol escapes per element: measurement (comma,
+ * space), tag key/value (comma, =, space), and quoted field strings (" and \). */
+enum { TPL_ESC_NONE, TPL_ESC_URL, TPL_ESC_INFLUX_MEASUREMENT, TPL_ESC_INFLUX_TAG,
+       TPL_ESC_INFLUX_STRING };
+
+static char* backslash_escape(const char* s, const char* specials) {
+    size_t n = 0;
+    for (const char* p = s; *p; p++) n += strchr(specials, *p) ? 2 : 1;
+    char* out = malloc(n + 1);
+    if (!out) return NULL;
+    char* o = out;
+    for (const char* p = s; *p; p++) {
+        if (strchr(specials, *p)) *o++ = '\\';
+        *o++ = *p;
+    }
+    *o = '\0';
+    return out;
+}
+
+static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int escape_mode) {
     if (!tmpl) return strdup("");
 
     gps_snapshot_t gps;
@@ -477,9 +496,16 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
             }
 
             char* escaped = NULL;
-            if (url_encode_values && replacement[0]) {
+            if (escape_mode == TPL_ESC_URL && replacement[0]) {
                 escaped = curl_easy_escape(NULL, replacement, 0);
                 if (escaped) replacement = escaped;
+            }
+            char* bs_escaped = NULL;
+            if (replacement[0] && escape_mode >= TPL_ESC_INFLUX_MEASUREMENT) {
+                bs_escaped = backslash_escape(replacement,
+                    escape_mode == TPL_ESC_INFLUX_MEASUREMENT ? ", " :
+                    escape_mode == TPL_ESC_INFLUX_TAG ? ",= " : "\"\\");
+                if (bs_escaped) replacement = bs_escaped;
             }
 
             size_t rlen = strlen(replacement);
@@ -487,6 +513,7 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
                 LOG_WARN("template expansion exceeded %d bytes, truncating", MAX_TEMPLATE_OUTPUT);
                 curl_free(escaped);
                 free(xml_escaped);
+                free(bs_escaped);
                 free(dyn_replacement);
                 break;
             }
@@ -499,6 +526,7 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
             out[out_len] = '\0';
             curl_free(escaped);
             free(xml_escaped);
+            free(bs_escaped);
             free(dyn_replacement);
             p = end + 2;
         } else {
@@ -514,12 +542,12 @@ static char* expand_template_impl(const char* tmpl, cJSON* trigger_data, int url
 }
 
 char* Actions_Expand_Template(const char* tmpl, cJSON* trigger_data) {
-    return expand_template_impl(tmpl, trigger_data, 0);
+    return expand_template_impl(tmpl, trigger_data, TPL_ESC_NONE);
 }
 
 /* URL-safe variant: percent-encodes each substituted value. */
 static char* expand_url_template(const char* tmpl, cJSON* trigger_data) {
-    return expand_template_impl(tmpl, trigger_data, 1);
+    return expand_template_impl(tmpl, trigger_data, TPL_ESC_URL);
 }
 
 /*-----------------------------------------------------
@@ -3175,7 +3203,6 @@ static void action_audio_clip(const char* rule_id, cJSON* cfg) {
 
     cJSON* volume_j  = cJSON_GetObjectItem(cfg, "volume");
     cJSON* loop_j    = cJSON_GetObjectItem(cfg, "loop_count");
-    cJSON* channel_j = cJSON_GetObjectItem(cfg, "channel");
     cJSON* wa_j      = cJSON_GetObjectItem(cfg, "while_active");
     int loop_count   = (loop_j && cJSON_IsNumber(loop_j)) ? (int)loop_j->valuedouble : 1;
 
@@ -3191,8 +3218,8 @@ static void action_audio_clip(const char* rule_id, cJSON* cfg) {
         n += snprintf(req + n, sizeof(req) - n, "&volume=%d", (int)volume_j->valuedouble);
     if (loop_j    && cJSON_IsNumber(loop_j))
         n += snprintf(req + n, sizeof(req) - n, "&repeat=%d", loop_count);
-    if (channel_j && cJSON_IsNumber(channel_j))
-        n += snprintf(req + n, sizeof(req) - n, "&channel=%d", (int)channel_j->valuedouble);
+    /* "channel" in older rules is ignored: the Media Clip API has no such
+     * parameter, and unknown parameters can make a device refuse the request. */
     (void)n;
 
     char* resp = VAPIX_GET(cfg, req);
@@ -3619,10 +3646,12 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
     const char* fields_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "fields"));
     if (!fields_tmpl || !fields_tmpl[0]) { LOG_ACTION_ERR("influxdb_write: no fields"); return; }
 
-    char* measurement = Actions_Expand_Template(meas_tmpl, trigger_data);
-    char* fields      = Actions_Expand_Template(fields_tmpl, trigger_data);
+    /* Template values are escaped for their place in the line; the template's
+     * own commas, = and quotes stay as written. */
+    char* measurement = expand_template_impl(meas_tmpl, trigger_data, TPL_ESC_INFLUX_MEASUREMENT);
+    char* fields      = expand_template_impl(fields_tmpl, trigger_data, TPL_ESC_INFLUX_STRING);
     const char* tags_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tags"));
-    char* tags = tags_tmpl ? Actions_Expand_Template(tags_tmpl, trigger_data) : NULL;
+    char* tags = tags_tmpl ? expand_template_impl(tags_tmpl, trigger_data, TPL_ESC_INFLUX_TAG) : NULL;
 
     /* Build line protocol: measurement[,tags] fields */
     char line[2048];
@@ -4625,7 +4654,7 @@ static void action_light_control(cJSON* cfg) {
  * actions can use {{trigger.aoa_total}}, {{trigger.aoa_human}}, etc. */
 static void action_aoa_get_counts(cJSON* cfg, cJSON* trigger_data) {
     cJSON* sid_j = cJSON_GetObjectItem(cfg, "scenario_id");
-    if (!sid_j) { LOG_WARN("aoa_get_counts: no scenario_id"); return; }
+    if (!sid_j) { LOG_ACTION_ERR("aoa_get_counts: no scenario_id"); return; }
     int scenario_id = (int)sid_j->valuedouble;
 
     char body[256];
@@ -4634,11 +4663,14 @@ static void action_aoa_get_counts(cJSON* cfg, cJSON* trigger_data) {
         "\"params\":{\"scenario\":%d}}", scenario_id);
 
     char* raw = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", body);
-    if (!raw) { LOG_WARN("aoa_get_counts: VAPIX call failed for scenario %d", scenario_id); return; }
+    /* Object Analytics answers 200 with {"error": ...} for a scenario that
+     * does not exist or does not count crossings. */
+    if (!vapix_ok(cfg, "aoa_get_counts", raw)) { free(raw); return; }
+    if (!raw) { LOG_ACTION_ERR("aoa_get_counts: no answer from Object Analytics"); return; }
 
     cJSON* root = cJSON_Parse(raw);
     free(raw);
-    if (!root) { LOG_WARN("aoa_get_counts: invalid JSON response"); return; }
+    if (!root) { LOG_ACTION_ERR("aoa_get_counts: invalid JSON response"); return; }
 
     cJSON* data = cJSON_GetObjectItem(root, "data");
     if (data) {
@@ -4674,20 +4706,61 @@ static void action_aoa_get_counts(cJSON* cfg, cJSON* trigger_data) {
             "{\"method\":\"resetAccumulatedCounts\",\"apiVersion\":\"1.0\","
             "\"params\":{\"scenario\":%d}}", scenario_id);
         char* rresp = ACAP_VAPIX_Post_Path("/local/objectanalytics/control.cgi", rbody);
-        if (rresp) free(rresp);
+        vapix_ok(cfg, "aoa_get_counts reset", rresp);
+        free(rresp);
     }
 }
 
 /* acap_control — start, stop, or restart another installed ACAP application */
 static void action_acap_control(cJSON* cfg) {
     const char* package = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "package"));
-    if (!package || !package[0]) { LOG_WARN("acap_control: no package specified"); return; }
+    if (!package || !package[0]) { LOG_ACTION_ERR("acap_control: no package specified"); return; }
+    for (const char* c = package; *c; c++) {
+        if (!isalnum((unsigned char)*c) && *c != '_' && *c != '-') {
+            LOG_ACTION_ERR("acap_control: invalid package name '%.64s'", package);
+            return;
+        }
+    }
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     if (!op) op = "start";
+    if (strcmp(op, "start") != 0 && strcmp(op, "stop") != 0 && strcmp(op, "restart") != 0) {
+        LOG_ACTION_ERR("acap_control: operation must be start, stop or restart, not '%.32s'", op);
+        return;
+    }
+    /* AXIS OS 13 restarts an app that is told to start while running (and
+     * only then answers "already running"), so a running app is left alone. */
+    if (strcmp(op, "start") == 0) {
+        char* list = VAPIX_GET(cfg, "applications/list.cgi");
+        if (!vapix_ok(cfg, "acap_control", NULL)) { free(list); return; }
+        char needle[96];
+        snprintf(needle, sizeof(needle), "<application Name=\"%s\"", package);
+        const char* app = list ? strstr(list, needle) : NULL;
+        const char* app_end = app ? strchr(app, '>') : NULL;
+        const char* status = app ? strstr(app, " Status=\"") : NULL;
+        int running = status && app_end && status < app_end &&
+                      strncmp(status + 9, "Running\"", 8) == 0;
+        int listed = list && strstr(list, "<application ") != NULL;
+        free(list);
+        if (running) return;
+        if (listed && !app) { LOG_ACTION_ERR("acap_control: %s is not installed", package); return; }
+    }
+
     char req[256];
     snprintf(req, sizeof(req), "applications/control.cgi?package=%s&action=%s", package, op);
     char* resp = VAPIX_GET(cfg, req);
-    if (resp) free(resp);
+    if (!vapix_ok(cfg, "acap_control", NULL)) { free(resp); return; }
+
+    /* control.cgi answers 200 with "Error: N": 4 = not installed, 6 = already
+     * running, 7 = not running. Starting a running app or stopping a stopped
+     * one already has the wanted result. */
+    const char* t = resp ? resp : "";
+    while (*t == ' ' || *t == '\r' || *t == '\n') t++;
+    int code = strncmp(t, "Error:", 6) == 0 ? atoi(t + 6) : 0;
+    if (code == 4)
+        LOG_ACTION_ERR("acap_control: %s is not installed", package);
+    else if (!((code == 6 && strcmp(op, "start") == 0) || (code == 7 && strcmp(op, "stop") == 0)))
+        vapix_ok(cfg, "acap_control", resp);
+    free(resp);
 }
 
 /*-----------------------------------------------------
@@ -4747,52 +4820,62 @@ typedef struct {
 
 static DigestBuf digest_bufs[MAX_DIGEST_BUFFERS];
 static int       digest_buf_count = 0;
+/* Rules are edited from API threads while the 1 s tick flushes buffers. */
+static GMutex    digest_lock;
 
-static DigestBuf* digest_find_or_create(const char* rule_id, cJSON* cfg) {
-    for (int i = 0; i < digest_buf_count; i++)
-        if (strcmp(digest_bufs[i].rule_id, rule_id) == 0) return &digest_bufs[i];
-    if (digest_buf_count >= MAX_DIGEST_BUFFERS) return NULL;
-
-    DigestBuf* d = &digest_bufs[digest_buf_count++];
-    memset(d, 0, sizeof(*d));
-    snprintf(d->rule_id, sizeof(d->rule_id), "%s", rule_id);
+/* Takes the rule's current digest settings, keeping the queued lines, so an
+ * edit applies to the next delivery. */
+static void digest_apply_config_locked(DigestBuf* d, cJSON* cfg) {
     const char* via = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "deliver_via"));
     snprintf(d->deliver_via, sizeof(d->deliver_via), "%s", via ? via : "slack");
+    cJSON_Delete(d->config);
     d->config = cJSON_Duplicate(cfg, 1);
     cJSON* iv = cJSON_GetObjectItem(cfg, "interval");
-    d->interval = iv ? (int)iv->valuedouble : 300;
+    d->interval = cJSON_IsNumber(iv) ? (int)iv->valuedouble : 300;
     if (d->interval < 30) d->interval = 30;
-    d->last_flush = time(NULL);
-    return d;
 }
 
-static void digest_flush(DigestBuf* d) {
-    if (d->line_count == 0) return;
+static DigestBuf* digest_find_locked(const char* rule_id) {
+    for (int i = 0; i < digest_buf_count; i++)
+        if (strcmp(digest_bufs[i].rule_id, rule_id) == 0) return &digest_bufs[i];
+    return NULL;
+}
+
+static void digest_free_locked(DigestBuf* d) {
+    for (int i = 0; i < d->line_count; i++) free(d->lines[i]);
+    cJSON_Delete(d->config);
+    int index = (int)(d - digest_bufs);
+    if (index < digest_buf_count - 1)
+        digest_bufs[index] = digest_bufs[digest_buf_count - 1];
+    digest_buf_count--;
+}
+
+/* Moves the queued lines into a delivery payload (caller owns it), or NULL. */
+static cJSON* digest_take_locked(DigestBuf* d) {
+    if (d->line_count == 0) return NULL;
 
     size_t total_len = 0;
     for (int i = 0; i < d->line_count; i++)
         total_len += strlen(d->lines[i]) + 1;
     char* combined = malloc(total_len + 64);
-    if (!combined) return;
-    combined[0] = '\0';
-
-    char header[64];
-    snprintf(header, sizeof(header), "[%d events]\n", d->line_count);
-    strcat(combined, header);
-
+    if (!combined) return NULL;
+    int n = snprintf(combined, 64, "[%d events]\n", d->line_count);
+    char* o = combined + n;
     for (int i = 0; i < d->line_count; i++) {
-        strcat(combined, d->lines[i]);
-        strcat(combined, "\n");
+        size_t len = strlen(d->lines[i]);
+        memcpy(o, d->lines[i], len);
+        o += len;
+        *o++ = '\n';
         free(d->lines[i]);
         d->lines[i] = NULL;
     }
+    *o = '\0';
     d->line_count = 0;
     d->last_flush = time(NULL);
 
     cJSON* payload = cJSON_Duplicate(d->config, 1);
     cJSON_DeleteItemFromObject(payload, "type");
     cJSON_AddStringToObject(payload, "type", d->deliver_via);
-
     /* Fill every text field a handler may read: message (chat), body (email), payload (MQTT) */
     cJSON_DeleteItemFromObject(payload, "message");
     cJSON_AddStringToObject(payload, "message", combined);
@@ -4800,45 +4883,103 @@ static void digest_flush(DigestBuf* d) {
     cJSON_AddStringToObject(payload, "body", combined);
     cJSON_DeleteItemFromObject(payload, "payload");
     cJSON_AddStringToObject(payload, "payload", combined);
-
-    cJSON* empty_td = cJSON_CreateObject();
-    if (strcmp(d->deliver_via, "slack") == 0)
-        action_slack_webhook(payload, empty_td);
-    else if (strcmp(d->deliver_via, "teams") == 0)
-        action_teams_webhook(payload, empty_td);
-    else if (strcmp(d->deliver_via, "email") == 0)
-        action_email(payload, empty_td);
-    else if (strcmp(d->deliver_via, "mqtt") == 0)
-        action_mqtt_publish(NULL, payload, empty_td);
-    else if (strcmp(d->deliver_via, "telegram") == 0)
-        action_telegram(payload, empty_td);
-    cJSON_Delete(payload);
-    cJSON_Delete(empty_td);
     free(combined);
+    return payload;
+}
+
+static void digest_deliver(cJSON* payload) {
+    const char* via = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "type"));
+    cJSON* empty_td = cJSON_CreateObject();
+    if (strcmp(via, "slack") == 0)
+        action_slack_webhook(payload, empty_td);
+    else if (strcmp(via, "teams") == 0)
+        action_teams_webhook(payload, empty_td);
+    else if (strcmp(via, "email") == 0)
+        action_email(payload, empty_td);
+    else if (strcmp(via, "mqtt") == 0)
+        action_mqtt_publish(NULL, payload, empty_td);
+    else if (strcmp(via, "telegram") == 0)
+        action_telegram(payload, empty_td);
+    else
+        LOG_WARN("digest: unknown deliver_via '%s'", via);
+    cJSON_Delete(empty_td);
+    cJSON_Delete(payload);
 }
 
 static void action_digest(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
-    DigestBuf* d = digest_find_or_create(rule_id, cfg);
-    if (!d) { LOG_WARN("digest: too many buffers"); return; }
-
     const char* line_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "line"));
     if (!line_tmpl) line_tmpl = "{{timestamp}} — {{trigger_json}}";
     char* line = Actions_Expand_Template(line_tmpl, trigger_data);
 
-    if (d->line_count < MAX_DIGEST_LINES)
-        d->lines[d->line_count++] = line;
-    else
-        free(line); /* buffer full, drop */
+    /* A test run (no rule) delivers its one line at once, to check delivery. */
+    if (!rule_id) {
+        DigestBuf once;
+        memset(&once, 0, sizeof(once));
+        digest_apply_config_locked(&once, cfg);
+        once.lines[once.line_count++] = line;
+        cJSON* payload = digest_take_locked(&once);
+        cJSON_Delete(once.config);
+        if (payload) digest_deliver(payload);
+        return;
+    }
+
+    g_mutex_lock(&digest_lock);
+    DigestBuf* d = digest_find_locked(rule_id);
+    if (!d && digest_buf_count < MAX_DIGEST_BUFFERS) {
+        d = &digest_bufs[digest_buf_count++];
+        memset(d, 0, sizeof(*d));
+        snprintf(d->rule_id, sizeof(d->rule_id), "%s", rule_id);
+        d->last_flush = time(NULL);
+    }
+    if (d) {
+        digest_apply_config_locked(d, cfg);
+        if (d->line_count < MAX_DIGEST_LINES) {
+            d->lines[d->line_count++] = line;
+            line = NULL;
+        }
+    }
+    g_mutex_unlock(&digest_lock);
+
+    if (!d) LOG_ACTION_ERR("digest: more than %d rules are collecting digests", MAX_DIGEST_BUFFERS);
+    free(line); /* buffer full: dropped */
+}
+
+void Actions_Digest_Rule_Changed(const char* rule_id, cJSON* actions) {
+    if (!rule_id) return;
+    cJSON* cfg = NULL;
+    cJSON* action;
+    cJSON_ArrayForEach(action, actions) {
+        const char* type = cJSON_GetStringValue(cJSON_GetObjectItem(action, "type"));
+        if (type && strcmp(type, "digest") == 0) {
+            cfg = action;
+            break;
+        }
+    }
+    g_mutex_lock(&digest_lock);
+    DigestBuf* d = digest_find_locked(rule_id);
+    if (d) {
+        if (cfg) digest_apply_config_locked(d, cfg);
+        else     digest_free_locked(d); /* rule deleted or its digest removed */
+    }
+    g_mutex_unlock(&digest_lock);
 }
 
 /* Called from the 1 s Engine_Tick timer in main.c */
 void Actions_Digest_Tick(void) {
     time_t now = time(NULL);
+    cJSON* due[MAX_DIGEST_BUFFERS];
+    int ndue = 0;
+    g_mutex_lock(&digest_lock);
     for (int i = 0; i < digest_buf_count; i++) {
         DigestBuf* d = &digest_bufs[i];
-        if (d->line_count > 0 && (now - d->last_flush) >= d->interval)
-            digest_flush(d);
+        if (d->line_count > 0 && (now - d->last_flush) >= d->interval) {
+            cJSON* payload = digest_take_locked(d);
+            if (payload) due[ndue++] = payload;
+        }
     }
+    g_mutex_unlock(&digest_lock);
+    for (int i = 0; i < ndue; i++)
+        digest_deliver(due[i]);
 }
 
 /* A value to write as text: templates expanded, numbers as written. */
