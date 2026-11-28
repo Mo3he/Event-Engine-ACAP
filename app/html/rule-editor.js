@@ -3470,8 +3470,8 @@ function actionFields(a, rowIdx) {
       </div>
       <div class="form-group" style="flex:0 0 100px;">
         <label>Device ID</label>
-        <input type="number" data-k="id" value="${escHtml(a.id || 1)}" min="1">
-        <div class="form-hint">Use <b>getServiceInfo</b> to find IDs.</div>
+        <input type="number" data-k="id" value="${escHtml(a.id ?? 0)}" min="0">
+        <div class="form-hint">Usually 0 = wiper, 1 = speed dry (<b>getServiceInfo</b> lists them).</div>
       </div>
       <div class="form-group" style="flex:0 0 130px;">
         <label>Duration (s, optional)</label>
@@ -4261,7 +4261,7 @@ function normalizeAction(a) {
   if (a.type === 'snapshot_upload' || a.type === 'guard_tour' || a.type === 'ir_cut_filter' || a.type === 'privacy_mask')
     if (out.channel !== undefined) out.channel = parseInt(out.channel) || 1;
   if (a.type === 'wiper')
-    if (out.id !== undefined) out.id = parseInt(out.id) || 1;
+    if (out.id !== undefined) { const id = parseInt(out.id); out.id = Number.isNaN(id) ? 0 : id; }
   if (a.type === 'aoa_get_counts') {
     out.scenario_id = parseInt(a.scenario_id) || 1;
     out.reset_after = a.reset_after === true;

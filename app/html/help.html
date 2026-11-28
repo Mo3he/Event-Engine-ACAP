@@ -647,12 +647,12 @@ Content-Type: application/json
       </table>
 
       <h3 id="cond-var">Variable Compare</h3>
-      <p>Compare a named variable against a string value.</p>
+      <p>Compare a named variable against a value. When both are numbers they compare as numbers (10 is greater than 9); otherwise as text.</p>
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>Variable name</strong></td><td>Name of the variable to check. Use <code>system.armed</code> for the arm/disarm pattern (see <a href="#arm-disarm">Arm / Disarm</a>).</td></tr>
         <tr><td><strong>Operator</strong></td><td><em>equals</em> or <em>not equals</em>.</td></tr>
-        <tr><td><strong>Value</strong></td><td>String to compare against.</td></tr>
+        <tr><td><strong>Value</strong></td><td>Value to compare against: a number or text.</td></tr>
       </table>
 
       <h3 id="cond-trigger">Trigger Data</h3>
@@ -927,7 +927,7 @@ Content-Type: application/json
       <table>
         <tr><th>Option</th><th>Description</th></tr>
         <tr><td><strong>Operation</strong></td><td><em>Start</em> or <em>Stop</em>.</td></tr>
-        <tr><td><strong>Device ID</strong></td><td>Which wiper device to control (for multi-sensor cameras).</td></tr>
+        <tr><td><strong>Device ID</strong></td><td>Which Clear View service to run. Usually 0 is the wiper and 1 is speed dry; the camera's <code>getServiceInfo</code> lists them.</td></tr>
         <tr><td><strong>Duration</strong></td><td>Optional. Seconds to run the wiper (for cameras with variable-duration wipers).</td></tr>
       </table>
 

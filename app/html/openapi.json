@@ -74,7 +74,7 @@
           },
           "max_exec_period": {
             "type": "string",
-            "enum": ["", "minute", "hour", "day", "lifetime"],
+            "enum": ["", "minute", "hour", "day"],
             "default": "",
             "description": "Period for max_executions counter. Empty string means lifetime total."
           },
@@ -110,7 +110,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "modbus_read", "modbus_error", "sparkplug_command", "gps_update", "gps_speed", "gps_geofence", "gps_fix"],
+            "enum": ["vapix_event", "http_webhook", "schedule", "mqtt_message", "io_input", "counter_threshold", "rule_fired", "aoa_scenario", "manual", "modbus_read", "modbus_error", "sparkplug_command", "gps_update", "gps_speed", "gps_geofence", "gps_fix"],
             "description": "Trigger type"
           }
         }
@@ -489,7 +489,7 @@
               "event": { "type": "string", "enum": ["enter", "exit", "both"], "default": "enter" },
               "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
               "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
-              "radius_m": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+              "radius_m": { "type": "number", "minimum": 0, "exclusiveMinimum": true, "maximum": 100000 },
               "points": {
                 "type": "array", "minItems": 3, "maxItems": 32,
                 "items": {
@@ -512,6 +512,34 @@
             "properties": {
               "type": { "type": "string", "enum": ["gps_fix"] },
               "event": { "type": "string", "enum": ["acquired", "lost", "stale"], "default": "acquired" }
+            }
+          }
+        ]
+      },
+
+      "TriggerAoaScenario": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "description": "Fires when an AXIS Object Analytics scenario becomes active (event topic CameraApplicationPlatform/ObjectAnalytics/Device1Scenario<N> with active=true). An inactive event fires nothing and stops a running siren_light started by the rule. Trigger data: scenario_id plus the event's data fields.",
+            "properties": {
+              "type":         { "type": "string", "enum": ["aoa_scenario"] },
+              "scenario_id":  { "type": "integer", "default": 1, "description": "AOA scenario number (N in Device1Scenario<N>)", "example": 1 },
+              "object_class": { "type": "string", "default": "", "description": "Optional filter: fire only when the event's reason field equals this value exactly (e.g. human). Empty or absent: any object.", "example": "human" }
+            }
+          }
+        ]
+      },
+
+      "TriggerManual": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Trigger" },
+          {
+            "type": "object",
+            "description": "No subscription and no configuration. The rule fires only when run explicitly: POST /fire with the rule id (conditions are checked; trigger data is the optional trigger_data object), or a run_rule action from another rule.",
+            "properties": {
+              "type": { "type": "string", "enum": ["manual"] }
             }
           }
         ]
@@ -707,6 +735,46 @@
         ]
       },
 
+      "ConditionDayNight": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Condition" },
+          {
+            "type": "object",
+            "description": "Pass only during day or only during night, computed from sunrise and sunset at the given location. Day runs from sunrise + sunrise_offset_minutes until sunset + sunset_offset_minutes and may cross midnight; if the offsets make that window empty it is night all day. With no sunrise or sunset, midnight sun counts as day and polar night as night.",
+            "properties": {
+              "type":  { "type": "string", "enum": ["day_night"] },
+              "state": { "type": "string", "enum": ["day", "night"], "default": "day", "description": "Required state. Any value other than day is treated as night." },
+              "lat":   { "type": "number", "default": 0, "description": "Latitude in decimal degrees. When lat and lon are both 0 or absent, the engine location (settings engine.latitude/longitude) is used.", "example": 59.3293 },
+              "lon":   { "type": "number", "default": 0, "description": "Longitude in decimal degrees (see lat)", "example": 18.0686 },
+              "sunrise_offset_minutes": { "type": "number", "default": 0, "minimum": -720, "maximum": 720, "description": "Shift sunrise by this many minutes (positive = later). Clamped to ±720.", "example": 60 },
+              "sunset_offset_minutes":  { "type": "number", "default": 0, "minimum": -720, "maximum": 720, "description": "Shift sunset by this many minutes (positive = later). Clamped to ±720.", "example": -30 }
+            }
+          }
+        ]
+      },
+
+      "ConditionAoaOccupancy": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Condition" },
+          {
+            "type": "object",
+            "description": "Query the current AXIS Object Analytics occupancy of a scenario (getOccupancy on /local/objectanalytics/control.cgi) and compare it with a threshold. Fails if scenario_id, op or value is missing, or the count is not available. When remote_host is set, queries a remote Axis device.",
+            "properties": {
+              "type":         { "type": "string", "enum": ["aoa_occupancy"] },
+              "scenario_id":  { "type": "integer", "description": "AOA scenario number", "example": 1 },
+              "object_class": { "type": "string", "description": "Key of the occupancy data to compare (e.g. human, car). Empty, absent or \"any\": the total count.", "example": "human" },
+              "op":           { "type": "string", "enum": ["gt", "gte", "lt", "lte", "eq"], "example": "gte" },
+              "value":        { "type": "number", "description": "Threshold to compare the count against", "example": 3 },
+              "remote_host":  { "type": "string", "description": "IP or hostname of a remote Axis device" },
+              "remote_user":  { "type": "string", "description": "Username for the remote device" },
+              "remote_pass":  { "type": "string", "format": "password", "description": "Password for the remote device. Secret: replaced with __REDACTED__ in rule exports unless include_secrets=1." },
+              "remote_https": { "type": "boolean", "default": false, "description": "Reach the remote device over HTTPS (required for OS 13 cameras that are HTTPS-only). The device's self-signed certificate is accepted." }
+            },
+            "required": ["scenario_id", "op", "value"]
+          }
+        ]
+      },
+
       "Action": {
         "type": "object",
         "required": ["type"],
@@ -721,12 +789,15 @@
               "fire_vapix_event", "send_syslog", "delay",
               "guard_tour", "set_device_param", "snapshot_upload",
               "ir_cut_filter", "privacy_mask", "wiper", "light_control", "acap_control",
-              "speaker_display", "modbus_write", "sparkplug_publish"
+              "speaker_display", "modbus_write", "sparkplug_publish",
+              "set_rule_enabled", "email", "slack_webhook", "teams_webhook", "telegram",
+              "ftp_upload", "influxdb_write", "digest", "aoa_get_counts",
+              "paging_console_execute", "paging_console_button"
             ]
           },
           "remote_host": {
             "type": "string",
-            "description": "IP address or hostname of a remote Axis device to execute this action on. When set, the action targets the remote device via VAPIX over HTTP using digest authentication. Supported by: recording, overlay_text, overlay_image, ptz_preset, io_output, io_flash, audio_clip, siren_light, guard_tour, set_device_param, ir_cut_filter, privacy_mask, wiper, light_control, acap_control, speaker_display.",
+            "description": "IP address or hostname of a remote Axis device to execute this action on. When set, the action targets the remote device via VAPIX over HTTP using digest authentication. Supported by: recording, overlay_text, overlay_image, ptz_preset, io_output, io_flash, audio_clip, siren_light, guard_tour, set_device_param, ir_cut_filter, privacy_mask, wiper, light_control, acap_control, speaker_display, paging_console_execute, paging_console_button.",
             "example": "192.168.1.100"
           },
           "remote_user": {
@@ -1220,7 +1291,7 @@
             "properties": {
               "type":      { "type": "string", "enum": ["wiper"] },
               "operation": { "type": "string", "enum": ["start", "stop"], "default": "start" },
-              "id":        { "type": "integer", "default": 1, "minimum": 1, "description": "Clear view device ID from getServiceInfo" },
+              "id":        { "type": "integer", "default": 0, "minimum": 0, "description": "Clear View service ID from getServiceInfo: usually 0 = wiper, 1 = speed dry" },
               "duration":  { "type": "integer", "minimum": 1, "description": "Duration in seconds. Only applicable for variable-duration wiper services. Omit to use device default." }
             }
           }
@@ -1279,8 +1350,7 @@
               "duration_type":   { "type": "string", "enum": ["repetitions", "time", "timeCompleteMessage"], "description": "Duration mode. Omit for indefinite display." },
               "duration_value":  { "type": "integer", "minimum": 1, "description": "Number of repetitions, or milliseconds, depending on duration_type." },
               "while_active":    { "type": "boolean", "default": false, "description": "Only valid when duration_type is omitted. If true, automatically stops the display when the triggering condition clears." }
-            },
-            "required": []
+            }
           }
         ]
       },
@@ -1343,6 +1413,217 @@
                 }
               }
             }
+          }
+        ]
+      },
+
+      "ActionSetRuleEnabled": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Enable or disable another rule by ID.",
+            "properties": {
+              "type":    { "type": "string", "enum": ["set_rule_enabled"] },
+              "rule_id": { "type": "string", "format": "uuid", "description": "ID of the rule to enable or disable" },
+              "enabled": { "type": "boolean", "default": true }
+            },
+            "required": ["rule_id"]
+          }
+        ]
+      },
+
+      "ActionEmail": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Send an email. The SMTP server, sender, credentials and TLS options come from the smtp section of /settings; the action only carries the message.",
+            "properties": {
+              "type":    { "type": "string", "enum": ["email"] },
+              "to":      { "type": "string", "description": "Recipients, separated by commas or semicolons", "example": "security@example.com" },
+              "subject": { "type": "string", "default": "Event Engine Alert", "description": "Subject. Supports {{variable}} substitution.", "example": "Alert — {{camera.model}}" },
+              "body":    { "type": "string", "default": "", "description": "Plain-text body. Supports {{variable}} substitution.", "example": "Motion detected at {{time}} on {{camera.ip}}" },
+              "attach_snapshot": { "type": "boolean", "default": false, "description": "Attach a JPEG snapshot (snapshot.jpg) and expose it as {{trigger.snapshot_base64}} in subject/body" }
+            },
+            "required": ["to"]
+          }
+        ]
+      },
+
+      "ActionSlackWebhook": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "POST a message ({\"text\": ...}) to a Slack incoming webhook.",
+            "properties": {
+              "type":        { "type": "string", "enum": ["slack_webhook"] },
+              "webhook_url": { "type": "string", "format": "password", "description": "Slack incoming webhook URL. Secret: replaced with __REDACTED__ in rule exports unless include_secrets=1.", "example": "https://hooks.slack.com/services/T000/B000/XXXX" },
+              "message":     { "type": "string", "default": "", "description": "Message text. Supports {{variable}} substitution.", "example": ":rotating_light: Motion on {{camera.model}} at {{time}}" },
+              "channel":     { "type": "string", "description": "Optional channel override", "example": "#security-alerts" },
+              "username":    { "type": "string", "description": "Optional sender name override", "example": "Axis Camera" },
+              "attach_snapshot": { "type": "boolean", "default": false, "description": "Capture a JPEG snapshot and expose it as {{trigger.snapshot_base64}} for template expansion. No image is attached to the Slack message." }
+            },
+            "required": ["webhook_url"]
+          }
+        ]
+      },
+
+      "ActionTeamsWebhook": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "POST an Adaptive Card message to a Microsoft Teams Workflows / Power Automate webhook.",
+            "properties": {
+              "type":        { "type": "string", "enum": ["teams_webhook"] },
+              "webhook_url": { "type": "string", "format": "password", "description": "Teams webhook URL. Secret: replaced with __REDACTED__ in rule exports unless include_secrets=1." },
+              "title":       { "type": "string", "description": "Optional card title (bold). Supports {{variable}} substitution.", "example": "Motion Detected" },
+              "message":     { "type": "string", "default": "", "description": "Card text. Supports {{variable}} substitution.", "example": "Camera {{camera.serial}} at {{time}}" },
+              "theme_color": { "type": "string", "description": "Sent as the card's accentColor", "example": "FF6600" },
+              "attach_snapshot": { "type": "boolean", "default": false, "description": "Capture a JPEG snapshot and expose it as {{trigger.snapshot_base64}} for template expansion. No image is attached to the card." }
+            },
+            "required": ["webhook_url"]
+          }
+        ]
+      },
+
+      "ActionTelegram": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Send a message through the Telegram Bot API (sendMessage, or sendPhoto with the message as caption when attach_snapshot is set).",
+            "properties": {
+              "type":       { "type": "string", "enum": ["telegram"] },
+              "bot_token":  { "type": "string", "format": "password", "description": "Telegram bot token. Secret: replaced with __REDACTED__ in rule exports unless include_secrets=1.", "example": "123456:ABC-DEF" },
+              "chat_id":    { "type": "string", "description": "Chat, group or channel ID. Must be a JSON string.", "example": "-1001234567890" },
+              "message":    { "type": "string", "default": "", "description": "Message text (caption with a snapshot). Supports {{variable}} substitution.", "example": "Alert on {{camera.model}} at {{time}}" },
+              "parse_mode": { "type": "string", "description": "Passed to Telegram unchanged when not empty (Markdown, MarkdownV2 or HTML)", "example": "Markdown" },
+              "attach_snapshot": { "type": "boolean", "default": false, "description": "Send a JPEG snapshot with the message as caption. Falls back to a text message if the snapshot cannot be captured." },
+              "disable_preview": { "type": "boolean", "default": false, "description": "Disable link previews (text messages only)" }
+            },
+            "required": ["bot_token", "chat_id"]
+          }
+        ]
+      },
+
+      "ActionFtpUpload": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Capture a JPEG snapshot (channel 1) and upload it with libcurl. Missing remote directories are created.",
+            "properties": {
+              "type":     { "type": "string", "enum": ["ftp_upload"] },
+              "url":      { "type": "string", "description": "Destination URL including the file name (ftp://, ftps:// or sftp://). Supports {{variable}} substitution.", "example": "ftp://server.example.com/snapshots/{{camera.serial}}_{{timestamp}}.jpg" },
+              "username": { "type": "string" },
+              "password": { "type": "string", "format": "password", "description": "Secret: replaced with __REDACTED__ in rule exports unless include_secrets=1." },
+              "use_tls":  { "type": "boolean", "default": false, "description": "Require explicit FTPS (AUTH TLS) on an ftp:// URL. ftps:// is always TLS." },
+              "allow_insecure": { "type": "boolean", "default": false, "description": "Skip server certificate verification" },
+              "tls_profile": { "type": "string", "description": "Name of a TLS profile (see /certs): private CA and/or client certificate for mutual TLS. Empty or absent: public CAs, no client certificate." }
+            },
+            "required": ["url"]
+          }
+        ]
+      },
+
+      "ActionInfluxdbWrite": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Write one point in line protocol (measurement[,tags] fields) to InfluxDB. v2 posts to {url}/api/v2/write?org=&bucket= with an Authorization: Token header; v1 posts to {url}/write?db= with Basic auth (username / token).",
+            "properties": {
+              "type":        { "type": "string", "enum": ["influxdb_write"] },
+              "url":         { "type": "string", "description": "InfluxDB base URL", "example": "http://influxdb.local:8086" },
+              "version":     { "type": "string", "enum": ["v1", "v2"], "default": "v2", "description": "InfluxDB API version. Empty means v2; any other value fails the action." },
+              "measurement": { "type": "string", "description": "Measurement name. Supports {{variable}} substitution.", "example": "environment" },
+              "tags":        { "type": "string", "description": "Optional line-protocol tag set. Supports {{variable}} substitution.", "example": "camera={{camera.serial}}" },
+              "fields":      { "type": "string", "description": "Line-protocol field set. Supports {{variable}} substitution.", "example": "temperature={{trigger.Temperature|2}}" },
+              "org":         { "type": "string", "description": "v2: organization" },
+              "bucket":      { "type": "string", "description": "v2: bucket" },
+              "database":    { "type": "string", "description": "v1: database name" },
+              "username":    { "type": "string", "description": "v1: Basic auth user (auth is only sent when set)" },
+              "token":       { "type": "string", "format": "password", "description": "v2: API token. v1: Basic auth password. Secret: replaced with __REDACTED__ in rule exports unless include_secrets=1." },
+              "allow_insecure": { "type": "boolean", "default": false, "description": "Skip server certificate verification" },
+              "tls_profile": { "type": "string", "description": "Name of a TLS profile (see /certs): private CA and/or client certificate for mutual TLS. Empty or absent: public CAs, no client certificate." }
+            },
+            "required": ["url", "measurement", "fields"]
+          }
+        ]
+      },
+
+      "ActionDigest": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Buffer one line per firing (up to 200; later lines are dropped) and send them together every interval seconds through another action type. The sent text is \"[N events]\" followed by the lines; it replaces message, body and payload. Add the target's own fields to this action (e.g. webhook_url, to/subject, topic/qos/retain, bot_token/chat_id). Edits to the delivery settings apply to the next delivery.",
+            "properties": {
+              "type":        { "type": "string", "enum": ["digest"] },
+              "deliver_via": { "type": "string", "enum": ["slack", "teams", "email", "mqtt", "telegram"], "default": "slack", "description": "Delivered as slack_webhook, teams_webhook, email, mqtt_publish or telegram respectively" },
+              "interval":    { "type": "integer", "default": 300, "minimum": 30, "description": "Flush interval in seconds (values below 30 become 30)" },
+              "line":        { "type": "string", "default": "{{timestamp}} — {{trigger_json}}", "description": "Template for each buffered line" }
+            },
+            "additionalProperties": true
+          }
+        ],
+        "example": {
+          "type": "digest",
+          "deliver_via": "email",
+          "interval": 86400,
+          "line": "{{time}} — Motion detected on {{camera.model}}",
+          "to": "manager@example.com",
+          "subject": "Daily Activity Digest — {{camera.serial}}"
+        }
+      },
+
+      "ActionAoaGetCounts": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Read AXIS Object Analytics accumulated crossline counts (getAccumulatedCounts) for a scenario on this device and add them to the trigger data for later actions: {{trigger.aoa_total}}, aoa_human, aoa_car, aoa_truck, aoa_bus, aoa_bike, aoa_otherVehicle and aoa_timestamp. remote_host is not supported.",
+            "properties": {
+              "type":        { "type": "string", "enum": ["aoa_get_counts"] },
+              "scenario_id": { "type": "integer", "description": "AOA scenario number", "example": 1 },
+              "reset_after": { "type": "boolean", "default": false, "description": "Reset the accumulated counts (resetAccumulatedCounts) after reading them" }
+            },
+            "required": ["scenario_id"]
+          }
+        ]
+      },
+
+      "ActionPagingConsoleExecute": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Execute a paging console action (POST /config/rest/paging-console-actions/v1/actions/{action_id}/execute). Supports remote_host.",
+            "properties": {
+              "type":      { "type": "string", "enum": ["paging_console_execute"] },
+              "action_id": { "type": "string", "pattern": "^[A-Za-z0-9-]+$", "description": "Paging console action ID (letters, digits and hyphens only)" }
+            },
+            "required": ["action_id"]
+          }
+        ]
+      },
+
+      "ActionPagingConsoleButton": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Action" },
+          {
+            "type": "object",
+            "description": "Assign a paging console action to a button slot on a page, or clear the slot (reads the page from /config/rest/paging-console-button-layout/v1/pages/{page_id}, updates actionLayout and writes it back). Supports remote_host.",
+            "properties": {
+              "type":      { "type": "string", "enum": ["paging_console_button"] },
+              "page_id":   { "type": "string", "pattern": "^[A-Za-z0-9-]+$", "description": "Paging console page ID (letters, digits and hyphens only)" },
+              "slot":      { "type": "integer", "minimum": 1, "maximum": 32, "description": "Button slot, 1-based" },
+              "action_id": { "type": "string", "description": "Action ID to assign (letters, digits and hyphens only). Empty or absent clears the slot." }
+            },
+            "required": ["page_id", "slot"]
           }
         ]
       },
@@ -1472,19 +1753,6 @@
                         "topic2": { "type": "object", "additionalProperties": { "type": "string" } },
                         "topic3": { "type": "object", "additionalProperties": { "type": "string" } }
                       },
-                      "gps": {
-                        "type": "object",
-                        "description": "NMEA 0183 GPS input. A fix is considered stale after stale_after_s without a valid update.",
-                        "properties": {
-                          "enabled": { "type": "boolean", "default": false },
-                          "source": { "type": "string", "enum": ["serial", "udp", "tcp_server", "tcp_client"], "default": "serial" },
-                          "device": { "type": "string", "default": "auto", "description": "Serial device path; auto resolves the camera's configured serial port." },
-                          "baud": { "type": "integer", "enum": [0, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200], "default": 0, "description": "Serial baud rate; 0 preserves the camera's existing serial configuration." },
-                          "host": { "type": "string", "default": "127.0.0.1", "description": "Remote host for tcp_client. Listeners bind on all interfaces." },
-                          "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5010 },
-                          "stale_after_s": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 5 }
-                        }
-                      },
                       "example": {
                         "topic0": { "tnsaxis": "Device" },
                         "topic1": { "tnsaxis": "IO" },
@@ -1500,6 +1768,19 @@
                   }
                 }
               }
+            }
+          },
+          "gps": {
+            "type": "object",
+            "description": "NMEA 0183 GPS input. A fix is considered stale after stale_after_s without a valid update.",
+            "properties": {
+              "enabled": { "type": "boolean", "default": false },
+              "source": { "type": "string", "enum": ["serial", "udp", "tcp_server", "tcp_client"], "default": "serial" },
+              "device": { "type": "string", "default": "auto", "description": "Serial device path; auto resolves the camera's configured serial port." },
+              "baud": { "type": "integer", "enum": [0, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200], "default": 0, "description": "Serial baud rate; 0 preserves the camera's existing serial configuration." },
+              "host": { "type": "string", "default": "127.0.0.1", "description": "Remote host for tcp_client. Listeners bind on all interfaces." },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5010 },
+              "stale_after_s": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 5 }
             }
           }
         }

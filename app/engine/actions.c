@@ -3171,7 +3171,7 @@ static int resolve_clip_id(const char* clip_name) {
 
 static void action_audio_clip(const char* rule_id, cJSON* cfg) {
     const char* clip = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "clip_name"));
-    if (!clip) return;
+    if (!clip || !clip[0]) { LOG_ACTION_ERR("audio_clip: no clip_name"); return; }
 
     cJSON* volume_j  = cJSON_GetObjectItem(cfg, "volume");
     cJSON* loop_j    = cJSON_GetObjectItem(cfg, "loop_count");
@@ -3214,7 +3214,7 @@ static void action_audio_clip(const char* rule_id, cJSON* cfg) {
 /* send_syslog */
 static void action_send_syslog(cJSON* cfg, cJSON* trigger_data) {
     const char* msg_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "message"));
-    if (!msg_tmpl) return;
+    if (!msg_tmpl) { LOG_ACTION_ERR("send_syslog: no message"); return; }
     char* msg = Actions_Expand_Template(msg_tmpl, trigger_data);
     int priority = LOG_INFO;
     const char* lvl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "level"));
@@ -3366,7 +3366,7 @@ static void action_fire_vapix_event(cJSON* cfg, cJSON* trigger_data) {
 static void action_set_variable(cJSON* cfg, cJSON* trigger_data) {
     const char* name     = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "name"));
     const char* val_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "value"));
-    if (!name || !val_tmpl) return;
+    if (!name || !name[0] || !val_tmpl) { LOG_ACTION_ERR("set_variable: needs a name and a value"); return; }
     char* val = Actions_Expand_Template(val_tmpl, trigger_data);
     Variables_Set(name, val);
     free(val);
@@ -3375,7 +3375,7 @@ static void action_set_variable(cJSON* cfg, cJSON* trigger_data) {
 /* increment_counter */
 static void action_increment_counter(cJSON* cfg) {
     const char* name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "name"));
-    if (!name) return;
+    if (!name || !name[0]) { LOG_ACTION_ERR("increment_counter: no name"); return; }
     cJSON* delta_j = cJSON_GetObjectItem(cfg, "delta");
     double delta = delta_j ? delta_j->valuedouble : 1.0;
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
@@ -3392,7 +3392,7 @@ static void action_increment_counter(cJSON* cfg) {
 /* mqtt_publish */
 static void action_mqtt_publish(const char* rule_id, cJSON* cfg, cJSON* trigger_data) {
     const char* topic_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "topic"));
-    if (!topic_tmpl) return;
+    if (!topic_tmpl || !topic_tmpl[0]) { LOG_ACTION_ERR("mqtt_publish: no topic"); return; }
 
     cJSON* td_with_snap = build_trigger_data_with_snapshot(cfg, trigger_data);
     cJSON* effective_td = td_with_snap ? td_with_snap : trigger_data;
@@ -3611,7 +3611,11 @@ static void action_influxdb_write(cJSON* cfg, cJSON* trigger_data) {
     if (!base_url || !base_url[0]) { LOG_ACTION_ERR("influxdb_write: no url"); return; }
 
     const char* version = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "version"));
-    if (!version) version = "v2";
+    if (!version || !version[0]) version = "v2";
+    if (strcmp(version, "v1") != 0 && strcmp(version, "v2") != 0) {
+        LOG_ACTION_ERR("influxdb_write: version must be v1 or v2, not '%.16s'", version);
+        return;
+    }
     int is_v1 = strcmp(version, "v1") == 0;
 
     const char* meas_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "measurement"));
@@ -3986,7 +3990,7 @@ static void action_telegram(cJSON* cfg, cJSON* trigger_data) {
 /* ftp_upload — Upload a snapshot to FTP/SFTP via libcurl */
 static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
-    if (!url_tmpl) { LOG_WARN("ftp_upload: no url"); return; }
+    if (!url_tmpl || !url_tmpl[0]) { LOG_ACTION_ERR("ftp_upload: no url"); return; }
 
     char* url = Actions_Expand_Template(url_tmpl, trigger_data);
 
@@ -4040,7 +4044,7 @@ static void action_ftp_upload(cJSON* cfg, cJSON* trigger_data) {
 static void action_siren_light(const char* rule_id, cJSON* cfg) {
     const char* signal_action = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "signal_action"));
     const char* profile        = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "profile"));
-    if (!profile || profile[0] == '\0') { LOG_WARN("siren_light: no profile specified"); return; }
+    if (!profile || profile[0] == '\0') { LOG_ACTION_ERR("siren_light: no profile specified"); return; }
     int stopping = (signal_action && strcmp(signal_action, "stop") == 0);
     const char* method = stopping ? "stop" : "start";
 
@@ -4073,7 +4077,7 @@ static void action_siren_light(const char* rule_id, cJSON* cfg) {
 /* run_rule — forward to rule engine */
 static void action_run_rule(cJSON* cfg) {
     const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
-    if (!rid) return;
+    if (!rid || !rid[0]) { LOG_ACTION_ERR("run_rule: no rule_id"); return; }
     if (!RuleEngine_IsEnabled(rid)) {
         LOG("run_rule: skipping disabled rule %s", rid);
         return;
@@ -4085,7 +4089,7 @@ static void action_run_rule(cJSON* cfg) {
 /* set_rule_enabled — enable or disable another rule by ID */
 static void action_set_rule_enabled(cJSON* cfg) {
     const char* rid = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "rule_id"));
-    if (!rid || !rid[0]) { LOG_WARN("set_rule_enabled: no rule_id specified"); return; }
+    if (!rid || !rid[0]) { LOG_ACTION_ERR("set_rule_enabled: no rule_id specified"); return; }
     cJSON* en_item = cJSON_GetObjectItem(cfg, "enabled");
     int enabled = en_item ? (cJSON_IsTrue(en_item) ? 1 : 0) : 1;
     if (!RuleEngine_SetEnabled(rid, enabled))
@@ -4152,7 +4156,7 @@ static void action_guard_tour(cJSON* cfg) {
 
     const char* tour_name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "tour_id"));
     if (starting && (!tour_name || !tour_name[0])) {
-        LOG_WARN("guard_tour: no tour_id specified for start"); return;
+        LOG_ACTION_ERR("guard_tour: no tour_id specified for start"); return;
     }
 
     /* If stopping with no name, stop all running tours */
@@ -4237,7 +4241,7 @@ static void action_set_device_param(cJSON* cfg, cJSON* trigger_data) {
 /* snapshot_upload — capture a JPEG snapshot and POST/PUT it to a URL */
 static void action_snapshot_upload(cJSON* cfg, cJSON* trigger_data) {
     const char* url_tmpl = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "url"));
-    if (!url_tmpl) { LOG_WARN("snapshot_upload: no url specified"); return; }
+    if (!url_tmpl || !url_tmpl[0]) { LOG_ACTION_ERR("snapshot_upload: no url specified"); return; }
 
     cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
     int channel = ch_j ? (int)ch_j->valuedouble : 1;
@@ -4341,7 +4345,7 @@ static void action_ir_cut_filter(cJSON* cfg) {
  * We scan by name to find the right slot, then set Enabled=yes/no. */
 static void action_privacy_mask(cJSON* cfg) {
     const char* mask_name = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "mask_id"));
-    if (!mask_name || !mask_name[0]) { LOG_WARN("privacy_mask: no mask_id specified"); return; }
+    if (!mask_name || !mask_name[0]) { LOG_ACTION_ERR("privacy_mask: no mask_id specified"); return; }
     cJSON* ch_j = cJSON_GetObjectItem(cfg, "channel");
     cJSON* en_j = cJSON_GetObjectItem(cfg, "enabled");
     int idx     = ch_j ? (int)ch_j->valuedouble - 1 : 0;
@@ -4476,7 +4480,8 @@ static void action_speaker_display(const char* rule_id, cJSON* cfg, cJSON* trigg
 static void action_wiper(cJSON* cfg) {
     const char* op = cJSON_GetStringValue(cJSON_GetObjectItem(cfg, "operation"));
     cJSON* id_j  = cJSON_GetObjectItem(cfg, "id");
-    int id = id_j ? (int)id_j->valuedouble : 1;
+    /* Clear View numbers its services from 0: usually 0 = wiper, 1 = speed dry. */
+    int id = cJSON_IsNumber(id_j) ? (int)id_j->valuedouble : 0;
 
     cJSON* req = cJSON_CreateObject();
     cJSON_AddStringToObject(req, "apiVersion", "1.0");

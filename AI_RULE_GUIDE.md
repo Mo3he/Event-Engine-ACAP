@@ -402,10 +402,18 @@ Fires when an object is detected in an AXIS Object Analytics (AOA) scenario.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `scenario_id` | integer | AOA scenario number (1-based) |
+| `scenario_id` | integer | AOA scenario number (1-based, default `1`) |
 | `object_class` | string | Optional filter: `"human"`, `"car"`, `"truck"`, `"bus"`, `"bike"`, etc. Empty = all objects. |
 
 ---
+
+### 9. `manual` — Manual Trigger
+
+Fires only when started by hand: the **Fire Now** button, or `POST /local/acap_event_engine/fire` with `{"id": "<rule id>"}` (optionally `"trigger_data": {...}`). No other fields. Conditions still apply.
+
+```json
+{ "type": "manual" }
+```
 
 ## Condition Types
 
@@ -475,7 +483,7 @@ Conditions are optional. If the `conditions` array is empty, the rule always pas
 |-------|------|---------|-------------|
 | `name` | string | — | Variable name |
 | `op` | `"eq"` \| `"ne"` \| `"gt"` \| `"gte"` \| `"lt"` \| `"lte"` | `"eq"` | Comparison operator |
-| `value` | string | — | Value to compare against (string comparison, so `"10"` sorts before `"9"`) |
+| `value` | string | — | Value to compare against. When both the variable and `value` are numbers they compare as numbers (`"10"` > `"9"`, `"10"` equals `"10.0"`); otherwise as text |
 
 ### 4b. `trigger_data` — Trigger Data Comparison
 
@@ -1144,7 +1152,7 @@ A non-2xx response counts as a failure. For an upload every N seconds, use a
 {
   "type": "wiper",
   "operation": "start",
-  "id": 1,
+  "id": 0,
   "duration": 10
 }
 ```
@@ -1152,7 +1160,7 @@ A non-2xx response counts as a failure. For an upload every N seconds, use a
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `operation` | `"start"` \| `"stop"` | `"start"` | Start or stop wiper |
-| `id` | integer | `1` | Clear view device ID |
+| `id` | integer | `0` | Clear View service ID: usually `0` = wiper, `1` = speed dry (see `getServiceInfo`) |
 | `duration` | integer | — | Duration in seconds (omit for device default) |
 
 ### 23. `light_control` — Illuminator Control
@@ -1260,7 +1268,7 @@ Requires SMTP to be configured in settings.
 | `bot_token` | string | — | Telegram bot token |
 | `chat_id` | string | — | Chat/group/channel ID |
 | `message` | string | — | Message text. Supports template variables. |
-| `parse_mode` | `"Markdown"` \| `"HTML"` | — | Message formatting |
+| `parse_mode` | string | — | Passed to Telegram: `"Markdown"`, `"MarkdownV2"` or `"HTML"` |
 | `attach_snapshot` | boolean | `false` | Send photo with caption (falls back to text if snapshot fails) |
 | `disable_preview` | boolean | `false` | Disable link preview |
 
@@ -1283,7 +1291,7 @@ Requires SMTP to be configured in settings.
 | `message` | string | Message text. Supports template variables. |
 | `channel` | string | Optional channel override |
 | `username` | string | Optional username override |
-| `attach_snapshot` | boolean | Include snapshot |
+| `attach_snapshot` | boolean | Makes `{{trigger.snapshot_base64}}` available to the templates; no image is attached |
 
 ### 29. `teams_webhook` — Microsoft Teams Webhook
 
@@ -1304,7 +1312,7 @@ Requires SMTP to be configured in settings.
 | `title` | string | Card title. Supports template variables. |
 | `message` | string | Card body. Supports template variables. |
 | `theme_color` | string | Hex color for the card accent |
-| `attach_snapshot` | boolean | Include snapshot |
+| `attach_snapshot` | boolean | Makes `{{trigger.snapshot_base64}}` available to the templates; no image is attached |
 
 ### 30. `influxdb_write` — InfluxDB Time Series Write
 
@@ -1378,7 +1386,7 @@ Buffers events and periodically flushes a summary via the specified delivery cha
 | `deliver_via` | `"slack"` \| `"teams"` \| `"email"` \| `"mqtt"` \| `"telegram"` | `"slack"` | Delivery channel |
 | `interval` | integer | `300` | Flush interval in seconds (minimum 30) |
 | `line` | string | `"{{timestamp}} — {{trigger_json}}"` | Template for each buffered line |
-| *(plus all fields of the target channel)* | | | e.g. `webhook_url` for Slack, `to`/`subject` for email, `topic`/`payload` for MQTT |
+| *(plus the fields of the target channel)* | | | e.g. `webhook_url` for Slack, `to`/`subject` for email, `topic` for MQTT. The digest text becomes the message, email body or MQTT payload, so `message`/`body`/`payload` are ignored. Edits apply to the next delivery |
 
 ### 33. `paging_console_execute` — Execute Paging Action
 
@@ -1829,7 +1837,7 @@ Set `while_active: true` on recording, overlay, I/O output, siren, or speaker_di
 3. **Rule IDs**: Auto-assigned UUIDs on creation. To update, use `POST /rules?id=UUID`.
 4. **MQTT must be configured** before `mqtt_message` triggers or `mqtt_publish` actions will work.
 5. **SMTP must be configured** before `email` actions will work.
-6. **Location must be set** for `astronomical` schedule triggers and `day_night` conditions (or specify `latitude`/`longitude` per trigger/condition).
+6. **Location must be set** for `astronomical` schedule triggers and `day_night` conditions, in Settings or per rule: `latitude`/`longitude` on the trigger, `lat`/`lon` on the condition (which also accepts `latitude`/`longitude`).
 7. **Template variables** are expanded at execution time, not at rule creation time.
 8. **`vapix_query` must come before** actions that use its injected `{{trigger.FIELD}}` values.
 9. **Counter and variable names** are global and shared across all rules.
