@@ -114,8 +114,11 @@ static int cond_day_night(cJSON* cfg) {
     if (!want) want = "day";
 
     double lat = 0.0, lon = 0.0;
+    /* "latitude"/"longitude" as on schedule triggers are accepted too. */
     cJSON* lat_j = cJSON_GetObjectItem(cfg, "lat");
     cJSON* lon_j = cJSON_GetObjectItem(cfg, "lon");
+    if (!lat_j) lat_j = cJSON_GetObjectItem(cfg, "latitude");
+    if (!lon_j) lon_j = cJSON_GetObjectItem(cfg, "longitude");
     if (lat_j) lat = lat_j->valuedouble;
     if (lon_j) lon = lon_j->valuedouble;
 

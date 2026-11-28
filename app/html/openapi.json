@@ -74,7 +74,7 @@
           },
           "max_exec_period": {
             "type": "string",
-            "enum": ["", "minute", "hour", "day", "lifetime"],
+            "enum": ["", "minute", "hour", "day"],
             "default": "",
             "description": "Period for max_executions counter. Empty string means lifetime total."
           },
@@ -489,7 +489,7 @@
               "event": { "type": "string", "enum": ["enter", "exit", "both"], "default": "enter" },
               "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
               "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
-              "radius_m": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+              "radius_m": { "type": "number", "minimum": 0, "exclusiveMinimum": true, "maximum": 100000 },
               "points": {
                 "type": "array", "minItems": 3, "maxItems": 32,
                 "items": {
@@ -1291,7 +1291,7 @@
             "properties": {
               "type":      { "type": "string", "enum": ["wiper"] },
               "operation": { "type": "string", "enum": ["start", "stop"], "default": "start" },
-              "id":        { "type": "integer", "default": 1, "minimum": 1, "description": "Clear view device ID from getServiceInfo" },
+              "id":        { "type": "integer", "default": 0, "minimum": 0, "description": "Clear View service ID from getServiceInfo: usually 0 = wiper, 1 = speed dry" },
               "duration":  { "type": "integer", "minimum": 1, "description": "Duration in seconds. Only applicable for variable-duration wiper services. Omit to use device default." }
             }
           }
@@ -1350,8 +1350,7 @@
               "duration_type":   { "type": "string", "enum": ["repetitions", "time", "timeCompleteMessage"], "description": "Duration mode. Omit for indefinite display." },
               "duration_value":  { "type": "integer", "minimum": 1, "description": "Number of repetitions, or milliseconds, depending on duration_type." },
               "while_active":    { "type": "boolean", "default": false, "description": "Only valid when duration_type is omitted. If true, automatically stops the display when the triggering condition clears." }
-            },
-            "required": []
+            }
           }
         ]
       },
@@ -1754,19 +1753,6 @@
                         "topic2": { "type": "object", "additionalProperties": { "type": "string" } },
                         "topic3": { "type": "object", "additionalProperties": { "type": "string" } }
                       },
-                      "gps": {
-                        "type": "object",
-                        "description": "NMEA 0183 GPS input. A fix is considered stale after stale_after_s without a valid update.",
-                        "properties": {
-                          "enabled": { "type": "boolean", "default": false },
-                          "source": { "type": "string", "enum": ["serial", "udp", "tcp_server", "tcp_client"], "default": "serial" },
-                          "device": { "type": "string", "default": "auto", "description": "Serial device path; auto resolves the camera's configured serial port." },
-                          "baud": { "type": "integer", "enum": [0, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200], "default": 0, "description": "Serial baud rate; 0 preserves the camera's existing serial configuration." },
-                          "host": { "type": "string", "default": "127.0.0.1", "description": "Remote host for tcp_client. Listeners bind on all interfaces." },
-                          "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5010 },
-                          "stale_after_s": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 5 }
-                        }
-                      },
                       "example": {
                         "topic0": { "tnsaxis": "Device" },
                         "topic1": { "tnsaxis": "IO" },
@@ -1782,6 +1768,19 @@
                   }
                 }
               }
+            }
+          },
+          "gps": {
+            "type": "object",
+            "description": "NMEA 0183 GPS input. A fix is considered stale after stale_after_s without a valid update.",
+            "properties": {
+              "enabled": { "type": "boolean", "default": false },
+              "source": { "type": "string", "enum": ["serial", "udp", "tcp_server", "tcp_client"], "default": "serial" },
+              "device": { "type": "string", "default": "auto", "description": "Serial device path; auto resolves the camera's configured serial port." },
+              "baud": { "type": "integer", "enum": [0, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200], "default": 0, "description": "Serial baud rate; 0 preserves the camera's existing serial configuration." },
+              "host": { "type": "string", "default": "127.0.0.1", "description": "Remote host for tcp_client. Listeners bind on all interfaces." },
+              "port": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5010 },
+              "stale_after_s": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 5 }
             }
           }
         }

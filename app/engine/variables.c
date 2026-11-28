@@ -235,12 +235,29 @@ int Variables_Delete(const char* name) {
     return 0;
 }
 
+/* True if s is a whole finite number (surrounding spaces allowed). */
+static int parse_number(const char* s, double* out) {
+    char* end;
+    while (*s == ' ') s++;
+    if (!*s) return 0;
+    *out = strtod(s, &end);
+    if (end == s || !isfinite(*out)) return 0;
+    while (*end == ' ') end++;
+    return *end == '\0';
+}
+
+/* Numbers compare as numbers ("10" > "9", "10" == "10.0"); anything else as text. */
 int Variables_Compare(const char* name, const char* op, const char* value) {
     if (!name || !op || !value) return 0;
     pthread_mutex_lock(&lock);
     Variable* v = find_var(name);
     if (!v) { pthread_mutex_unlock(&lock); return 0; }
-    int cmp = strcmp(v->value, value);
+    double a, b;
+    int cmp;
+    if (parse_number(v->value, &a) && parse_number(value, &b))
+        cmp = (a > b) - (a < b);
+    else
+        cmp = strcmp(v->value, value);
     pthread_mutex_unlock(&lock);
     if (strcmp(op, "eq") == 0) return cmp == 0;
     if (strcmp(op, "ne") == 0) return cmp != 0;
