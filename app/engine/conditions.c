@@ -517,19 +517,56 @@ static void pp_collect(const char* resp, const char* event_key, cJSON* out) {
     }
 }
 
-/* Query current event state from a remote device using ONVIF PullPoint.
- * Returns an array of instance objects (see pp_collect), or NULL. */
-static cJSON* cond_remote_pullpoint(const char* host, const char* user,
-                                     const char* pass, const char* event_key) {
-    static const char create_soap[] =
+typedef char* (*pp_post_fn)(void* ctx, const char* soap);
+
+/* A ConcreteSet topic filter is used only for full topic paths in the tns1 and
+ * tnsaxis namespaces (what the rule editor stores); anything else is matched
+ * as a substring of every topic, as before. */
+static int pp_filter_usable(const char* key) {
+    if (strncmp(key, "tns1:", 5) != 0 && strncmp(key, "tnsaxis:", 8) != 0) return 0;
+    if (strlen(key) > 256) return 0;
+    for (const char* c = key; *c; c++)
+        if (!isalnum((unsigned char)*c) && !strchr("_-.:/", *c)) return 0;
+    const char* seg = key;
+    while (seg && *seg) {
+        const char* slash = strchr(seg, '/');
+        const char* colon = strchr(seg, ':');
+        if (colon && (!slash || colon < slash)) {
+            size_t n = (size_t)(colon - seg);
+            if (!((n == 4 && strncmp(seg, "tns1", 4) == 0) ||
+                  (n == 7 && strncmp(seg, "tnsaxis", 7) == 0))) return 0;
+        }
+        seg = slash ? slash + 1 : NULL;
+    }
+    return 1;
+}
+
+/* Current state of every instance of event_key via ONVIF PullPoint: returns an
+ * array of instance objects (see pp_collect), or NULL. The device sends one
+ * "Initialized" message per instance right after subscribing, then only
+ * changes; reading stops at the first pull without Initialized messages, since
+ * an unfiltered subscription on a busy device (air quality, analytics) never
+ * goes quiet. This runs on the main loop, so it must stay short. */
+static cJSON* pp_query(pp_post_fn post, void* ctx, const char* label,
+                       const char* event_key, int filtered) {
+    char filter[512] = "";
+    if (filtered)
+        snprintf(filter, sizeof(filter),
+            "<tev:Filter><wsnt:TopicExpression Dialect=\"http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet\">"
+            "%s//.</wsnt:TopicExpression></tev:Filter>", event_key);
+    char create_soap[1024];
+    snprintf(create_soap, sizeof(create_soap),
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
         "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
-        " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\">"
-        "<soap:Body><tev:CreatePullPointSubscription>"
+        " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
+        " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
+        " xmlns:tns1=\"http://www.onvif.org/ver10/topics\""
+        " xmlns:tnsaxis=\"http://www.axis.com/2009/event/topics\">"
+        "<soap:Body><tev:CreatePullPointSubscription>%s"
         "<tev:InitialTerminationTime>PT60S</tev:InitialTerminationTime>"
-        "</tev:CreatePullPointSubscription></soap:Body></soap:Envelope>";
+        "</tev:CreatePullPointSubscription></soap:Body></soap:Envelope>", filter);
 
-    char* resp = cond_remote_soap_post(host, user, pass, "/vapix/services", create_soap);
+    char* resp = post(ctx, create_soap);
     if (!resp) return NULL;
 
     char* sid_tag = strstr(resp, "SubscriptionId");
@@ -564,18 +601,18 @@ static cJSON* cond_remote_pullpoint(const char* host, const char* user,
             "</tev:PullMessages></soap:Body></soap:Envelope>",
             sub_id, timeout_str);
 
-        resp = cond_remote_soap_post(host, user, pass, "/vapix/services", pull_soap);
+        resp = post(ctx, pull_soap);
         if (!resp) break;
         if (strstr(resp, "Fault")) { free(resp); break; }
 
-        int got = strstr(resp, "NotificationMessage") != NULL;
+        int initial = strstr(resp, "PropertyOperation=\"Initialized\"") != NULL;
         pp_collect(resp, event_key, result);
         free(resp);
-        if (!got) {
-            if (drained) break;
+        if (!initial) {
+            /* A filtered subscription has nothing else to wait for. */
+            if (drained || filtered) break;
             drained = 1;
         }
-        /* Every instance's state arrives before the first empty pull */
         if (drained && cJSON_GetArraySize(result) > 0) break;
     }
 
@@ -588,90 +625,47 @@ static cJSON* cond_remote_pullpoint(const char* host, const char* user,
         "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
         "<soap:Body><wsnt:Unsubscribe/></soap:Body></soap:Envelope>",
         sub_id);
-    char* unsub_resp = cond_remote_soap_post(host, user, pass, "/vapix/services", unsub_soap);
+    char* unsub_resp = post(ctx, unsub_soap);
     if (!unsub_resp || strstr(unsub_resp, "Fault"))
-        LOG_WARN("PullPoint unsubscribe failed for %s (sub %s)", host, sub_id);
+        LOG_WARN("PullPoint unsubscribe failed for %s (sub %s)", label, sub_id);
     free(unsub_resp);
 
     if (cJSON_GetArraySize(result) == 0) { cJSON_Delete(result); return NULL; }
     return result;
 }
 
-/* Local PullPoint over loopback via ACAP_VAPIX_Soap_Post (the ACAP framework
- * supplies credentials). Same drain-then-wait logic as the remote version. */
+/* Filtered first; unfiltered when the device rejects the filter or it matches
+ * nothing (a key that is a substring rather than a topic path). */
+static cJSON* pp_query_any(pp_post_fn post, void* ctx, const char* label, const char* event_key) {
+    cJSON* r = NULL;
+    if (pp_filter_usable(event_key))
+        r = pp_query(post, ctx, label, event_key, 1);
+    if (!r)
+        r = pp_query(post, ctx, label, event_key, 0);
+    return r;
+}
+
+struct pp_remote { const char* host; const char* user; const char* pass; };
+
+static char* pp_remote_post(void* ctx, const char* soap) {
+    struct pp_remote* r = ctx;
+    return cond_remote_soap_post(r->host, r->user, r->pass, "/vapix/services", soap);
+}
+
+static char* pp_local_post(void* ctx, const char* soap) {
+    (void)ctx;
+    return ACAP_VAPIX_Soap_Post("/vapix/services", soap);
+}
+
+static cJSON* cond_remote_pullpoint(const char* host, const char* user,
+                                     const char* pass, const char* event_key) {
+    struct pp_remote r = { host, user, pass };
+    return pp_query_any(pp_remote_post, &r, host, event_key);
+}
+
+/* Local PullPoint over loopback (the ACAP framework supplies credentials). */
 static cJSON* cond_local_pullpoint(const char* event_key) {
-    static const char create_soap[] =
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
-        " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\">"
-        "<soap:Body><tev:CreatePullPointSubscription>"
-        "<tev:InitialTerminationTime>PT60S</tev:InitialTerminationTime>"
-        "</tev:CreatePullPointSubscription></soap:Body></soap:Envelope>";
-
-    char* resp = ACAP_VAPIX_Soap_Post("/vapix/services", create_soap);
-    if (!resp) return NULL;
-
-    char* sid_tag = strstr(resp, "SubscriptionId");
-    if (!sid_tag || strstr(resp, "Fault")) { free(resp); return NULL; }
-    char* sid_gt = strchr(sid_tag, '>');
-    if (!sid_gt) { free(resp); return NULL; }
-    sid_gt++;
-    char* sid_lt = strchr(sid_gt, '<');
-    if (!sid_lt) { free(resp); return NULL; }
-    char sub_id[32];
-    size_t sid_len = (size_t)(sid_lt - sid_gt);
-    if (sid_len >= sizeof(sub_id)) sid_len = sizeof(sub_id) - 1;
-    memcpy(sub_id, sid_gt, sid_len);
-    sub_id[sid_len] = '\0';
-    free(resp);
-    if (strspn(sub_id, "0123456789") != sid_len) return NULL;
-
-    cJSON* result = cJSON_CreateArray();
-    int drained = 0;
-    for (int attempt = 0; attempt < 53; attempt++) {
-        const char* timeout_str = drained ? "PT5S" : "PT1S";
-        char pull_soap[1024];
-        snprintf(pull_soap, sizeof(pull_soap),
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-            "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
-            " xmlns:tev=\"http://www.onvif.org/ver10/events/wsdl\""
-            " xmlns:dom0=\"http://www.axis.com/2009/event\">"
-            "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
-            "<soap:Body><tev:PullMessages>"
-            "<tev:Timeout>%s</tev:Timeout>"
-            "<tev:MessageLimit>200</tev:MessageLimit>"
-            "</tev:PullMessages></soap:Body></soap:Envelope>",
-            sub_id, timeout_str);
-
-        resp = ACAP_VAPIX_Soap_Post("/vapix/services", pull_soap);
-        if (!resp) break;
-        if (strstr(resp, "Fault")) { free(resp); break; }
-
-        int got = strstr(resp, "NotificationMessage") != NULL;
-        pp_collect(resp, event_key, result);
-        free(resp);
-        if (!got) {
-            if (drained) break;
-            drained = 1;
-        }
-        /* Every instance's state arrives before the first empty pull */
-        if (drained && cJSON_GetArraySize(result) > 0) break;
-    }
-
-    char unsub_soap[512];
-    snprintf(unsub_soap, sizeof(unsub_soap),
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
-        "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\""
-        " xmlns:wsnt=\"http://docs.oasis-open.org/wsn/b-2\""
-        " xmlns:dom0=\"http://www.axis.com/2009/event\">"
-        "<soap:Header><dom0:SubscriptionId>%s</dom0:SubscriptionId></soap:Header>"
-        "<soap:Body><wsnt:Unsubscribe/></soap:Body></soap:Envelope>",
-        sub_id);
-    char* unsub_resp = ACAP_VAPIX_Soap_Post("/vapix/services", unsub_soap);
-    free(unsub_resp);
-
-    if (cJSON_GetArraySize(result) == 0) { cJSON_Delete(result); return NULL; }
-    return result;
+    return pp_query_any(pp_local_post, NULL, "local device", event_key);
 }
 
 static int cond_http_check(cJSON* cfg) {
