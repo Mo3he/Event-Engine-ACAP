@@ -542,6 +542,7 @@ int RuleEngine_Update(const char* id, cJSON* rule_json) {
             rules_save_locked();
 
             cJSON* triggers_dup = cJSON_Duplicate(r->triggers_json, 1);
+            cJSON* actions_dup = cJSON_Duplicate(r->actions_json, 1);
             int enabled = r->enabled;
             pthread_mutex_unlock(&store_lock);
 
@@ -550,6 +551,8 @@ int RuleEngine_Update(const char* id, cJSON* rule_json) {
             else         schedule_unsubscribe(id);
             cJSON_Delete(triggers_dup);
             Actions_IoFlash_Stop_Rule(id);
+            Actions_Digest_Rule_Changed(id, actions_dup);
+            cJSON_Delete(actions_dup);
             return 1;
         }
     }
@@ -570,6 +573,7 @@ int RuleEngine_Delete(const char* id) {
             pthread_mutex_unlock(&store_lock);
             schedule_unsubscribe(id);
             Actions_IoFlash_Stop_Rule(id);
+            Actions_Digest_Rule_Changed(id, NULL);
             return 1;
         }
     }

@@ -23,6 +23,7 @@ void  Actions_IoFlash_Stop_Rule(const char* rule_id); /* end this rule's io_flas
 void  Actions_IoFlash_Stop_All(void);                 /* end every io_flash run; call on shutdown */
 void  Actions_Set_Proxy(const char* proxy); /* set SOCKS5 proxy for outbound HTTP (e.g. "socks5h://localhost:1055") */
 void  Actions_Digest_Tick(void);           /* call from 1s timer to flush digest buffers */
+void  Actions_Digest_Rule_Changed(const char* rule_id, cJSON* actions); /* rule edited (its new actions) or deleted (NULL); any thread */
 void  Actions_Overlay_Flush(void);         /* save overlay state if changed; call from the 1s tick */
 void  Actions_Overlay_Cleanup(void);       /* remove overlays we still show; call on shutdown */
 int         Actions_Test(const char* type, cJSON* config); /* test a single action without a rule */
