@@ -1538,7 +1538,7 @@
             "properties": {
               "type":        { "type": "string", "enum": ["influxdb_write"] },
               "url":         { "type": "string", "description": "InfluxDB base URL", "example": "http://influxdb.local:8086" },
-              "version":     { "type": "string", "enum": ["v1", "v2"], "default": "v2", "description": "Any value other than v1 uses the v2 API" },
+              "version":     { "type": "string", "enum": ["v1", "v2"], "default": "v2", "description": "InfluxDB API version. Empty means v2; any other value fails the action." },
               "measurement": { "type": "string", "description": "Measurement name. Supports {{variable}} substitution.", "example": "environment" },
               "tags":        { "type": "string", "description": "Optional line-protocol tag set. Supports {{variable}} substitution.", "example": "camera={{camera.serial}}" },
               "fields":      { "type": "string", "description": "Line-protocol field set. Supports {{variable}} substitution.", "example": "temperature={{trigger.Temperature|2}}" },
@@ -1560,7 +1560,7 @@
           { "$ref": "#/components/schemas/Action" },
           {
             "type": "object",
-            "description": "Buffer one line per firing (up to 200; later lines are dropped) and send them together every interval seconds through another action type. The sent text is \"[N events]\" followed by the lines; it replaces message, body and payload. Add the target's own fields to this action (e.g. webhook_url, to/subject, topic/qos/retain, bot_token/chat_id). The delivery settings are those of the first firing after the engine starts.",
+            "description": "Buffer one line per firing (up to 200; later lines are dropped) and send them together every interval seconds through another action type. The sent text is \"[N events]\" followed by the lines; it replaces message, body and payload. Add the target's own fields to this action (e.g. webhook_url, to/subject, topic/qos/retain, bot_token/chat_id). Edits to the delivery settings apply to the next delivery.",
             "properties": {
               "type":        { "type": "string", "enum": ["digest"] },
               "deliver_via": { "type": "string", "enum": ["slack", "teams", "email", "mqtt", "telegram"], "default": "slack", "description": "Delivered as slack_webhook, teams_webhook, email, mqtt_publish or telegram respectively" },
