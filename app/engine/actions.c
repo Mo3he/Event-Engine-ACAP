@@ -4727,6 +4727,24 @@ static void action_acap_control(cJSON* cfg) {
         LOG_ACTION_ERR("acap_control: operation must be start, stop or restart, not '%.32s'", op);
         return;
     }
+    /* AXIS OS 13 restarts an app that is told to start while running (and
+     * only then answers "already running"), so a running app is left alone. */
+    if (strcmp(op, "start") == 0) {
+        char* list = VAPIX_GET(cfg, "applications/list.cgi");
+        if (!vapix_ok(cfg, "acap_control", NULL)) { free(list); return; }
+        char needle[96];
+        snprintf(needle, sizeof(needle), "<application Name=\"%s\"", package);
+        const char* app = list ? strstr(list, needle) : NULL;
+        const char* app_end = app ? strchr(app, '>') : NULL;
+        const char* status = app ? strstr(app, " Status=\"") : NULL;
+        int running = status && app_end && status < app_end &&
+                      strncmp(status + 9, "Running\"", 8) == 0;
+        int listed = list && strstr(list, "<application ") != NULL;
+        free(list);
+        if (running) return;
+        if (listed && !app) { LOG_ACTION_ERR("acap_control: %s is not installed", package); return; }
+    }
+
     char req[256];
     snprintf(req, sizeof(req), "applications/control.cgi?package=%s&action=%s", package, op);
     char* resp = VAPIX_GET(cfg, req);
